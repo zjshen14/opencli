@@ -23,6 +23,36 @@ describe("ContextManager", () => {
     expect(instruction).toContain(process.cwd());
   });
 
+  it("embeds tool names in system instruction for implicit cache prefix", () => {
+    const ctx = new ContextManager();
+    const tools = [
+      { name: "read", description: "Read a file" },
+      { name: "bash", description: "Run a command" },
+    ];
+    const instruction = ctx.getSystemInstruction(tools);
+    expect(instruction).toContain("read");
+    expect(instruction).toContain("bash");
+  });
+
+  it("returns cached system instruction when tools unchanged", () => {
+    const ctx = new ContextManager();
+    const tools = [{ name: "read", description: "Read a file" }];
+    const first = ctx.getSystemInstruction(tools);
+    const second = ctx.getSystemInstruction(tools);
+    expect(first).toBe(second); // same reference = cached
+  });
+
+  it("clears system instruction cache on clear()", () => {
+    const ctx = new ContextManager();
+    const tools = [{ name: "read", description: "Read a file" }];
+    ctx.getSystemInstruction(tools);
+    ctx.clear();
+    // After clear, different tools should produce a different instruction
+    const afterDifferentTools = ctx.getSystemInstruction([{ name: "bash", description: "Run" }]);
+    expect(afterDifferentTools).toContain("bash");
+    expect(afterDifferentTools).not.toContain("read: Read a file");
+  });
+
   it("adds and retrieves messages", () => {
     const ctx = new ContextManager();
     ctx.addMessage(userMsg("hello"));

@@ -48,9 +48,11 @@ export class Agent {
       let responseText = "";
 
       // Stream response from Gemini
+      // Pass functionDeclarations to getSystemInstruction so tool names are embedded
+      // in the static prefix, maximising implicit cache hits across turns.
       for await (const event of this.gemini.stream(
         this.context.getMessages(),
-        this.context.getSystemInstruction(),
+        this.context.getSystemInstruction(functionDeclarations),
         functionDeclarations,
       )) {
         if (event.type === "text") {

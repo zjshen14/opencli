@@ -78,6 +78,18 @@ src/
 - Prettier `printWidth: 100`, double quotes, trailing commas — run `npm run format` before committing
 - ESLint: `@typescript-eslint/recommended` + no unused vars (underscore prefix to suppress)
 
+**Before submitting any change**, run:
+```bash
+npm run typecheck && npm run lint && npm test
+```
+
+**Full engineering practices are in [`docs/engineering-practices.md`](docs/engineering-practices.md).** Check it before writing code. Key rules:
+- Colocate tests next to source (`context.ts` → `context.test.ts`)
+- Each layer owns its concern — `model/` never touches filesystem, `tools/` never imports `@google/genai`
+- No circular imports: `cli → agent → model/tools/skills/state`
+- Mock at system boundaries only; use real filesystem for file tool tests
+- Document non-obvious decisions in `docs/`
+
 ## Configuration
 
 - `.env` — `GEMINI_API_KEY`, `GEMINI_MODEL`

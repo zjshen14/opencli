@@ -21,7 +21,7 @@ A missing test file is immediately visible. Moving a module moves its test autom
 
 **Run before every commit:**
 ```bash
-npm run typecheck && npm run lint && npm test
+npm run typecheck && npm run lint && npm run format:check && npm test
 ```
 
 ---

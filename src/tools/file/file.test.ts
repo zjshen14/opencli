@@ -33,7 +33,11 @@ describe("readTool", () => {
 
   it("respects offset and limit", async () => {
     await writeFile(join(tmpDir, "f.txt"), "a\nb\nc\nd\ne");
-    const result = await readTool.execute({ file_path: join(tmpDir, "f.txt"), offset: 2, limit: 2 });
+    const result = await readTool.execute({
+      file_path: join(tmpDir, "f.txt"),
+      offset: 2,
+      limit: 2,
+    });
     expect(result.success).toBe(true);
     expect(result.output).toContain("2\tb");
     expect(result.output).toContain("3\tc");

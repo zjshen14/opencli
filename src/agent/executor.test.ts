@@ -5,7 +5,11 @@ import { ContextManager } from "./context.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import type { FunctionCallPart } from "../model/types.js";
 
-function makeToolCall(name: string, args: Record<string, unknown> = {}, id = "call-1"): FunctionCallPart {
+function makeToolCall(
+  name: string,
+  args: Record<string, unknown> = {},
+  id = "call-1",
+): FunctionCallPart {
   return { type: "function_call", id, name, args };
 }
 

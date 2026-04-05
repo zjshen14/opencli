@@ -15,7 +15,12 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true });
 });
 
-async function createSkill(baseDir: string, name: string, description: string, body = "Instructions for $ARGUMENTS"): Promise<void> {
+async function createSkill(
+  baseDir: string,
+  name: string,
+  description: string,
+  body = "Instructions for $ARGUMENTS",
+): Promise<void> {
   const skillDir = join(baseDir, name);
   await mkdir(skillDir, { recursive: true });
   await writeFile(

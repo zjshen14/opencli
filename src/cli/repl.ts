@@ -1,7 +1,6 @@
 import * as readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import chalk from "chalk";
-import ora from "ora";
 import type { Agent } from "../agent/core.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import { loadSkillFile, processBody } from "../skills/loader.js";
@@ -73,7 +72,8 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
     }
 
     // Run the agent loop
-    const spinner = ora({ text: chalk.dim("Thinking…"), stream: process.stderr }).start();
+    const spinner = createSpinner("Thinking…");
+    spinner.start();
     let firstToken = true;
 
     // Track pending edit args so we can print the diff after the tool result arrives
@@ -163,6 +163,30 @@ function printSkillList(skills: SkillRegistry): void {
     process.stderr.write(chalk.magenta(`  /${s.name}`) + chalk.gray(` — ${s.description}\n`));
   }
   printInfo("\nBuilt-in commands: /clear, /exit\n");
+}
+
+// Minimal spinner that only writes to stderr — never touches stdin,
+// so it doesn't interfere with the readline interface on stdout.
+function createSpinner(text: string) {
+  const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  let i = 0;
+  let timer: NodeJS.Timeout | undefined;
+  return {
+    start() {
+      process.stderr.write(chalk.dim(`${frames[0]} ${text}`));
+      timer = setInterval(() => {
+        process.stderr.write(`\r${chalk.cyan(frames[i % frames.length])} ${chalk.dim(text)}`);
+        i++;
+      }, 80);
+    },
+    stop() {
+      if (timer) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+      process.stderr.write("\r\x1b[K"); // overwrite spinner line with blank
+    },
+  };
 }
 
 async function loadAndProcess(skillDir: string, args: string): Promise<string | undefined> {

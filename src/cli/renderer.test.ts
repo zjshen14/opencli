@@ -16,6 +16,7 @@ import {
 } from "./renderer.js";
 
 // Strip ANSI escape codes so assertions aren't brittle against colour changes
+// eslint-disable-next-line no-control-regex
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 describe("COMPACT_TOOLS", () => {
@@ -223,7 +224,7 @@ describe("print functions write to stderr/stdout", () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let stderrSpy: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let stdoutSpy: any;
+  let _stdoutSpy: any;
 
   beforeEach(() => {
     stderrOutput = [];
@@ -232,7 +233,7 @@ describe("print functions write to stderr/stdout", () => {
       stderrOutput.push(String(chunk));
       return true;
     });
-    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+    _stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
       stdoutOutput.push(String(chunk));
       return true;
     });
@@ -240,11 +241,10 @@ describe("print functions write to stderr/stdout", () => {
 
   afterEach(() => {
     stderrSpy.mockRestore();
-    stdoutSpy.mockRestore();
+    _stdoutSpy.mockRestore();
   });
 
   const stderr = () => stripAnsi(stderrOutput.join(""));
-  const stdout = () => stripAnsi(stdoutOutput.join(""));
 
   it("printToolCall writes to stderr", () => {
     printToolCall("bash", { command: "ls" });

@@ -6,10 +6,13 @@ import type { SkillRegistry } from "../skills/registry.js";
 import { loadSkillFile, processBody } from "../skills/loader.js";
 import { join } from "node:path";
 import {
+  COMPACT_TOOLS,
   printAssistantChunk,
   printAssistantDone,
   printToolCall,
+  printToolCallCompact,
   printToolResult,
+  printToolResultCompact,
   printEditDiff,
   printSkillActivated,
   printError,
@@ -76,11 +79,8 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
     spinner.start();
     let firstToken = true;
 
-    // Track pending edit args so we can print the diff after the tool result arrives
-    const pendingEdits = new Map<
-      string,
-      { file_path: string; old_string: string; new_string: string }
-    >();
+    // Queue of pending edit args for diff rendering (matched in call order)
+    const pendingEdits: { file_path: string; old_string: string; new_string: string }[] = [];
 
     try {
       for await (const event of agent.run(input)) {
@@ -98,34 +98,37 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
               spinner.stop();
               firstToken = false;
             }
-            printToolCall(event.name, event.args);
-            // Capture edit args for diff rendering
-            if (
-              event.name === "edit" &&
-              typeof event.args.file_path === "string" &&
-              typeof event.args.old_string === "string" &&
-              typeof event.args.new_string === "string"
-            ) {
-              pendingEdits.set(event.name + "_" + event.args.file_path, {
-                file_path: event.args.file_path as string,
-                old_string: event.args.old_string as string,
-                new_string: event.args.new_string as string,
-              });
+            if (COMPACT_TOOLS.has(event.name)) {
+              printToolCallCompact(event.name, event.args);
+            } else {
+              printToolCall(event.name, event.args);
+              // Capture edit args for diff rendering
+              if (
+                event.name === "edit" &&
+                typeof event.args.file_path === "string" &&
+                typeof event.args.old_string === "string" &&
+                typeof event.args.new_string === "string"
+              ) {
+                pendingEdits.push({
+                  file_path: event.args.file_path as string,
+                  old_string: event.args.old_string as string,
+                  new_string: event.args.new_string as string,
+                });
+              }
             }
             break;
 
           case "tool_result":
-            // Show diff for edit tool results instead of raw output
-            if (event.name === "edit") {
-              const key = [...pendingEdits.keys()].find((k) => k.startsWith("edit_"));
-              if (key) {
-                const edit = pendingEdits.get(key)!;
-                pendingEdits.delete(key);
+            if (COMPACT_TOOLS.has(event.name)) {
+              printToolResultCompact(event.name, event.result);
+            } else if (event.name === "edit") {
+              const edit = pendingEdits.shift();
+              if (edit) {
                 printEditDiff(edit.old_string, edit.new_string, edit.file_path);
-                break;
               }
+            } else {
+              printToolResult(event.name, event.result);
             }
-            printToolResult(event.name, event.result);
             break;
 
           case "skill_activated":

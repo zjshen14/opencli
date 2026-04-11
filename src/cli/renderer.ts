@@ -7,6 +7,9 @@ import TerminalRenderer from "marked-terminal";
 
 marked.setOptions({ renderer: new TerminalRenderer() });
 
+// Tools that render as compact one-liners (read-only, low noise)
+export const COMPACT_TOOLS = new Set(["read", "glob", "grep"]);
+
 export function renderMarkdown(text: string): string {
   return marked(text) as string;
 }
@@ -19,31 +22,48 @@ export function printAssistantDone(): void {
   process.stdout.write("\n");
 }
 
+// Full bordered box for write/exec tools — printed when the call is issued
 export function printToolCall(name: string, args: Record<string, unknown>): void {
-  const header = chalk.bold.cyan(name);
+  const { color, icon } = toolStyle(name);
+  const header = chalk.bold[color](name);
   const body = formatToolArgs(name, args);
-  const box = boxen(body, {
+  // Cap width at terminal width so long commands don't break the box borders.
+  // 6 = 2 (border chars) + 2 (horizontal padding each side) + 2 (safety margin)
+  const maxWidth = (process.stdout.columns ?? 100) - 6;
+  const box = boxen(`${icon} ${body}`, {
     title: header,
     titleAlignment: "left",
     padding: { top: 0, bottom: 0, left: 1, right: 1 },
     borderStyle: "round",
-    borderColor: "cyan",
+    borderColor: color,
     dimBorder: true,
+    width: maxWidth,
   });
   process.stderr.write(box + "\n");
 }
 
+// Result line appended below the full box once execution completes
 export function printToolResult(name: string, result: string): void {
-  const preview = result.slice(0, 160).replace(/\n/g, " ");
-  const truncated = result.length > 160;
-  process.stderr.write(chalk.dim(`  ← ${name}: ${preview}${truncated ? "…" : ""}`) + "\n");
+  if (name === "edit") return; // edit results are shown as a diff instead
+  const summary = summariseResult(name, result);
+  process.stderr.write(chalk.dim(`  ✓ ${summary}`) + "\n");
+}
+
+// Compact one-liner for read/glob/grep — printed when the call is issued
+export function printToolCallCompact(name: string, args: Record<string, unknown>): void {
+  const arg = compactArg(args);
+  process.stderr.write(chalk.dim(`  ○ ${name.padEnd(6)}${arg}`) + "\n");
+}
+
+// Overwrites the compact call line with a ✓ result summary
+export function printToolResultCompact(name: string, result: string): void {
+  const summary = summariseResult(name, result);
+  process.stderr.write(chalk.dim(`  ✓ ${summary}`) + "\n");
 }
 
 export function printEditDiff(oldStr: string, newStr: string, filePath: string): void {
-  const patch = Diff.createPatch(filePath, oldStr, newStr, "", "", {
-    context: 3,
-  });
-  const lines = patch.split("\n").slice(4); // skip the file header lines
+  const patch = Diff.createPatch(filePath, oldStr, newStr, "", "", { context: 3 });
+  const lines = patch.split("\n").slice(4); // skip file header
   const rendered = lines
     .map((line) => {
       if (line.startsWith("+")) return chalk.green(line);
@@ -67,15 +87,22 @@ export function printInfo(message: string): void {
   process.stderr.write(chalk.gray(message + "\n"));
 }
 
-// --- helpers ---
+// --- helpers (exported for testing) ---
 
-function formatToolArgs(name: string, args: Record<string, unknown>): string {
-  // For edit: show file path only (diff is printed separately)
+export type ChalkColor = "magenta" | "yellow" | "cyan" | "white";
+
+export function toolStyle(name: string): { color: ChalkColor; icon: string } {
+  if (name === "bash") return { color: "magenta", icon: "❯" };
+  if (name === "write" || name === "edit") return { color: "yellow", icon: "✎" };
+  return { color: "cyan", icon: "⟳" };
+}
+
+export function formatToolArgs(name: string, args: Record<string, unknown>): string {
   if (name === "edit" && typeof args.file_path === "string") {
     return chalk.dim(args.file_path);
   }
-  // For read/write/glob/grep: show the key path/pattern arg compactly
-  const pathArg = args.file_path ?? args.path ?? args.pattern ?? args.command ?? null;
+  // pattern before path so grep/glob show the search term rather than the directory
+  const pathArg = args.file_path ?? args.pattern ?? args.path ?? args.command ?? null;
   if (typeof pathArg === "string") {
     const rest = Object.entries(args)
       .filter(([k]) => !["file_path", "path", "pattern", "command"].includes(k))
@@ -83,6 +110,38 @@ function formatToolArgs(name: string, args: Record<string, unknown>): string {
       .join(" ");
     return chalk.dim(pathArg + (rest ? "  " + rest : ""));
   }
-  // Fallback: compact JSON
   return chalk.dim(JSON.stringify(args).slice(0, 120));
+}
+
+export function compactArg(args: Record<string, unknown>): string {
+  const val = args.file_path ?? args.path ?? args.pattern ?? null;
+  return typeof val === "string" ? chalk.dim(val) : chalk.dim(JSON.stringify(args).slice(0, 80));
+}
+
+export function summariseResult(name: string, result: string): string {
+  const trimmed = result.trim();
+
+  if (name === "read") {
+    const lines = trimmed.split("\n").length;
+    const filePath = trimmed.split("\n")[0]?.slice(0, 60) ?? "";
+    return `${name.padEnd(6)}${chalk.dim(`${filePath}  (${lines} lines)`)}`;
+  }
+  if (name === "glob") {
+    const files = trimmed ? trimmed.split("\n").length : 0;
+    return `${name.padEnd(6)}${chalk.dim(`${files} file${files === 1 ? "" : "s"}`)}`;
+  }
+  if (name === "grep") {
+    const matches = trimmed ? trimmed.split("\n").length : 0;
+    return `${name.padEnd(6)}${chalk.dim(`${matches} match${matches === 1 ? "" : "es"}`)}`;
+  }
+  if (name === "bash") {
+    const preview = trimmed.split("\n")[0]?.slice(0, 80) ?? "";
+    return `${name.padEnd(6)}${chalk.dim(preview)}`;
+  }
+  if (name === "write") {
+    return `${name.padEnd(6)}${chalk.dim("written")}`;
+  }
+
+  const preview = trimmed.replace(/\n/g, " ").slice(0, 100);
+  return `${name.padEnd(6)}${chalk.dim(preview)}`;
 }

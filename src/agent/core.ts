@@ -28,7 +28,7 @@ export class Agent {
     this.context.setSessionTmpDir(dir);
   }
 
-  restoreMessages(messages: import("../model/types.js").Message[]): void {
+  restoreMessages(messages: Message[]): void {
     this.context.restoreMessages(messages);
   }
 

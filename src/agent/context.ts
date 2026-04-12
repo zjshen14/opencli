@@ -77,7 +77,7 @@ export class ContextManager {
   }
 
   restoreMessages(messages: Message[]): void {
-    this.history = [...messages];
+    this.history = messages;
   }
 
   clear(): void {

@@ -12,6 +12,8 @@
  */
 
 import { mkdir, appendFile, readdir, readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { AGENT_DIR } from "./config.js";
 import type { Message } from "../model/types.js";
@@ -24,8 +26,38 @@ function makeSessionId(): string {
   return new Date().toISOString().slice(0, 19).replace(/:/g, "-");
 }
 
-function projectDir(cwd: string): string {
+function sessionProjectDir(cwd: string): string {
   return join(AGENT_DIR, "projects", encodeProjectPath(cwd));
+}
+
+/** List JSONL session files for a project dir, newest first. Returns [] on ENOENT. */
+async function listSessionFiles(dir: string): Promise<string[]> {
+  try {
+    return (await readdir(dir))
+      .filter((f) => f.endsWith(".jsonl"))
+      .sort()
+      .reverse();
+  } catch {
+    return [];
+  }
+}
+
+/** Read only until the first "user" entry, returning the content (max 80 chars). */
+async function readFirstUserMessage(logPath: string): Promise<string> {
+  try {
+    const rl = createInterface({ input: createReadStream(logPath), crlfDelay: Infinity });
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      const entry = JSON.parse(line);
+      if (entry.type === "user" && typeof entry.content === "string") {
+        rl.close();
+        return entry.content.slice(0, 80);
+      }
+    }
+  } catch {
+    // ignore — missing or malformed file
+  }
+  return "";
 }
 
 export interface SessionEntry {
@@ -36,7 +68,6 @@ export interface SessionEntry {
 
 export interface SessionSummary {
   id: string;
-  timestamp: string;
   firstUserMessage: string;
 }
 
@@ -58,7 +89,7 @@ export class Session {
 
   static async create(cwd: string = process.cwd()): Promise<Session> {
     const id = makeSessionId();
-    const dir = projectDir(cwd);
+    const dir = sessionProjectDir(cwd);
     await mkdir(dir, { recursive: true });
     const logPath = join(dir, `${id}.jsonl`);
     const session = new Session(id, cwd, logPath);
@@ -71,47 +102,29 @@ export class Session {
    * Returns up to `limit` entries with the first user message as a preview.
    */
   static async list(cwd: string = process.cwd(), limit = 20): Promise<SessionSummary[]> {
-    const dir = projectDir(cwd);
-    let files: string[];
-    try {
-      files = (await readdir(dir))
-        .filter((f) => f.endsWith(".jsonl"))
-        .sort()
-        .reverse();
-    } catch {
-      return [];
-    }
-
-    const summaries: SessionSummary[] = [];
-    for (const file of files.slice(0, limit)) {
-      const id = file.replace(".jsonl", "");
-      const firstUserMessage = await readFirstUserMessage(join(dir, file));
-      summaries.push({
-        id,
-        timestamp: id.replace("T", " ").replace(/-/g, (_, o) => (o < 10 ? "-" : ":")),
-        firstUserMessage,
-      });
-    }
-    return summaries;
+    const dir = sessionProjectDir(cwd);
+    const files = (await listSessionFiles(dir)).slice(0, limit);
+    return Promise.all(
+      files.map(async (file) => ({
+        id: file.replace(".jsonl", ""),
+        firstUserMessage: await readFirstUserMessage(join(dir, file)),
+      })),
+    );
   }
 
   /**
    * Load conversation messages from a session JSONL for resuming.
-   * Returns the most recent session if id is "latest".
+   * Pass "latest" to resume the most recent session that has conversation content.
    */
   static async loadMessages(
     id: string,
     cwd: string = process.cwd(),
   ): Promise<{ session: Session; messages: Message[] }> {
-    const dir = projectDir(cwd);
+    const dir = sessionProjectDir(cwd);
 
     let sessionId = id;
     if (id === "latest") {
-      // Pick the most recent session that has at least one user message
-      const files = (await readdir(dir))
-        .filter((f) => f.endsWith(".jsonl"))
-        .sort()
-        .reverse();
+      const files = await listSessionFiles(dir);
       if (files.length === 0) throw new Error("No sessions found for this directory.");
       let found = false;
       for (const file of files) {
@@ -133,7 +146,7 @@ export class Session {
       .map((line) => JSON.parse(line));
 
     // Reconstruct conversation as alternating user/model messages.
-    // Tool calls/results are omitted — the text content is sufficient for context.
+    // Tool calls/results are omitted — text content is sufficient for context.
     const messages: Message[] = [];
     for (const entry of entries) {
       if (entry.type === "user" && typeof entry.content === "string") {
@@ -143,8 +156,7 @@ export class Session {
       }
     }
 
-    const session = new Session(sessionId, cwd, logPath);
-    return { session, messages };
+    return { session: new Session(sessionId, cwd, logPath), messages };
   }
 
   async log(entry: Omit<SessionEntry, "timestamp">): Promise<void> {
@@ -155,19 +167,4 @@ export class Session {
       // Non-fatal — session logging should never crash the agent
     }
   }
-}
-
-async function readFirstUserMessage(logPath: string): Promise<string> {
-  try {
-    const raw = await readFile(logPath, "utf8");
-    for (const line of raw.split("\n").filter(Boolean)) {
-      const entry = JSON.parse(line);
-      if (entry.type === "user" && typeof entry.content === "string") {
-        return entry.content.slice(0, 80);
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return "";
 }

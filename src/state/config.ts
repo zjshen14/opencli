@@ -3,8 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 export const AGENT_DIR = join(homedir(), ".gemini-agent");
-const CONFIG_DIR = AGENT_DIR;
-const CONFIG_FILE = join(CONFIG_DIR, "config.json");
+const CONFIG_FILE = join(AGENT_DIR, "config.json");
 
 export interface Config {
   apiKey?: string;
@@ -37,7 +36,7 @@ export async function loadConfig(): Promise<Config> {
 export async function saveConfig(config: Partial<Config>): Promise<void> {
   const current = await loadConfig();
   const updated = { ...current, ...config };
-  await mkdir(CONFIG_DIR, { recursive: true });
+  await mkdir(AGENT_DIR, { recursive: true });
   await writeFile(CONFIG_FILE, JSON.stringify(updated, null, 2), "utf8");
 }
 

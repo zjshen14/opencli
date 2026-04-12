@@ -1,10 +1,9 @@
-import * as readline from "node:readline/promises";
-import { stdin, stdout } from "node:process";
 import chalk from "chalk";
 import type { Agent } from "../agent/core.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import { loadSkillFile, processBody } from "../skills/loader.js";
 import { join } from "node:path";
+import { readLine, loadHistory, saveHistory, type SlashCommand } from "./input.js";
 import {
   COMPACT_TOOLS,
   printAssistantChunk,
@@ -19,30 +18,40 @@ import {
   printInfo,
 } from "./renderer.js";
 
+// Built-in slash commands (always available)
+const BUILTIN_COMMANDS: SlashCommand[] = [
+  { name: "help", description: "list available skills and commands" },
+  { name: "clear", description: "clear conversation history" },
+  { name: "exit", description: "exit the agent" },
+];
+
 export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void> {
-  const rl = readline.createInterface({ input: stdin, output: stdout });
+  printInfo(`Gemini Agent — type /help for commands, Ctrl+C to exit\n`);
 
-  printInfo(`Gemini Agent — type /help for available skills, Ctrl+C to exit\n`);
-
-  rl.on("SIGINT", () => {
-    console.log("\nGoodbye.");
-    process.exit(0);
-  });
+  // Load persisted history and build the command list for the popup
+  const history = await loadHistory();
+  const skillCommands: SlashCommand[] = skills
+    .list()
+    .map((s) => ({ name: s.name, description: s.description }));
+  const allCommands = [...BUILTIN_COMMANDS, ...skillCommands];
 
   while (true) {
-    let input: string;
-    try {
-      input = await rl.question(chalk.green("› "));
-    } catch {
-      break;
-    }
+    const raw = await readLine(history, allCommands);
 
-    input = input.trim();
+    // EOF (Ctrl+D)
+    if (raw === null) break;
+
+    const input = raw.trim();
     if (!input) continue;
 
-    // Built-in meta-commands
+    // Persist to history (skip duplicates at the top)
+    if (history[0] !== input) {
+      history.unshift(input);
+    }
+
+    // Built-in commands
     if (input === "/help") {
-      printSkillList(skills);
+      printCommandList(allCommands, skills);
       continue;
     }
     if (input === "/clear") {
@@ -55,13 +64,14 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
     }
 
     // Skill invocation: /skill-name [args]
+    let userMessage = input;
     if (input.startsWith("/")) {
       const [slashName, ...argParts] = input.slice(1).split(/\s+/);
       const args = argParts.join(" ");
       const entry = skills.get(slashName);
 
       if (!entry) {
-        printError(`Unknown skill: ${slashName}. Type /help to list available skills.`);
+        printError(`Unknown command: /${slashName}. Type /help to list available commands.`);
         continue;
       }
 
@@ -70,20 +80,17 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
 
       agent.injectSkill(entry.name, body);
       printSkillActivated(entry.name);
-
-      input = args || `Please follow the ${entry.name} skill instructions.`;
+      userMessage = args || `Please follow the ${entry.name} skill instructions.`;
     }
 
     // Run the agent loop
     const spinner = createSpinner("Thinking…");
     spinner.start();
     let firstToken = true;
-
-    // Queue of pending edit args for diff rendering (matched in call order)
     const pendingEdits: { file_path: string; old_string: string; new_string: string }[] = [];
 
     try {
-      for await (const event of agent.run(input)) {
+      for await (const event of agent.run(userMessage)) {
         switch (event.type) {
           case "text":
             if (firstToken) {
@@ -102,7 +109,6 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
               printToolCallCompact(event.name, event.args);
             } else {
               printToolCall(event.name, event.args);
-              // Capture edit args for diff rendering
               if (
                 event.name === "edit" &&
                 typeof event.args.file_path === "string" &&
@@ -123,9 +129,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
               printToolResultCompact(event.name, event.result);
             } else if (event.name === "edit") {
               const edit = pendingEdits.shift();
-              if (edit) {
-                printEditDiff(edit.old_string, edit.new_string, edit.file_path);
-              }
+              if (edit) printEditDiff(edit.old_string, edit.new_string, edit.file_path);
             } else {
               printToolResult(event.name, event.result);
             }
@@ -137,7 +141,6 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
 
           case "done":
             if (firstToken) {
-              // No text at all (tool-only turn) — just stop spinner
               spinner.stop();
               firstToken = false;
             }
@@ -152,24 +155,31 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
     }
   }
 
-  rl.close();
+  await saveHistory(history);
+  process.stdout.write(chalk.gray("Goodbye.\n"));
 }
 
-function printSkillList(skills: SkillRegistry): void {
-  const entries = skills.list();
-  if (entries.length === 0) {
-    printInfo("No skills available.");
-    return;
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+function printCommandList(commands: SlashCommand[], skills: SkillRegistry): void {
+  const builtins = commands.filter((c) => BUILTIN_COMMANDS.some((b) => b.name === c.name));
+  const skillEntries = skills.list();
+
+  printInfo("\nBuilt-in commands:");
+  for (const c of builtins) {
+    process.stderr.write(chalk.green(`  /${c.name}`) + chalk.gray(` — ${c.description}\n`));
   }
-  printInfo("\nAvailable skills:");
-  for (const s of entries) {
-    process.stderr.write(chalk.magenta(`  /${s.name}`) + chalk.gray(` — ${s.description}\n`));
+
+  if (skillEntries.length > 0) {
+    printInfo("\nSkills:");
+    for (const s of skillEntries) {
+      process.stderr.write(chalk.magenta(`  /${s.name}`) + chalk.gray(` — ${s.description}\n`));
+    }
   }
-  printInfo("\nBuilt-in commands: /clear, /exit\n");
+
+  process.stderr.write("\n");
 }
 
-// Minimal spinner that only writes to stderr — never touches stdin,
-// so it doesn't interfere with the readline interface on stdout.
 function createSpinner(text: string) {
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
   let i = 0;
@@ -187,7 +197,7 @@ function createSpinner(text: string) {
         clearInterval(timer);
         timer = undefined;
       }
-      process.stderr.write("\r\x1b[K"); // overwrite spinner line with blank
+      process.stderr.write("\r\x1b[K");
     },
   };
 }

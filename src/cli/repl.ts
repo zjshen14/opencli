@@ -6,8 +6,7 @@ import { join } from "node:path";
 import { readLine, loadHistory, saveHistory, type SlashCommand } from "./input.js";
 import {
   COMPACT_TOOLS,
-  printAssistantChunk,
-  printAssistantDone,
+  MarkdownStreamRenderer,
   printToolCall,
   printToolCallCompact,
   printToolResult,
@@ -87,6 +86,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
     const spinner = createSpinner("Thinking…");
     spinner.start();
     let firstToken = true;
+    const mdRenderer = new MarkdownStreamRenderer();
     const pendingEdits: { file_path: string; old_string: string; new_string: string }[] = [];
 
     try {
@@ -97,7 +97,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
               spinner.stop();
               firstToken = false;
             }
-            printAssistantChunk(event.text);
+            mdRenderer.push(event.text);
             break;
 
           case "tool_call":
@@ -105,6 +105,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
               spinner.stop();
               firstToken = false;
             }
+            mdRenderer.flush();
             if (COMPACT_TOOLS.has(event.name)) {
               printToolCallCompact(event.name, event.args);
             } else {
@@ -144,7 +145,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
               spinner.stop();
               firstToken = false;
             }
-            printAssistantDone();
+            mdRenderer.flush();
             break;
         }
       }

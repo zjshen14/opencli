@@ -14,12 +14,44 @@ export function renderMarkdown(text: string): string {
   return marked(text) as string;
 }
 
-export function printAssistantChunk(text: string): void {
-  process.stdout.write(text);
-}
+/**
+ * Paragraph-level streaming markdown renderer.
+ *
+ * Strategy: buffer incoming text chunks and flush completed paragraphs
+ * (separated by "\n\n") through marked-terminal. Code fences (```) are
+ * treated as atomic — we never flush mid-fence, even if a blank line
+ * appears inside.
+ *
+ * Usage:
+ *   const r = new MarkdownStreamRenderer();
+ *   for each chunk: r.push(chunk);
+ *   r.flush(); // on done — render any remaining buffered text
+ */
+export class MarkdownStreamRenderer {
+  private buf = "";
 
-export function printAssistantDone(): void {
-  process.stdout.write("\n");
+  push(chunk: string): void {
+    this.buf += chunk;
+
+    // Flush complete paragraphs while not inside a code fence
+    let boundary: number;
+    while ((boundary = this.buf.indexOf("\n\n")) !== -1) {
+      const para = this.buf.slice(0, boundary + 2);
+      // Count ``` occurrences up to this point — odd means we're inside a fence
+      const fencesBefore = (this.buf.slice(0, boundary).match(/```/g) ?? []).length;
+      if (fencesBefore % 2 !== 0) break; // inside a code block — wait for closing fence
+      this.buf = this.buf.slice(boundary + 2);
+      process.stdout.write(renderMarkdown(para));
+    }
+  }
+
+  flush(): void {
+    if (this.buf.trim()) {
+      process.stdout.write(renderMarkdown(this.buf));
+    }
+    this.buf = "";
+    process.stdout.write("\n");
+  }
 }
 
 // Full bordered box for write/exec tools — printed when the call is issued

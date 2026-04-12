@@ -116,6 +116,39 @@ describe("ContextManager", () => {
     expect(skillText).toContain("debug");
   });
 
+  it("setSessionTmpDir embeds the path in the system instruction", () => {
+    const ctx = new ContextManager();
+    ctx.setSessionTmpDir("/tmp/my-session-123");
+    const instruction = ctx.getSystemInstruction();
+    expect(instruction).toContain("/tmp/my-session-123");
+  });
+
+  it("setSessionTmpDir invalidates the system instruction cache", () => {
+    const ctx = new ContextManager();
+    const before = ctx.getSystemInstruction();
+    ctx.setSessionTmpDir("/tmp/new-session");
+    const after = ctx.getSystemInstruction();
+    expect(before).not.toBe(after);
+    expect(after).toContain("/tmp/new-session");
+  });
+
+  it("restoreMessages replaces history with provided messages", () => {
+    const ctx = new ContextManager();
+    ctx.addMessage(userMsg("original message"));
+    ctx.restoreMessages([userMsg("restored A"), modelMsg("restored B")]);
+    const msgs = ctx.getMessages();
+    expect(msgs).toHaveLength(2);
+    expect((msgs[0].parts[0] as { type: string; text: string }).text).toBe("restored A");
+    expect((msgs[1].parts[0] as { type: string; text: string }).text).toBe("restored B");
+  });
+
+  it("restoreMessages with empty array clears history", () => {
+    const ctx = new ContextManager();
+    ctx.addMessage(userMsg("something"));
+    ctx.restoreMessages([]);
+    expect(ctx.getMessages()).toEqual([]);
+  });
+
   it("prunes history beyond maxHistoryMessages (50)", () => {
     const ctx = new ContextManager();
     for (let i = 0; i < 60; i++) {

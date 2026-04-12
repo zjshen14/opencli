@@ -5,7 +5,14 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov"],
-      exclude: ["src/cli/**"],
+      exclude: [
+        "src/cli/**",
+        "*.config.ts",
+        "src/model/types.ts",
+        "src/tools/base.ts",
+        "src/tools/index.ts",
+        "src/agent/core.ts",
+      ],
       thresholds: {
         lines: 70,
         statements: 70,

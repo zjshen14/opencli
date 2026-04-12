@@ -4,6 +4,7 @@ import type { SkillRegistry } from "../skills/registry.js";
 import { loadSkillFile, processBody } from "../skills/loader.js";
 import { join } from "node:path";
 import { readLine, loadHistory, saveHistory, type SlashCommand } from "./input.js";
+import { Session } from "../state/session.js";
 import {
   COMPACT_TOOLS,
   MarkdownStreamRenderer,
@@ -27,6 +28,8 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
 export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void> {
   printInfo(`Gemini Agent — type /help for commands, Ctrl+C to exit\n`);
 
+  const session = await Session.create();
+
   // Load persisted history and build the command list for the popup
   const history = await loadHistory();
   const skillCommands: SlashCommand[] = skills
@@ -47,6 +50,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
     if (history[0] !== input) {
       history.unshift(input);
     }
+    void session.log({ type: "user", content: input });
 
     // Built-in commands
     if (input === "/help") {
@@ -90,6 +94,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
     const pendingEdits: { file_path: string; old_string: string; new_string: string }[] = [];
 
     try {
+      let assistantText = "";
       for await (const event of agent.run(userMessage)) {
         switch (event.type) {
           case "text":
@@ -97,6 +102,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
               spinner.stop();
               firstToken = false;
             }
+            assistantText += event.text;
             mdRenderer.push(event.text);
             break;
 
@@ -106,6 +112,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
               firstToken = false;
             }
             mdRenderer.flush();
+            void session.log({ type: "tool_call", name: event.name, args: event.args });
             if (COMPACT_TOOLS.has(event.name)) {
               printToolCallCompact(event.name, event.args);
             } else {
@@ -126,6 +133,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
             break;
 
           case "tool_result":
+            void session.log({ type: "tool_result", name: event.name, result: event.result });
             if (COMPACT_TOOLS.has(event.name)) {
               printToolResultCompact(event.name, event.result);
             } else if (event.name === "edit") {
@@ -146,6 +154,8 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
               firstToken = false;
             }
             mdRenderer.flush();
+            void session.log({ type: "assistant", content: assistantText });
+            assistantText = "";
             break;
         }
       }

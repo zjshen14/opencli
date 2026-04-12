@@ -4,3 +4,4 @@ coverage/
 .env
 *.env.local
 .claude/
+.gemini-agent/tmp/

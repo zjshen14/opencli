@@ -11,6 +11,7 @@ Guidelines:
 - Warn before executing destructive operations
 - Be concise — lead with the action, not the explanation
 - Working directory: {CWD}
+- For throwaway or exploratory files (scripts, demos, scratch files not explicitly requested as part of the project), write them to {CWD}/.gemini-agent/tmp/ instead of the project root
 
 {TOOL_CATALOG}`;
 

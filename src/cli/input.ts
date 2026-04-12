@@ -83,14 +83,18 @@ function filterCommands(commands: SlashCommand[], input: string): SlashCommand[]
 function renderPopup(matches: SlashCommand[], selectedIdx: number): string {
   if (matches.length === 0) return "";
   const maxName = Math.max(...matches.map((c) => c.name.length + 1)); // +1 for "/"
+  const termWidth = stdout.columns ?? 100;
+  // indent(2) + name + sep(2) + description + trailing(2 for selected padding)
+  const descWidth = Math.max(20, termWidth - 2 - maxName - 2 - 2);
   let out = "";
   for (let i = 0; i < matches.length; i++) {
     const { name, description } = matches[i];
     const nameStr = ("/" + name).padEnd(maxName);
+    const desc = description.slice(0, descWidth);
     const selected = i === selectedIdx;
     const line = selected
-      ? chalk.bgBlue.bold.white(`  ${nameStr}  ${description.slice(0, 40)}  `)
-      : `  ${chalk.bold(nameStr)}  ${chalk.dim(description.slice(0, 40))}`;
+      ? chalk.bgBlue.bold.white(`  ${nameStr}  ${desc}  `)
+      : `  ${chalk.bold(nameStr)}  ${chalk.dim(desc)}`;
     out += "\n" + line;
   }
   return out;
@@ -107,6 +111,7 @@ export async function readLine(
   commands: SlashCommand[],
 ): Promise<string | null> {
   emitKeypressEvents(stdin);
+  stdin.ref(); // ensure the event loop stays alive while waiting for input
   if (stdin.isTTY) stdin.setRawMode(true);
 
   return new Promise((resolve) => {
@@ -114,44 +119,40 @@ export async function readLine(
     let histIdx = -1; // -1 = live input; ≥0 = browsing history
     let savedInput = ""; // snapshot of live input while browsing history
     let selectedIdx = -1; // popup selection; -1 = none
-    let prevPopupLines = 0; // how many popup lines were drawn last render
 
     // ── render ──────────────────────────────────────────────────────────────
+    // Invariant: the cursor is ALWAYS on the prompt line when render() is
+    // called — either because no popup was shown, or because we moved it
+    // back up after drawing the popup. So we never need to move up first;
+    // clearLine + clearDown is enough to erase the prompt and any popup
+    // lines that may still be visible below it.
     const render = () => {
       const matches = input.startsWith("/") ? filterCommands(commands, input) : [];
 
-      let out = "";
-
-      // Move back up to the prompt line and erase everything below it
-      if (prevPopupLines > 0) out += A.up(prevPopupLines);
-      out += A.clearLine + A.clearDown;
+      let out = A.clearLine + A.clearDown;
 
       // Draw prompt + current input
       out += PROMPT + input;
 
       // Draw popup (if any)
-      const popupStr = renderPopup(matches, selectedIdx);
-      out += popupStr;
+      out += renderPopup(matches, selectedIdx);
 
-      // Reposition cursor back on the input line at end of input
+      // Reposition cursor back on the prompt line at end of input
       if (matches.length > 0) {
         out += A.up(matches.length);
         out += "\r" + A.right(PROMPT_STR.length + input.length);
       }
 
-      prevPopupLines = matches.length;
       stdout.write(out);
     };
 
     // ── cleanup ──────────────────────────────────────────────────────────────
     const done = (result: string | null) => {
-      // Clear popup, end on a fresh line
-      if (prevPopupLines > 0) {
-        stdout.write(A.up(prevPopupLines) + A.clearLine + A.clearDown + PROMPT + input);
-      }
-      stdout.write("\n");
+      // Cursor is on the prompt line; clear any popup below and finalise
+      stdout.write(A.clearLine + A.clearDown + PROMPT + input + "\n");
       if (stdin.isTTY) stdin.setRawMode(false);
       stdin.removeListener("keypress", onKey);
+      stdin.unref(); // don't keep the event loop alive after the REPL exits
       resolve(result);
     };
 
@@ -184,7 +185,6 @@ export async function readLine(
           // Complete the selected slash command
           input = "/" + matches[selectedIdx].name + " ";
           selectedIdx = -1;
-          prevPopupLines = 0;
           render();
           return;
         }
@@ -198,7 +198,6 @@ export async function readLine(
         if (pick) {
           input = "/" + pick.name + " ";
           selectedIdx = -1;
-          prevPopupLines = 0;
         }
         render();
         return;
@@ -214,8 +213,8 @@ export async function readLine(
       // Up arrow
       if (key.name === "up") {
         if (matches.length > 0) {
-          // Navigate popup upward
-          selectedIdx = selectedIdx <= 0 ? 0 : selectedIdx - 1;
+          // Navigate popup upward; pressing Up past the top deselects
+          selectedIdx = selectedIdx <= 0 ? -1 : selectedIdx - 1;
         } else {
           // History: go back
           if (histIdx === -1) savedInput = input;
@@ -230,9 +229,9 @@ export async function readLine(
 
       // Down arrow
       if (key.name === "down") {
-        if (matches.length > 0 && selectedIdx >= 0) {
-          // Navigate popup downward
-          selectedIdx = Math.min(matches.length - 1, selectedIdx + 1);
+        if (matches.length > 0) {
+          // Popup visible: start selection or move down
+          selectedIdx = selectedIdx < 0 ? 0 : Math.min(matches.length - 1, selectedIdx + 1);
         } else {
           // History: go forward
           if (histIdx > 0) {

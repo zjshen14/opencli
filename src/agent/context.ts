@@ -21,19 +21,17 @@ export class ContextManager {
   private history: Message[] = [];
   private skillContent: string[] = []; // activated skill bodies, never pruned
   private maxHistoryMessages = 50;
-  private sessionTmpDir: string = "";
-  // Cached system instruction — rebuilt only when tool definitions change
+  private sessionTmpDir: string | undefined = undefined;
   private cachedSystemInstruction: string | null = null;
   private cachedToolSignature: string | null = null;
 
   setSessionTmpDir(dir: string): void {
     this.sessionTmpDir = dir;
-    this.cachedSystemInstruction = null; // invalidate cache
+    this.cachedSystemInstruction = null;
+    this.cachedToolSignature = null;
   }
 
   getSystemInstruction(tools: FunctionDeclaration[] = []): string {
-    // Use a signature to avoid rebuilding the string when tools haven't changed.
-    // This keeps the static prefix identical across turns, maximising implicit cache hits.
     const signature = tools.map((t) => t.name).join(",");
     if (this.cachedSystemInstruction && this.cachedToolSignature === signature) {
       return this.cachedSystemInstruction;
@@ -44,7 +42,7 @@ export class ContextManager {
         ? `## Available Tools\n${tools.map((t) => `- ${t.name}: ${t.description ?? ""}`).join("\n")}`
         : "";
 
-    const tmpDir = this.sessionTmpDir || `${process.cwd()}/.gemini-agent/tmp/session`;
+    const tmpDir = this.sessionTmpDir ?? `${process.cwd()}/.gemini-agent/tmp`;
     this.cachedSystemInstruction = SYSTEM_INSTRUCTION.replace("{CWD}", process.cwd())
       .replace("{SESSION_TMP}", tmpDir)
       .replace("{TOOL_CATALOG}", toolCatalog);
@@ -76,6 +74,10 @@ export class ContextManager {
       parts: [{ type: "text", text: `## Active Skills\n\n${skillBlock}` }],
     };
     return [skillMessage, ...this.history];
+  }
+
+  restoreMessages(messages: Message[]): void {
+    this.history = [...messages];
   }
 
   clear(): void {

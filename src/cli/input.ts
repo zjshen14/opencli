@@ -16,8 +16,8 @@ import { emitKeypressEvents } from "node:readline";
 import { stdin, stdout } from "node:process";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import chalk from "chalk";
+import { AGENT_DIR } from "../state/config.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ export interface SlashCommand {
 
 // ── History persistence ───────────────────────────────────────────────────────
 
-const HISTORY_FILE = join(homedir(), ".gemini-agent", "history");
+const HISTORY_FILE = join(AGENT_DIR, "history");
 const MAX_HISTORY = 500;
 
 export async function loadHistory(): Promise<string[]> {
@@ -46,7 +46,7 @@ export async function loadHistory(): Promise<string[]> {
 
 export async function saveHistory(history: string[]): Promise<void> {
   try {
-    await mkdir(join(homedir(), ".gemini-agent"), { recursive: true });
+    await mkdir(AGENT_DIR, { recursive: true });
     // Write oldest-first, cap at MAX_HISTORY
     const lines = [...history].reverse().slice(-MAX_HISTORY).join("\n") + "\n";
     await writeFile(HISTORY_FILE, lines, "utf8");

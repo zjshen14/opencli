@@ -25,10 +25,22 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: "exit", description: "exit the agent" },
 ];
 
-export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void> {
+export async function runRepl(
+  agent: Agent,
+  skills: SkillRegistry,
+  resumeSessionId?: string,
+): Promise<void> {
   printInfo(`Gemini Agent — type /help for commands, Ctrl+C to exit\n`);
 
-  const session = await Session.create();
+  let session: Session;
+  if (resumeSessionId) {
+    const { session: s, messages } = await Session.loadMessages(resumeSessionId);
+    session = s;
+    agent.restoreMessages(messages);
+    printInfo(`Resumed session ${s.id} (${messages.length} messages restored)\n`);
+  } else {
+    session = await Session.create();
+  }
   agent.setSessionTmpDir(session.tmpDir);
 
   // Load persisted history and build the command list for the popup

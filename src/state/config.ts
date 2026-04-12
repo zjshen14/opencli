@@ -2,7 +2,8 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const CONFIG_DIR = join(homedir(), ".gemini-agent");
+export const AGENT_DIR = join(homedir(), ".gemini-agent");
+const CONFIG_DIR = AGENT_DIR;
 const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 export interface Config {

@@ -28,6 +28,10 @@ export class Agent {
     this.context.setSessionTmpDir(dir);
   }
 
+  restoreMessages(messages: import("../model/types.js").Message[]): void {
+    this.context.restoreMessages(messages);
+  }
+
   injectSkill(name: string, body: string): void {
     if (!this.context.hasSkill(name)) {
       this.context.addSkillContent(name, body);

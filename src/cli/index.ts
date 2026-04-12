@@ -4,6 +4,7 @@ import { Agent } from "../agent/core.js";
 import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
 import { loadConfig, resolveApiKey, saveConfig } from "../state/config.js";
+import { Session } from "../state/session.js";
 import { runRepl } from "./repl.js";
 import { printError, printInfo } from "./renderer.js";
 
@@ -19,8 +20,28 @@ program
   .command("chat", { isDefault: true })
   .description("Start an interactive chat session")
   .option("-m, --model <model>", "Gemini model to use")
+  .option("-r, --resume", "Resume the most recent session")
+  .option("-s, --session <id>", "Resume a specific session by ID")
   .action(async (opts) => {
-    await startChat(opts.model);
+    const sessionId = opts.session ?? (opts.resume ? "latest" : undefined);
+    await startChat(opts.model, sessionId);
+  });
+
+// List sessions for the current directory
+program
+  .command("sessions")
+  .description("List recent sessions for the current directory")
+  .action(async () => {
+    const sessions = await Session.list();
+    if (sessions.length === 0) {
+      printInfo("No sessions found for this directory.");
+      return;
+    }
+    printInfo(`Sessions for ${process.cwd()}:\n`);
+    for (const s of sessions) {
+      const preview = s.firstUserMessage ? `  "${s.firstUserMessage}"` : "";
+      process.stderr.write(`  ${s.id}${preview ? `\n  ${preview}` : ""}\n\n`);
+    }
   });
 
 // One-shot command: run a single prompt and exit
@@ -60,9 +81,9 @@ program.parseAsync(process.argv).catch((err) => {
   process.exit(1);
 });
 
-async function startChat(modelOverride?: string): Promise<void> {
+async function startChat(modelOverride?: string, resumeSessionId?: string): Promise<void> {
   const { agent, skills } = await createAgent(modelOverride);
-  await runRepl(agent, skills);
+  await runRepl(agent, skills, resumeSessionId);
 }
 
 async function runSingle(prompt: string, modelOverride?: string): Promise<void> {

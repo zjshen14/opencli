@@ -15,52 +15,39 @@ export function renderMarkdown(text: string): string {
 }
 
 /**
- * Scan buf for the first "\n\n" that occurs outside a code fence (```).
- * Returns the index immediately after the "\n\n", or -1 if none found.
- */
-function findOutsideFence(buf: string): number {
-  let inFence = false;
-  let i = 0;
-  while (i < buf.length) {
-    if (buf.startsWith("```", i)) {
-      inFence = !inFence;
-      i += 3;
-      continue;
-    }
-    if (!inFence && buf[i] === "\n" && buf[i + 1] === "\n") {
-      return i + 2;
-    }
-    i++;
-  }
-  return -1;
-}
-
-/**
  * Paragraph-level streaming markdown renderer.
  *
- * Strategy: buffer incoming text chunks and flush completed paragraphs
- * (separated by "\n\n") through marked-terminal. Code fences (```) are
- * treated as atomic — we never flush mid-fence, even if a blank line
- * appears inside.
- *
- * Usage:
- *   const r = new MarkdownStreamRenderer();
- *   for each chunk: r.push(chunk);
- *   r.flush(); // on done — render any remaining buffered text
+ * Buffers incoming chunks and flushes complete paragraphs ("\n\n"-separated)
+ * through marked-terminal. Code fences (```) are treated as atomic — no flush
+ * mid-fence even if a blank line appears inside.
  */
 export class MarkdownStreamRenderer {
   private buf = "";
+  private scanPos = 0; // resume scanning here; avoids O(n²) full-buffer rescans
+  private inFence = false;
 
   push(chunk: string): void {
+    const prevLen = this.buf.length;
     this.buf += chunk;
+    // Back up 1 so a "\n" at the end of the previous chunk can pair with a
+    // "\n" at the start of this one to form a boundary.
+    this.scanPos = Math.max(0, prevLen - 1);
 
-    // Find the next \n\n that falls outside a code fence by scanning linearly.
-    // Returns the index just after the \n\n, or -1 if none found outside a fence.
-    let boundary: number;
-    while ((boundary = findOutsideFence(this.buf)) !== -1) {
-      const para = this.buf.slice(0, boundary);
-      this.buf = this.buf.slice(boundary);
-      process.stdout.write(renderMarkdown(para));
+    while (this.scanPos < this.buf.length) {
+      if (this.buf.startsWith("```", this.scanPos)) {
+        this.inFence = !this.inFence;
+        this.scanPos += 3;
+        continue;
+      }
+      if (!this.inFence && this.buf[this.scanPos] === "\n" && this.buf[this.scanPos + 1] === "\n") {
+        const boundary = this.scanPos + 2;
+        const para = this.buf.slice(0, boundary);
+        this.buf = this.buf.slice(boundary);
+        this.scanPos = 0;
+        process.stdout.write(renderMarkdown(para));
+        continue;
+      }
+      this.scanPos++;
     }
   }
 
@@ -69,6 +56,8 @@ export class MarkdownStreamRenderer {
       process.stdout.write(renderMarkdown(this.buf));
     }
     this.buf = "";
+    this.scanPos = 0;
+    this.inFence = false;
     process.stdout.write("\n");
   }
 }

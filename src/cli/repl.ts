@@ -29,6 +29,7 @@ export async function runRepl(agent: Agent, skills: SkillRegistry): Promise<void
   printInfo(`Gemini Agent — type /help for commands, Ctrl+C to exit\n`);
 
   const session = await Session.create();
+  agent.setSessionTmpDir(session.tmpDir);
 
   // Load persisted history and build the command list for the popup
   const history = await loadHistory();

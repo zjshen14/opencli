@@ -24,6 +24,10 @@ export class Agent {
     this.context = new ContextManager();
   }
 
+  setSessionTmpDir(dir: string): void {
+    this.context.setSessionTmpDir(dir);
+  }
+
   injectSkill(name: string, body: string): void {
     if (!this.context.hasSkill(name)) {
       this.context.addSkillContent(name, body);

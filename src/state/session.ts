@@ -54,11 +54,21 @@ export interface SessionEntry {
 
 export class Session {
   readonly id: string;
+  readonly cwd: string;
   private readonly logPath: string;
 
-  private constructor(id: string, logPath: string) {
+  private constructor(id: string, cwd: string, logPath: string) {
     this.id = id;
+    this.cwd = cwd;
     this.logPath = logPath;
+  }
+
+  /**
+   * Scratch directory for agent-generated temporary files, scoped to this session.
+   * Relative to cwd so it lands inside the project as .gemini-agent/tmp/<session-id>/.
+   */
+  get tmpDir(): string {
+    return join(this.cwd, ".gemini-agent", "tmp", this.id);
   }
 
   /** Create a new session for the given working directory. */
@@ -68,7 +78,7 @@ export class Session {
     await mkdir(projectDir, { recursive: true });
     const logPath = join(projectDir, `${id}.jsonl`);
 
-    const session = new Session(id, logPath);
+    const session = new Session(id, cwd, logPath);
     await session.log({ type: "session_start", cwd });
     return session;
   }

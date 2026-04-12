@@ -15,6 +15,27 @@ export function renderMarkdown(text: string): string {
 }
 
 /**
+ * Scan buf for the first "\n\n" that occurs outside a code fence (```).
+ * Returns the index immediately after the "\n\n", or -1 if none found.
+ */
+function findOutsideFence(buf: string): number {
+  let inFence = false;
+  let i = 0;
+  while (i < buf.length) {
+    if (buf.startsWith("```", i)) {
+      inFence = !inFence;
+      i += 3;
+      continue;
+    }
+    if (!inFence && buf[i] === "\n" && buf[i + 1] === "\n") {
+      return i + 2;
+    }
+    i++;
+  }
+  return -1;
+}
+
+/**
  * Paragraph-level streaming markdown renderer.
  *
  * Strategy: buffer incoming text chunks and flush completed paragraphs
@@ -33,14 +54,12 @@ export class MarkdownStreamRenderer {
   push(chunk: string): void {
     this.buf += chunk;
 
-    // Flush complete paragraphs while not inside a code fence
+    // Find the next \n\n that falls outside a code fence by scanning linearly.
+    // Returns the index just after the \n\n, or -1 if none found outside a fence.
     let boundary: number;
-    while ((boundary = this.buf.indexOf("\n\n")) !== -1) {
-      const para = this.buf.slice(0, boundary + 2);
-      // Count ``` occurrences up to this point — odd means we're inside a fence
-      const fencesBefore = (this.buf.slice(0, boundary).match(/```/g) ?? []).length;
-      if (fencesBefore % 2 !== 0) break; // inside a code block — wait for closing fence
-      this.buf = this.buf.slice(boundary + 2);
+    while ((boundary = findOutsideFence(this.buf)) !== -1) {
+      const para = this.buf.slice(0, boundary);
+      this.buf = this.buf.slice(boundary);
       process.stdout.write(renderMarkdown(para));
     }
   }

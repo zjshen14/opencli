@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   COMPACT_TOOLS,
+  MarkdownStreamRenderer,
   toolStyle,
   formatToolArgs,
   compactArg,
@@ -215,6 +216,121 @@ describe("summariseResult", () => {
       // name (padded to 6) + preview (100) + possible ANSI = reasonable bound
       expect(result.length).toBeLessThan(120);
     });
+  });
+});
+
+describe("MarkdownStreamRenderer", () => {
+  let stdoutOutput: string[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let stdoutSpy: any;
+
+  beforeEach(() => {
+    stdoutOutput = [];
+    stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      stdoutOutput.push(String(chunk));
+      return true;
+    });
+  });
+
+  afterEach(() => {
+    stdoutSpy.mockRestore();
+  });
+
+  const stdout = () => stripAnsi(stdoutOutput.join(""));
+
+  it("does not flush before a paragraph boundary", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("hello world");
+    expect(stdoutSpy).not.toHaveBeenCalled();
+  });
+
+  it("flushes a complete paragraph on \\n\\n", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("hello world\n\n");
+    expect(stdoutSpy).toHaveBeenCalled();
+    expect(stdout()).toContain("hello world");
+  });
+
+  it("flushes multiple paragraphs in order", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("first\n\nsecond\n\n");
+    const out = stdout();
+    expect(out.indexOf("first")).toBeLessThan(out.indexOf("second"));
+  });
+
+  it("does not flush on \\n\\n inside a code fence", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("```\ncode\n\nstill inside fence");
+    // one ``` seen → inside fence → no flush despite blank line
+    expect(stdoutSpy).not.toHaveBeenCalled();
+  });
+
+  it("flushes after the closing code fence", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("```\ncode\n\nstill inside\n```\n\n");
+    expect(stdoutSpy).toHaveBeenCalled();
+    expect(stdout()).toContain("code");
+  });
+
+  it("flush() renders remaining buffered text", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("trailing paragraph");
+    expect(stdoutSpy).not.toHaveBeenCalled();
+    r.flush();
+    expect(stdoutSpy).toHaveBeenCalled();
+    expect(stdout()).toContain("trailing paragraph");
+  });
+
+  it("flush() writes a trailing newline even when buffer is empty", () => {
+    const r = new MarkdownStreamRenderer();
+    r.flush();
+    expect(stdout()).toContain("\n");
+  });
+
+  it("handles chunks that split across a paragraph boundary", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("para one\n");
+    expect(stdoutSpy).not.toHaveBeenCalled();
+    r.push("\npara two");
+    // boundary \n\n now complete — first para should have flushed
+    expect(stdoutSpy).toHaveBeenCalled();
+    expect(stdout()).toContain("para one");
+  });
+
+  it("renders bold — strips ** markers from output", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("**bold text**\n\n");
+    const out = stdout();
+    expect(out).toContain("bold text");
+    expect(out).not.toContain("**");
+  });
+
+  it("renders heading — outputs plain text, not HTML", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("# My Heading\n\n");
+    const out = stdout();
+    expect(out).toContain("My Heading");
+    // marked without the terminal renderer would produce <h1>...</h1>;
+    // the absence of HTML tags confirms TerminalRenderer is active
+    expect(out).not.toContain("<h1>");
+    expect(out).not.toContain("</h1>");
+  });
+
+  it("renders inline code — strips backtick markers from output", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("Use `someFunction()` here\n\n");
+    const out = stdout();
+    expect(out).toContain("someFunction()");
+    expect(out).not.toContain("`someFunction()`");
+  });
+
+  it("renders bullet list — strips * markers from output", () => {
+    const r = new MarkdownStreamRenderer();
+    r.push("* item one\n* item two\n\n");
+    const out = stdout();
+    expect(out).toContain("item one");
+    expect(out).toContain("item two");
+    expect(out).not.toMatch(/^\* item/m);
   });
 });
 

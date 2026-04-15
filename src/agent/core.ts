@@ -20,8 +20,9 @@ export class Agent {
     private gemini: GeminiClient,
     private tools: ToolRegistry,
     private skills: SkillRegistry,
+    systemInstruction?: string,
   ) {
-    this.context = new ContextManager();
+    this.context = new ContextManager(systemInstruction);
   }
 
   setSessionTmpDir(dir: string): void {

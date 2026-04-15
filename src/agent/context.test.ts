@@ -1,6 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { ContextManager } from "./context.js";
+import { DEFAULT_SYSTEM_INSTRUCTION } from "./prompt.js";
 import type { Message } from "../model/types.js";
+
+// Minimal template used in most tests — fast and independent of prompt wording changes
+const STUB = "Agent. CWD={CWD} TMP={SESSION_TMP}\n{TOOL_CATALOG}";
 
 function userMsg(text: string): Message {
   return { role: "user", parts: [{ type: "text", text }] };
@@ -12,19 +16,30 @@ function modelMsg(text: string): Message {
 
 describe("ContextManager", () => {
   it("returns empty messages initially", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     expect(ctx.getMessages()).toEqual([]);
   });
 
-  it("includes system instruction with cwd", () => {
+  it("uses DEFAULT_SYSTEM_INSTRUCTION when no template is passed", () => {
     const ctx = new ContextManager();
     const instruction = ctx.getSystemInstruction();
     expect(instruction).toContain("Gemini Agent");
     expect(instruction).toContain(process.cwd());
   });
 
+  it("uses the provided custom instruction template", () => {
+    const ctx = new ContextManager("Custom prompt. CWD={CWD}\n{TOOL_CATALOG}");
+    expect(ctx.getSystemInstruction()).toContain("Custom prompt.");
+    expect(ctx.getSystemInstruction()).not.toContain("Gemini Agent");
+  });
+
+  it("substitutes {CWD} in the instruction", () => {
+    const ctx = new ContextManager(STUB);
+    expect(ctx.getSystemInstruction()).toContain(process.cwd());
+  });
+
   it("embeds tool names in system instruction for implicit cache prefix", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     const tools = [
       { name: "read", description: "Read a file" },
       { name: "bash", description: "Run a command" },
@@ -35,7 +50,7 @@ describe("ContextManager", () => {
   });
 
   it("returns cached system instruction when tools unchanged", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     const tools = [{ name: "read", description: "Read a file" }];
     const first = ctx.getSystemInstruction(tools);
     const second = ctx.getSystemInstruction(tools);
@@ -43,18 +58,17 @@ describe("ContextManager", () => {
   });
 
   it("clears system instruction cache on clear()", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     const tools = [{ name: "read", description: "Read a file" }];
     ctx.getSystemInstruction(tools);
     ctx.clear();
-    // After clear, different tools should produce a different instruction
     const afterDifferentTools = ctx.getSystemInstruction([{ name: "bash", description: "Run" }]);
     expect(afterDifferentTools).toContain("bash");
     expect(afterDifferentTools).not.toContain("read: Read a file");
   });
 
   it("adds and retrieves messages", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     ctx.addMessage(userMsg("hello"));
     ctx.addMessage(modelMsg("hi there"));
     const msgs = ctx.getMessages();
@@ -64,7 +78,7 @@ describe("ContextManager", () => {
   });
 
   it("clears history and skills", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     ctx.addMessage(userMsg("hello"));
     ctx.addSkillContent("review", "Review instructions.");
     ctx.clear();
@@ -73,7 +87,7 @@ describe("ContextManager", () => {
   });
 
   it("prepends skill content as first message when skills are active", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     ctx.addSkillContent("review", "Review instructions.");
     ctx.addMessage(userMsg("review this file"));
 
@@ -88,14 +102,14 @@ describe("ContextManager", () => {
   });
 
   it("detects if a skill is already active", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     ctx.addSkillContent("review", "instructions");
     expect(ctx.hasSkill("review")).toBe(true);
     expect(ctx.hasSkill("debug")).toBe(false);
   });
 
   it("wraps skill content in skill_content tags", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     ctx.addSkillContent("test", "Test instructions.");
     const msgs = ctx.getMessages();
     const text = (msgs[0].parts[0] as { type: string; text: string }).text;
@@ -104,27 +118,26 @@ describe("ContextManager", () => {
   });
 
   it("combines multiple active skills into one message", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     ctx.addSkillContent("review", "Review instructions.");
     ctx.addSkillContent("debug", "Debug instructions.");
     ctx.addMessage(userMsg("go"));
 
     const msgs = ctx.getMessages();
-    expect(msgs).toHaveLength(2); // skill message + user message
+    expect(msgs).toHaveLength(2);
     const skillText = (msgs[0].parts[0] as { type: string; text: string }).text;
     expect(skillText).toContain("review");
     expect(skillText).toContain("debug");
   });
 
   it("setSessionTmpDir embeds the path in the system instruction", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     ctx.setSessionTmpDir("/tmp/my-session-123");
-    const instruction = ctx.getSystemInstruction();
-    expect(instruction).toContain("/tmp/my-session-123");
+    expect(ctx.getSystemInstruction()).toContain("/tmp/my-session-123");
   });
 
   it("setSessionTmpDir invalidates the system instruction cache", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     const before = ctx.getSystemInstruction();
     ctx.setSessionTmpDir("/tmp/new-session");
     const after = ctx.getSystemInstruction();
@@ -133,7 +146,7 @@ describe("ContextManager", () => {
   });
 
   it("restoreMessages replaces history with provided messages", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     ctx.addMessage(userMsg("original message"));
     ctx.restoreMessages([userMsg("restored A"), modelMsg("restored B")]);
     const msgs = ctx.getMessages();
@@ -143,22 +156,43 @@ describe("ContextManager", () => {
   });
 
   it("restoreMessages with empty array clears history", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     ctx.addMessage(userMsg("something"));
     ctx.restoreMessages([]);
     expect(ctx.getMessages()).toEqual([]);
   });
 
   it("prunes history beyond maxHistoryMessages (50)", () => {
-    const ctx = new ContextManager();
+    const ctx = new ContextManager(STUB);
     for (let i = 0; i < 60; i++) {
       ctx.addMessage(userMsg(`message ${i}`));
     }
     const msgs = ctx.getMessages();
     expect(msgs.length).toBeLessThanOrEqual(50);
-    // Should keep the most recent messages
     expect((msgs[msgs.length - 1].parts[0] as { type: string; text: string }).text).toBe(
       "message 59",
     );
+  });
+});
+
+describe("DEFAULT_SYSTEM_INSTRUCTION", () => {
+  it("contains all required placeholders", () => {
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("{CWD}");
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("{SESSION_TMP}");
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("{TOOL_CATALOG}");
+  });
+
+  it("defines the agent persona", () => {
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("Gemini Agent");
+  });
+
+  it("includes all major sections", () => {
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("## Workflow");
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("## Engineering Standards");
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("## Tool Usage");
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("## Git");
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("## Security");
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("## Tone");
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("## Files");
   });
 });

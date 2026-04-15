@@ -5,6 +5,7 @@ import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
 import { loadConfig, resolveApiKey, saveConfig } from "../state/config.js";
 import { Session } from "../state/session.js";
+import { loadSystemInstruction } from "../agent/prompt.js";
 import { runRepl } from "./repl.js";
 import { printError, printInfo } from "./renderer.js";
 
@@ -104,6 +105,7 @@ async function createAgent(modelOverride?: string) {
   const skills = new SkillRegistry();
   await skills.discover();
 
-  const agent = new Agent(gemini, tools, skills);
+  const systemInstruction = await loadSystemInstruction();
+  const agent = new Agent(gemini, tools, skills, systemInstruction);
   return { agent, skills };
 }

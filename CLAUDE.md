@@ -28,13 +28,15 @@ API key is loaded from `.env` (`GEMINI_API_KEY`). Default model: `gemini-3.1-fla
 ```
 src/
   cli/
-    index.ts        # Entry point — commander CLI (chat / run / config commands)
-    repl.ts         # Interactive REPL, /slash command interception, skill loading
-    renderer.ts     # Streaming output, markdown rendering, tool call display
+    index.ts        # Entry point — commander CLI (chat / run / sessions / config commands)
+    repl.ts         # Interactive REPL, /slash command interception, skill loading, session logging
+    renderer.ts     # MarkdownStreamRenderer (paragraph-level streaming), tool call display
+    input.ts        # Raw-mode readline, /slash popup with arrow-key navigation
   agent/
     core.ts         # Agentic loop: stream → collect function calls → execute → feed back
     executor.ts     # Parallel tool execution + skill activation dispatch
     context.ts      # Conversation history, skill content injection, context pruning
+    prompt.ts       # DEFAULT_SYSTEM_INSTRUCTION template + loadSystemInstruction() (GEMINI_SYSTEM_MD)
   model/
     types.ts        # Shared types: Message, StreamEvent, ToolResult, thoughtSignature
     gemini.ts       # Gemini streaming client, exponential backoff retry
@@ -50,7 +52,8 @@ src/
     loader.ts       # Parse SKILL.md frontmatter, !{cmd} preprocessing, $ARGUMENTS substitution
     builtin/        # review, commit, explain, debug, test
   state/
-    config.ts       # ~/.gemini-agent/config.json load/save, API key resolution
+    config.ts       # ~/.gemini-agent/config.json load/save, API key resolution; exports AGENT_DIR
+    session.ts      # JSONL session logs at ~/.gemini-agent/projects/<cwd>/; create, list, resume
 ```
 
 ## Architecture
@@ -93,5 +96,19 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 ## Configuration
 
 - `.env` — `GEMINI_API_KEY`, `GEMINI_MODEL`
+- `GEMINI_SYSTEM_MD` — path to a Markdown file that overrides the default system instruction (for prompt hill-climbing)
 - `~/.gemini-agent/config.json` — persisted user config (model, temperature, historySize, etc.)
+- `~/.gemini-agent/projects/<encoded-cwd>/<session-id>.jsonl` — session conversation logs
 - `.gitignore` excludes `.env` and `dist/`
+
+## Session Management
+
+Sessions are JSONL logs stored globally (not in the project directory):
+
+```bash
+gemini-agent sessions              # list sessions for current directory
+gemini-agent chat --resume         # resume most recent session with conversation content
+gemini-agent chat --session <id>   # resume a specific session by ID
+```
+
+Session ID format: `YYYY-MM-DDTHH-mm-ss` (human-readable, lexicographically sortable).

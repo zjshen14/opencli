@@ -70,8 +70,10 @@ Don't manually format — run Prettier.
 **Architecture decisions go in `docs/`.** When a non-obvious technical decision is made (API choice, caching strategy, layering boundary), document it. Future contributors should understand *why*, not just *what*.
 
 Current docs:
-- `docs/architecture.md` — system design and component spec
+- `docs/architecture.md` — system design and component reference
 - `docs/api-and-efficiency.md` — Gemini API choice and token efficiency strategy
+- `docs/cli-ux-research.md` — REPL UX research and feature backlog
+- `docs/cli-ui-research.md` — visual design research (rendering, popups, spinners)
 - `docs/engineering-practices.md` — this file
 
 **CLAUDE.md is for Claude Code.** Keep it current when commands, file structure, or key conventions change. It's the first thing Claude reads.

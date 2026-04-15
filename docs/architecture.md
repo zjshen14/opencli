@@ -57,11 +57,9 @@ A general-purpose AI agent CLI powered by Google Gemini, similar to Claude Code 
 - Display progress indicators
 
 **Tech Stack:**
-- `commander` or `yargs` - CLI argument parsing
-- `@clack/prompts` - Interactive prompts
-- `chalk` - Terminal colors
-- `marked` + `marked-terminal` - Markdown rendering
-- `ora` - Spinners and progress
+- `commander` — CLI argument parsing
+- `marked` + `marked-terminal` — Markdown rendering (`MarkdownStreamRenderer` buffers to paragraph boundaries before rendering)
+- Raw Node.js `readline` — per-keystroke input, slash-command popup
 
 **Skill Invocation (CLI Layer responsibilities):**
 - Intercept input starting with `/` before forwarding to Agent Core
@@ -73,10 +71,10 @@ A general-purpose AI agent CLI powered by Google Gemini, similar to Claude Code 
 **Key Files:**
 ```
 src/cli/
-  ├── index.ts           # CLI entry point
-  ├── commands/          # Command handlers
-  ├── ui/                # UI components (prompts, rendering)
-  └── renderer.ts        # Markdown/code rendering
+  ├── index.ts           # CLI entry point (chat / run / sessions / config commands)
+  ├── repl.ts            # Interactive REPL + session logging
+  ├── renderer.ts        # MarkdownStreamRenderer, tool call display
+  └── input.ts           # Raw-mode input, slash-command popup
 ```
 
 ### 2. Agent Core
@@ -120,9 +118,9 @@ src/cli/
 ```
 src/agent/
   ├── core.ts            # Main agent loop
-  ├── context.ts         # Context management
-  ├── streaming.ts       # Stream handling
-  └── executor.ts        # Tool execution coordinator
+  ├── context.ts         # Context management, ContextManager class
+  ├── executor.ts        # Tool execution coordinator
+  └── prompt.ts          # DEFAULT_SYSTEM_INSTRUCTION; loadSystemInstruction() respects GEMINI_SYSTEM_MD
 ```
 
 ### 3. Model Layer (Gemini Integration)
@@ -135,12 +133,12 @@ src/agent/
 - Error handling and retries
 - Rate limiting
 
-**Gemini API Features to Use:**
-- Model: `gemini-3-flash-preview` (fast) or `gemini-3.1-pro-preview` (capable/agentic)
+**Gemini API Features Used:**
+- Model: `gemini-3.1-flash-lite-preview` (default) — override with `GEMINI_MODEL` or `--model`
 - Function calling for tool execution
-- System instructions for agent behavior
+- System instructions for agent behavior (swappable via `GEMINI_SYSTEM_MD`)
 - Large context window (1M+ tokens)
-- Multi-turn conversations
+- Multi-turn conversations with `thoughtSignature` threading for thinking models
 
 **Function Calling vs Tools:**
 
@@ -218,10 +216,9 @@ The Model Layer exposes `activate_skill` as a Gemini function declaration alongs
 **Key Files:**
 ```
 src/model/
-  ├── gemini.ts          # Gemini client
-  ├── schema.ts          # Function calling schemas
-  ├── types.ts           # Type definitions
-  └── config.ts          # Model configuration
+  ├── gemini.ts          # Gemini client, streaming, exponential backoff
+  ├── schema.ts          # Function calling schemas + activate_skill declaration
+  └── types.ts           # Shared types: Message, StreamEvent, FunctionCallPart, thoughtSignature
 ```
 
 ### 4. Tool System
@@ -229,28 +226,14 @@ src/model/
 **Tool Categories:**
 
 **File Operations:**
-- `read` - Read file contents (with line range support)
-- `write` - Write/create files
-- `edit` - Edit files (find/replace)
-- `glob` - Find files by pattern
-- `grep` - Search file contents
+- `read` — Read file contents (with offset/limit support)
+- `write` — Write/create files
+- `edit` — Edit files (exact old_string → new_string; fails if match is ambiguous)
+- `glob` — Find files by pattern
+- `grep` — Search file contents with regex
 
 **Execution:**
-- `bash` - Execute shell commands
-- `bash_background` - Background execution
-- `kill_process` - Kill background processes
-
-**Code Intelligence:**
-- `parse_code` - AST parsing for understanding code structure
-- `find_symbol` - Find function/class definitions
-
-**Web:**
-- `web_fetch` - Fetch web content
-- `web_search` - Search the web
-
-**Task Management:**
-- `todo_write` - Manage task lists
-- `ask_user` - Ask clarifying questions
+- `bash` — Execute shell commands (blocks dangerous patterns: `rm -rf`, `git push --force`, etc.)
 
 **Tool Interface:**
 ```typescript
@@ -272,11 +255,10 @@ interface ToolResult {
 ```
 src/tools/
   ├── registry.ts        # Tool registration and lookup
-  ├── base.ts            # Base tool interface
-  ├── file/              # File operation tools
-  ├── exec/              # Execution tools
-  ├── search/            # Search tools
-  └── web/               # Web tools
+  ├── base.ts            # Tool interface + JSONSchema type
+  ├── index.ts           # createDefaultRegistry() factory
+  ├── file/              # read, write, edit, glob, grep
+  └── exec/              # bash
 ```
 
 ### 5. Skill System
@@ -348,29 +330,30 @@ src/skills/
 ### 6. State Management
 
 **Responsibilities:**
-- Conversation history persistence
-- Session management
-- Configuration storage
-- Caching (API responses, tool results)
+- Session lifecycle: create, log, list, resume
+- Configuration storage and API key resolution
 
-**State Components:**
-- **Conversation History**: Store messages and tool results
-- **Session**: Current working directory, environment
-- **Config**: User preferences, API keys, model settings
-- **Cache**: Reduce redundant API calls
+**Session storage layout** (mirrors Claude Code's pattern — never written inside the project):
+```
+~/.gemini-agent/
+  config.json                                    # persisted user config
+  projects/
+    -Users-alice-myproject/                      # encoded cwd (/ → -)
+      2025-06-01T14-23-45.jsonl                  # one JSONL file per session
+      2025-06-02T09-10-00.jsonl
+```
 
-**Storage:**
-- Local files in `~/.gemini-agent/`
-- SQLite for structured data (optional)
-- JSON for simple config
+Each JSONL line is a timestamped entry: `session_start`, `user`, `assistant`, `tool_call`, `tool_result`.
+
+**Session resume** — `Session.loadMessages(id | "latest")` reconstructs `Message[]` from the log, skipping tool call entries (text content is sufficient for context). Pass `"latest"` to resume the most recent session that has actual conversation content.
+
+**Scratch directory** — `session.tmpDir` resolves to `<cwd>/.gemini-agent/tmp/<session-id>/`. Agent-generated temporary files land here, scoped to the session, and never pollute the project root.
 
 **Key Files:**
 ```
 src/state/
-  ├── session.ts         # Session management
-  ├── history.ts         # Conversation history
-  ├── config.ts          # Configuration
-  └── cache.ts           # Caching layer
+  ├── session.ts         # Session: create, list, loadMessages, log, tmpDir
+  └── config.ts          # Config load/save, resolveApiKey, exports AGENT_DIR
 ```
 
 ## Data Flow
@@ -473,23 +456,13 @@ const result = await tools.execute("edit", {
 
 ## Context Management
 
-**Challenge**: Gemini has a large context window (1M+ tokens), but we still need to manage it efficiently.
+`ContextManager` (in `src/agent/context.ts`) owns all context state for a session.
 
-**Strategy**:
-1. **Sliding Window**: Keep last N messages + tool results
-2. **Summarization**: Summarize old conversations to reduce tokens
-3. **Smart Pruning**: Remove redundant tool results
-4. **Caching**: Use Gemini's context caching for repeated content
+**System instruction** is rendered from a template at first call and cached until tools or `sessionTmpDir` change. Placeholders `{CWD}`, `{SESSION_TMP}`, `{TOOL_CATALOG}` are substituted at render time. The tool list is embedded in the static prefix to maximise implicit prompt cache hits across turns.
 
-**Context Structure**:
-```typescript
-interface Context {
-  systemInstructions: string;      // Agent behavior, tool descriptions
-  conversationHistory: Message[];  // User messages + assistant responses
-  toolResults: ToolResult[];       // Recent tool execution results
-  workingDirectory: string;        // Current context
-}
-```
+**Conversation history** is a sliding window of the last 50 messages (pruned from the oldest end). Skill content is held in a separate `skillContent[]` array that is never pruned; it is prepended as a synthetic user message when `getMessages()` is called.
+
+**Constructor injection**: `new ContextManager(template?)` accepts a custom system instruction template, making it easy to swap prompts in tests or for A/B experiments without touching files.
 
 ## Configuration
 
@@ -500,16 +473,16 @@ interface Context {
   "model": "gemini-3.1-flash-lite-preview",
   "maxTokens": 8192,
   "temperature": 0.7,
-  "autoExecute": false,  // Auto-execute tools or ask first
+  "autoExecute": false,
   "theme": "dark",
   "historySize": 50
 }
 ```
 
 **Environment Variables**:
-- `GEMINI_API_KEY` - API key
-- `GEMINI_MODEL` - Model to use
-- `GEMINI_AGENT_CONFIG` - Custom config path
+- `GEMINI_API_KEY` — API key (takes precedence over config file)
+- `GEMINI_MODEL` — Model override (takes precedence over `--model` flag and config)
+- `GEMINI_SYSTEM_MD` — Path to a Markdown file that replaces the default system instruction
 
 ## Security Considerations
 
@@ -557,39 +530,23 @@ interface Context {
 
 ## Testing Strategy
 
-1. **Unit Tests**: Individual tools and utilities
-2. **Integration Tests**: Agent loop with mocked Gemini
-3. **E2E Tests**: Full scenarios with real API (CI only)
-4. **Manual Testing**: Interactive testing checklist
+- **Unit tests** colocated with source (`context.ts` → `context.test.ts`)
+- **Real filesystem** for file tool tests (no `fs` mocking — mocks hide real bugs)
+- **Mock at boundaries**: Gemini client and `SkillRegistry` are mocked; internal collaborators (`ContextManager`, `ToolRegistry`) are used directly
+- **Coverage threshold**: 70% lines/statements/functions/branches via vitest v8; config files, type-only files, and `agent/core.ts` (requires live Gemini) are excluded
 
 ## Deployment & Distribution
 
-**Installation**:
+**Build**:
 ```bash
-npm install -g gemini-agent
-# or
-npx gemini-agent
+npm run build   # bundles with tsup → dist/
 ```
 
-**Build**:
-- Bundle with `tsup` or `unbuild`
-- Single executable with `pkg` (optional)
-- Cross-platform support
-
-## Future Enhancements
-
-**Phase 2**:
-- Multi-file editing (refactoring)
-- Git integration (commits, PRs)
-- Code intelligence (LSP integration)
-- Custom tool plugins
-- Skill subagent isolation (`context: fork` — run skill in isolated subagent context)
-
-**Phase 3**:
-- Sub-agents for complex tasks
-- Multi-agent collaboration
-- MCP server support
-- Web UI companion
+**Run locally**:
+```bash
+npm run dev               # interactive REPL (auto-loads .env)
+npm run dev run "<prompt>" # one-shot
+```
 
 ## References
 

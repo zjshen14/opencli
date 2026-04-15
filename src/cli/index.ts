@@ -106,6 +106,6 @@ async function createAgent(modelOverride?: string) {
   await skills.discover();
 
   const systemInstruction = await loadSystemInstruction();
-  const agent = new Agent(gemini, tools, skills, systemInstruction);
+  const agent = new Agent(gemini, tools, skills, systemInstruction, config.historySize);
   return { agent, skills };
 }

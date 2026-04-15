@@ -130,7 +130,7 @@ describe("Session.loadMessages", () => {
     expect(messages[1]).toMatchObject({ role: "model" });
   });
 
-  it("ignores non-user non-assistant entries (tool calls, etc.)", async () => {
+  it("reconstructs tool calls and results into model/user messages", async () => {
     const session = await Session.create(CWD);
     await session.log({ type: "user", content: "Run something" });
     await session.log({ type: "tool_call", name: "bash", args: { command: "ls" } });
@@ -138,7 +138,59 @@ describe("Session.loadMessages", () => {
     await session.log({ type: "assistant", content: "Done." });
 
     const { messages } = await Session.loadMessages(session.id, CWD);
-    expect(messages).toHaveLength(2);
+    // user text → model (tool_call) → user (tool_result) → model text
+    expect(messages).toHaveLength(4);
+    expect(messages[0]).toMatchObject({
+      role: "user",
+      parts: [{ type: "text", text: "Run something" }],
+    });
+    expect(messages[1]).toMatchObject({
+      role: "model",
+      parts: [{ type: "function_call", name: "bash" }],
+    });
+    expect(messages[1].parts[0]).toMatchObject({ args: { command: "ls" } });
+    expect(messages[2]).toMatchObject({
+      role: "user",
+      parts: [{ type: "function_result", name: "bash", result: "file.txt" }],
+    });
+    expect(messages[3]).toMatchObject({ role: "model", parts: [{ type: "text", text: "Done." }] });
+  });
+
+  it("reconstructs multi-round tool use (parallel calls, multiple rounds)", async () => {
+    const session = await Session.create(CWD);
+    await session.log({ type: "user", content: "Search and edit" });
+    // Round 1: two parallel calls
+    await session.log({ type: "tool_call", name: "glob", args: { pattern: "*.ts" } });
+    await session.log({ type: "tool_call", name: "grep", args: { pattern: "foo" } });
+    await session.log({ type: "tool_result", name: "glob", result: "a.ts" });
+    await session.log({ type: "tool_result", name: "grep", result: "a.ts:1" });
+    // Round 2: one more call
+    await session.log({ type: "tool_call", name: "edit", args: { file_path: "a.ts" } });
+    await session.log({ type: "tool_result", name: "edit", result: "ok" });
+    await session.log({ type: "assistant", content: "Done." });
+
+    const { messages } = await Session.loadMessages(session.id, CWD);
+    // user → model(2 calls) → user(2 results) → model(1 call) → user(1 result) → model text
+    expect(messages).toHaveLength(6);
+    expect(messages[0].role).toBe("user");
+    expect(messages[1].role).toBe("model");
+    expect(messages[1].parts).toHaveLength(2); // glob + grep
+    expect(messages[2].role).toBe("user");
+    expect(messages[2].parts).toHaveLength(2); // 2 results
+    expect(messages[3].role).toBe("model");
+    expect(messages[3].parts).toHaveLength(1); // edit
+    expect(messages[4].role).toBe("user");
+    expect(messages[4].parts).toHaveLength(1); // 1 result
+    expect(messages[5]).toMatchObject({ role: "model", parts: [{ type: "text", text: "Done." }] });
+  });
+
+  it("ignores session_start and unknown entries", async () => {
+    const session = await Session.create(CWD);
+    await session.log({ type: "user", content: "Hi" });
+    await session.log({ type: "assistant", content: "Hello!" });
+
+    const { messages } = await Session.loadMessages(session.id, CWD);
+    expect(messages).toHaveLength(2); // session_start is filtered out
   });
 });
 

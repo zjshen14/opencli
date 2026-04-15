@@ -162,7 +162,7 @@ describe("ContextManager", () => {
     expect(ctx.getMessages()).toEqual([]);
   });
 
-  it("prunes history beyond maxHistoryMessages (50)", () => {
+  it("prunes history beyond maxHistoryMessages (50 default)", () => {
     const ctx = new ContextManager(STUB);
     for (let i = 0; i < 60; i++) {
       ctx.addMessage(userMsg(`message ${i}`));
@@ -171,6 +171,17 @@ describe("ContextManager", () => {
     expect(msgs.length).toBeLessThanOrEqual(50);
     expect((msgs[msgs.length - 1].parts[0] as { type: string; text: string }).text).toBe(
       "message 59",
+    );
+  });
+
+  it("respects a custom maxHistoryMessages from constructor", () => {
+    const ctx = new ContextManager(STUB, 5);
+    for (let i = 0; i < 10; i++) {
+      ctx.addMessage(userMsg(`message ${i}`));
+    }
+    expect(ctx.getMessages()).toHaveLength(5);
+    expect((ctx.getMessages()[4].parts[0] as { type: string; text: string }).text).toBe(
+      "message 9",
     );
   });
 });

@@ -5,12 +5,17 @@ import { DEFAULT_SYSTEM_INSTRUCTION } from "./prompt.js";
 export class ContextManager {
   private history: Message[] = [];
   private skillContent: string[] = []; // activated skill bodies, never pruned
-  private maxHistoryMessages = 50;
+  private maxHistoryMessages: number;
   private sessionTmpDir: string | undefined = undefined;
   private cachedSystemInstruction: string | null = null;
   private cachedToolSignature: string | null = null;
 
-  constructor(private readonly systemInstructionTemplate = DEFAULT_SYSTEM_INSTRUCTION) {}
+  constructor(
+    private readonly systemInstructionTemplate = DEFAULT_SYSTEM_INSTRUCTION,
+    maxHistoryMessages = 50,
+  ) {
+    this.maxHistoryMessages = maxHistoryMessages;
+  }
 
   setSessionTmpDir(dir: string): void {
     this.sessionTmpDir = dir;

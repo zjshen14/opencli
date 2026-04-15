@@ -16,7 +16,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { AGENT_DIR } from "./config.js";
-import type { Message } from "../model/types.js";
+import type { FunctionCallPart, FunctionResultPart, Message } from "../model/types.js";
 
 function encodeProjectPath(cwd: string): string {
   return cwd.replace(/\//g, "-");
@@ -58,6 +58,77 @@ async function readFirstUserMessage(logPath: string): Promise<string> {
     // ignore — missing or malformed file
   }
   return "";
+}
+
+/**
+ * Reconstruct a Message[] from session log entries.
+ *
+ * The JSONL stores events in emission order:
+ *   user → tool_call* → tool_result* → (tool_call* → tool_result*)* → assistant
+ *
+ * We group consecutive tool_calls into the model message that requested them,
+ * and consecutive tool_results into the user message that delivers them back.
+ * Synthetic IDs are assigned sequentially so each FunctionCallPart/FunctionResultPart
+ * pair is consistent (Gemini requires matching IDs but doesn't validate them on replay).
+ */
+function reconstructMessages(entries: SessionEntry[]): Message[] {
+  const messages: Message[] = [];
+  let idCounter = 0;
+
+  // Pending batches accumulate until we know where they belong
+  let pendingCalls: FunctionCallPart[] = [];
+  let pendingResults: FunctionResultPart[] = [];
+
+  function flushCalls(): void {
+    if (pendingCalls.length === 0) return;
+    messages.push({ role: "model", parts: pendingCalls });
+    pendingCalls = [];
+  }
+
+  function flushResults(): void {
+    if (pendingResults.length === 0) return;
+    messages.push({ role: "user", parts: pendingResults });
+    pendingResults = [];
+  }
+
+  for (const entry of entries) {
+    if (entry.type === "user" && typeof entry.content === "string") {
+      // A new user turn — flush any dangling tool state first
+      flushCalls();
+      flushResults();
+      messages.push({ role: "user", parts: [{ type: "text", text: entry.content }] });
+    } else if (entry.type === "tool_call") {
+      // New tool_call batch: if there were results from a previous round, flush them first
+      flushResults();
+      const id = `resume-call-${++idCounter}`;
+      pendingCalls.push({
+        type: "function_call",
+        id,
+        name: String(entry.name ?? ""),
+        args: (entry.args as Record<string, unknown>) ?? {},
+      });
+    } else if (entry.type === "tool_result") {
+      // Results follow their calls — flush the pending call batch into a model message
+      flushCalls();
+      const id = `resume-call-${++idCounter}`;
+      pendingResults.push({
+        type: "function_result",
+        id,
+        name: String(entry.name ?? ""),
+        result: String(entry.result ?? ""),
+      });
+    } else if (entry.type === "assistant" && typeof entry.content === "string" && entry.content) {
+      flushCalls();
+      flushResults();
+      messages.push({ role: "model", parts: [{ type: "text", text: entry.content }] });
+    }
+  }
+
+  // Flush anything left over (e.g. session ended mid-turn)
+  flushCalls();
+  flushResults();
+
+  return messages;
 }
 
 export interface SessionEntry {
@@ -145,18 +216,10 @@ export class Session {
       .filter(Boolean)
       .map((line) => JSON.parse(line));
 
-    // Reconstruct conversation as alternating user/model messages.
-    // Tool calls/results are omitted — text content is sufficient for context.
-    const messages: Message[] = [];
-    for (const entry of entries) {
-      if (entry.type === "user" && typeof entry.content === "string") {
-        messages.push({ role: "user", parts: [{ type: "text", text: entry.content }] });
-      } else if (entry.type === "assistant" && typeof entry.content === "string" && entry.content) {
-        messages.push({ role: "model", parts: [{ type: "text", text: entry.content }] });
-      }
-    }
-
-    return { session: new Session(sessionId, cwd, logPath), messages };
+    return {
+      session: new Session(sessionId, cwd, logPath),
+      messages: reconstructMessages(entries),
+    };
   }
 
   async log(entry: Omit<SessionEntry, "timestamp">): Promise<void> {

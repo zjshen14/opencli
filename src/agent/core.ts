@@ -21,8 +21,9 @@ export class Agent {
     private tools: ToolRegistry,
     private skills: SkillRegistry,
     systemInstruction?: string,
+    maxHistoryMessages?: number,
   ) {
-    this.context = new ContextManager(systemInstruction);
+    this.context = new ContextManager(systemInstruction, maxHistoryMessages);
   }
 
   setSessionTmpDir(dir: string): void {

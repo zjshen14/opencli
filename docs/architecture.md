@@ -2,7 +2,7 @@
 
 ## Overview
 
-A general-purpose AI agent CLI powered by Google Gemini, similar to Claude Code and Gemini CLI. The agent can assist with software development tasks through natural language interaction with tool execution capabilities.
+A general-purpose AI agent CLI that supports Google Gemini and Anthropic Claude models, similar to Claude Code and Gemini CLI. The agent can assist with software development tasks through natural language interaction with tool execution capabilities.
 
 ## Design Principles
 
@@ -38,10 +38,11 @@ A general-purpose AI agent CLI powered by Google Gemini, similar to Claude Code 
 ┌───────▼──────┐ ┌────▼────────┐ ┌──▼──────────┐ ┌▼─────────────┐
 │ Model Layer  │ │ Tool System │ │ State Mgmt  │ │ Skill System │
 │              │ │             │ │             │ │              │
-│ - Gemini API │ │ - File ops  │ │ - Session   │ │ - Registry   │
-│ - Function   │ │ - Bash exec │ │ - History   │ │ - SKILL.md   │
-│   calling    │ │ - Search    │ │ - Config    │ │   loader     │
-│ - Streaming  │ │ - Web       │ │ - Cache     │ │ - Built-ins  │
+│ - LLMClient  │ │ - File ops  │ │ - Session   │ │ - Registry   │
+│   interface  │ │ - Bash exec │ │ - History   │ │ - SKILL.md   │
+│ - Gemini     │ │ - Search    │ │ - Config    │ │   loader     │
+│ - Anthropic  │ │             │ │ - Cache     │ │ - Built-ins  │
+│ - Factory    │ │             │ │             │ │              │
 └──────────────┘ └─────────────┘ └─────────────┘ └──────────────┘
 ```
 
@@ -82,7 +83,7 @@ src/cli/
 **Responsibilities:**
 - Main agent loop: user input → LLM → tool execution → response
 - Manage conversation context and history
-- Handle streaming responses from Gemini
+- Handle streaming responses from the active LLM provider
 - Coordinate tool execution (parallel/sequential)
 - Error handling and recovery
 
@@ -92,7 +93,7 @@ src/cli/
    ↓
 2. Build Context (history + tool results + system prompt)
    ↓
-3. Call Gemini API
+3. Call LLM provider (via LLMClient interface)
    ↓
 4. Stream Response
    ├─→ Text chunks → Display to user
@@ -108,9 +109,9 @@ src/cli/
 ```
 
 **Skill responsibilities in Agent Core:**
-- At session start: call `SkillRegistry.discover()`, inject skill catalog (name + description only, ~50–100 tokens/skill) into the system prompt so Gemini knows which skills are available
+- At session start: call `SkillRegistry.discover()`, inject skill catalog (name + description only, ~50–100 tokens/skill) into the system prompt so the model knows which skills are available
 - On user-explicit activation (`/skill-name`): receive pre-processed skill content from CLI Layer, inject into conversation context as a system event
-- On model-driven activation: handle `activate_skill` function calls from Gemini, load and inject the full `SKILL.md` body as a tool result
+- On model-driven activation: handle `activate_skill` function calls from the LLM, load and inject the full `SKILL.md` body as a tool result
 - Protect activated skill content from context pruning (tag with `<skill_content name="...">`)
 - Deduplicate: skip re-injection if a skill is already active in the session
 
@@ -123,36 +124,28 @@ src/agent/
   └── prompt.ts          # DEFAULT_SYSTEM_INSTRUCTION; loadSystemInstruction() respects OPENCLI_SYSTEM_MD
 ```
 
-### 3. Model Layer (Gemini Integration)
+### 3. Model Layer (LLM Provider Abstraction)
 
 **Responsibilities:**
-- Gemini API client wrapper
-- Function calling schema generation
-- Request/response formatting
-- Streaming support
-- Error handling and retries
-- Rate limiting
+- Provider-agnostic `LLMClient` interface consumed by Agent Core
+- Per-provider clients (`GeminiClient`, `AnthropicClient`) that translate internal types to wire formats
+- Generic tool definition schema (`ToolDefinition`) in plain JSONSchema — no provider dependencies
+- Provider selection via `createClient()` factory based on model name
+- Streaming support and exponential-backoff retries, per provider
+- API key resolution per provider
 
-**Gemini API Features Used:**
-- Model: `gemini-3.1-flash-lite-preview` (default) — override with `OPENCLI_MODEL` or `--model`
-- Function calling for tool execution
-- System instructions for agent behavior (swappable via `OPENCLI_SYSTEM_MD`)
-- Large context window (1M+ tokens)
-- Multi-turn conversations with `thoughtSignature` threading for thinking models
+**Provider selection:**
 
-**Function Calling vs Tools:**
+`createClient(model, config)` in `factory.ts` detects the provider by model name prefix:
+- `claude-*` → `AnthropicClient` (reads `ANTHROPIC_API_KEY` / `config.anthropicApiKey`)
+- anything else → `GeminiClient` (reads `GEMINI_API_KEY` / `config.apiKey`)
 
-Function calling is the JSON wire protocol between the app and Gemini — distinct from the tool implementations themselves. The Model Layer owns both directions of the translation:
+**Tool definitions vs tool execution:**
 
-1. **Outbound** (`schema.ts`): translates `Tool` definitions into Gemini's `function_declarations` format before sending the API request.
-2. **Inbound** (`gemini.ts`): parses `functionCall` objects out of Gemini's streaming response and surfaces them to the Agent Core.
-
-The Tool System owns execution and knows nothing about Gemini. The Model Layer owns the protocol and never touches the filesystem or runs commands. This boundary means swapping Gemini for another LLM only requires changes to the Model Layer.
-
-Example — the same `read` tool as seen from each layer:
+`schema.ts` converts `Tool` objects to `ToolDefinition` (provider-agnostic, plain JSONSchema). Each client translates `ToolDefinition[]` into its own wire format internally:
 
 ```typescript
-// Tool System: the implementation (src/tools/file/read.ts)
+// Tool System: implementation (src/tools/file/read.ts)
 const readTool: Tool = {
   name: "read",
   description: "Read file contents",
@@ -164,61 +157,47 @@ const readTool: Tool = {
     },
     required: ["file_path"]
   },
-  execute: async ({ file_path, offset }) => {
-    const content = await fs.readFile(file_path, "utf8");
-    return { success: true, output: content };
-  }
+  execute: async ({ file_path }) => { ... }
 };
 
-// Model Layer: translated to Gemini's function declaration format (src/model/schema.ts)
-{
-  function_declarations: [{
-    name: "read",
-    description: "Read file contents",
-    parameters: {
-      type: "OBJECT",
-      properties: {
-        file_path: { type: "STRING" },
-        offset:    { type: "NUMBER" }
-      },
-      required: ["file_path"]
-    }
-  }]
-}
+// schema.ts → ToolDefinition (passed to LLMClient.stream)
+{ name: "read", description: "Read file contents", parameters: { type: "object", ... } }
 
-// Gemini response — parsed by Model Layer, dispatched by Agent Core
-{
-  "functionCall": {
-    "name": "read",
-    "args": { "file_path": "package.json" }
-  }
-}
+// GeminiClient translates internally: type → uppercase, wraps in functionDeclarations
+// AnthropicClient translates internally: used directly as input_schema (JSONSchema compatible)
 ```
 
-**Skill-related function declaration:**
-
-The Model Layer exposes `activate_skill` as a Gemini function declaration alongside tool declarations, enabling model-driven skill activation:
+The `activate_skill` definition is expressed the same way:
 
 ```typescript
-{
+// src/model/schema.ts
+export const activateSkillDefinition: ToolDefinition = {
   name: "activate_skill",
   description: "Activate a skill to load its instructions into context",
   parameters: {
-    type: "OBJECT",
-    properties: {
-      name: { type: "STRING", description: "Skill name to activate" }
-    },
+    type: "object",
+    properties: { name: { type: "string", description: "Skill name to activate" } },
     required: ["name"]
   }
-}
+};
 ```
+
+**Provider-specific notes:**
+
+- **Gemini**: types uppercased (`"object"` → `"OBJECT"`); `thoughtSignature` threaded through thinking model calls; uses `functionCall`/`functionResponse` message parts.
+- **Anthropic**: `role: "model"` translated to `"assistant"`; tool calls use `tool_use`/`tool_result` content blocks; `thoughtSignature` ignored.
+
+The Tool System owns execution and knows nothing about any provider SDK. Swapping or adding a provider requires only adding a new client in `src/model/` and a branch in `factory.ts`.
 
 **Key Files:**
 ```
 src/model/
-  ├── gemini.ts          # Gemini client, streaming, exponential backoff
-  ├── schema.ts          # Function calling schemas + activate_skill declaration
-  └── types.ts           # Shared types: Message, StreamEvent, FunctionCallPart, thoughtSignature
+  ├── client.ts          # LLMClient interface — the provider plug point
+  ├── gemini.ts          # GeminiClient: Gemini wire format, thoughtSignature, backoff
+  ├── anthropic.ts       # AnthropicClient: Anthropic wire format, tool_use blocks, backoff
+  ├── factory.ts         # createClient() — provider detection + key resolution
+  ├── schema.ts          # toolToDefinition() + activateSkillDefinition (generic JSONSchema)
+  └── types.ts           # Shared types: Message, StreamEvent, ToolDefinition, thoughtSignature
 ```
 
 ### 4. Tool System
@@ -353,7 +332,7 @@ Each JSONL line is a timestamped entry: `session_start`, `user`, `assistant`, `t
 ```
 src/state/
   ├── session.ts         # Session: create, list, loadMessages, log, tmpDir
-  └── config.ts          # Config load/save, resolveApiKey, exports AGENT_DIR
+  └── config.ts          # Config load/save, exports AGENT_DIR and Config interface
 ```
 
 ## Data Flow
@@ -366,9 +345,9 @@ src/state/
 
 3. **Agent Core**:
    - Build context with conversation history
-   - Send to Gemini with available tools
+   - Send to LLM provider (via `LLMClient`) with available tool definitions
 
-4. **Gemini Response 1** (streaming):
+4. **LLM Response 1** (streaming):
    ```
    Text: "I'll read the package.json file first"
    Function Call: read({ file_path: "package.json" })
@@ -378,9 +357,9 @@ src/state/
    - Execute `read` tool
    - Return file contents
 
-6. **Agent Core**: Send tool result back to Gemini
+6. **Agent Core**: Send tool result back to LLM provider
 
-7. **Gemini Response 2**:
+7. **LLM Response 2**:
    ```
    Text: "I can see the current version is 1.5.0. I'll update it to 2.0.0"
    Function Call: edit({
@@ -394,7 +373,7 @@ src/state/
    - Execute `edit` tool
    - Return success
 
-9. **Gemini Response 3**:
+9. **LLM Response 3**:
    ```
    Text: "Updated package.json version to 2.0.0"
    ```
@@ -416,7 +395,7 @@ src/state/
    - Injects skill content into conversation context tagged as `<skill_content name="review">`
    - Continues normal agent loop with enriched context
 
-4. **Gemini**: Receives skill instructions + user message, uses `read` and `grep` tools to execute the review
+4. **LLM provider**: Receives skill instructions + user message, uses `read` and `grep` tools to execute the review
 
 5. **CLI Layer**: Streams and renders the review response
 
@@ -470,6 +449,7 @@ const result = await tools.execute("edit", {
 ```json
 {
   "apiKey": "...",
+  "anthropicApiKey": "...",
   "model": "gemini-3.1-flash-lite-preview",
   "maxTokens": 8192,
   "temperature": 0.7,
@@ -479,9 +459,10 @@ const result = await tools.execute("edit", {
 }
 ```
 
-**Environment Variables**:
-- `GEMINI_API_KEY` — API key (takes precedence over config file)
-- `OPENCLI_MODEL` — Model override (takes precedence over `--model` flag and config)
+**Environment Variables** (take precedence over config file):
+- `GEMINI_API_KEY` — Gemini API key
+- `ANTHROPIC_API_KEY` — Anthropic API key
+- `OPENCLI_MODEL` — Model override (beats `--model` flag and config)
 - `OPENCLI_SYSTEM_MD` — Path to a Markdown file that replaces the default system instruction
 
 ## Security Considerations
@@ -532,8 +513,8 @@ const result = await tools.execute("edit", {
 
 - **Unit tests** colocated with source (`context.ts` → `context.test.ts`)
 - **Real filesystem** for file tool tests (no `fs` mocking — mocks hide real bugs)
-- **Mock at boundaries**: Gemini client and `SkillRegistry` are mocked; internal collaborators (`ContextManager`, `ToolRegistry`) are used directly
-- **Coverage threshold**: 70% lines/statements/functions/branches via vitest v8; config files, type-only files, and `agent/core.ts` (requires live Gemini) are excluded
+- **Mock at boundaries**: LLM clients and `SkillRegistry` are mocked; internal collaborators (`ContextManager`, `ToolRegistry`) are used directly
+- **Coverage threshold**: 70% lines/statements/functions/branches via vitest v8; config files, type-only files, and `agent/core.ts` (requires live LLM) are excluded
 
 ## Deployment & Distribution
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-OpenCLI — an open-source AI agent CLI powered by Google Gemini, modeled after Claude Code. The implementation is a working prototype in TypeScript/Node.js (ESM, Node 20+).
+OpenCLI — an open-source AI agent CLI that supports Google Gemini and Anthropic Claude models, modeled after Claude Code. The implementation is a working prototype in TypeScript/Node.js (ESM, Node 20+).
 
 ## Commands
 
@@ -21,7 +21,7 @@ npm test                  # Vitest
 npm run test:single       # Vitest verbose (single run)
 ```
 
-API key is loaded from `.env` (`GEMINI_API_KEY`). Default model: `gemini-3.1-flash-lite-preview`.
+API keys are loaded from `.env` (`GEMINI_API_KEY` for Gemini models, `ANTHROPIC_API_KEY` for Claude models). Default model: `gemini-3.1-flash-lite-preview`.
 
 ## Source Structure
 
@@ -38,9 +38,12 @@ src/
     context.ts      # Conversation history, skill content injection, context pruning
     prompt.ts       # DEFAULT_SYSTEM_INSTRUCTION template + loadSystemInstruction() (OPENCLI_SYSTEM_MD)
   model/
-    types.ts        # Shared types: Message, StreamEvent, ToolResult, thoughtSignature
-    gemini.ts       # Gemini streaming client, exponential backoff retry
-    schema.ts       # Tool → FunctionDeclaration translator + activate_skill declaration
+    types.ts        # Shared types: Message, StreamEvent, ToolDefinition, ToolResult, thoughtSignature
+    client.ts       # LLMClient interface — the provider plug point
+    gemini.ts       # GeminiClient implements LLMClient; Gemini-specific schema conversion internal
+    anthropic.ts    # AnthropicClient implements LLMClient; translates role/tool formats internally
+    factory.ts      # createClient(model, config) — picks provider by model name prefix
+    schema.ts       # Generic toolToDefinition() + activateSkillDefinition (plain JSONSchema, no provider deps)
   tools/
     base.ts         # Tool interface + JSONSchema type
     registry.ts     # ToolRegistry: register, execute, list
@@ -52,24 +55,24 @@ src/
     loader.ts       # Parse SKILL.md frontmatter, !{cmd} preprocessing, $ARGUMENTS substitution
     builtin/        # review, commit, explain, debug, test
   state/
-    config.ts       # ~/.opencli/config.json load/save, API key resolution; exports AGENT_DIR
+    config.ts       # ~/.opencli/config.json load/save; exports AGENT_DIR, Config (incl. anthropicApiKey)
     session.ts      # JSONL session logs at ~/.opencli/projects/<cwd>/; create, list, resume
 ```
 
 ## Architecture
 
-**Data flow**: User input → CLI Layer → Agent Core → Gemini API (streaming) → Tool/Skill execution → feed results back → repeat until final text response.
+**Data flow**: User input → CLI Layer → Agent Core → LLM provider (streaming) → Tool/Skill execution → feed results back → repeat until final text response.
 
 **Agentic loop** (`src/agent/core.ts`):
 1. Add user message to context
-2. Stream from Gemini with all tool + `activate_skill` function declarations
+2. Stream from the active `LLMClient` with all tool + `activate_skill` definitions
 3. Collect text chunks (display immediately) and function calls
 4. Execute all tool calls in parallel (`Promise.all`); skill activations inject content into context
 5. Feed results back as a user message; repeat from step 2 until no function calls
 
-**Function calling vs tools**: The Model Layer owns the Gemini API wire protocol (translating `Tool` → `function_declarations`, parsing `functionCall` responses). The Tool System owns execution and knows nothing about Gemini. Swapping the LLM only requires changes to the Model Layer.
+**Provider abstraction**: `LLMClient` (in `model/client.ts`) is the single interface the Agent Core depends on. `schema.ts` converts `Tool` objects to generic `ToolDefinition` (plain JSONSchema). Each provider client translates `ToolDefinition[]` and `Message[]` into its own wire format internally — Gemini converts types to uppercase and uses `functionCall`/`functionResponse`; Anthropic maps `role: "model"` → `"assistant"` and uses `tool_use`/`tool_result` blocks. The provider is selected by `createClient()` in `factory.ts` based on model name prefix (`claude-` → Anthropic, otherwise Gemini).
 
-**Thinking models + `thoughtSignature`**: Gemini thinking models (e.g. `gemini-3.1-*`) require `thoughtSignature` to be captured from each `functionCall` part and echoed back in the corresponding `functionResponse`. This is threaded through `FunctionCallPart` → `FunctionResultPart` → the API request in `gemini.ts`.
+**Thinking models + `thoughtSignature`**: Gemini thinking models (e.g. `gemini-3.1-*`) require `thoughtSignature` to be captured from each `functionCall` part and echoed back in the corresponding `functionResponse`. This is threaded through `FunctionCallPart` → `FunctionResultPart` → the API request in `gemini.ts`. The Anthropic client ignores this field.
 
 **Skill system**: Skills are `SKILL.md` files (YAML frontmatter + Markdown instructions) injected into the agent context on activation. They follow the [Agent Skills open standard](https://agentskills.io). Discovery priority: project `.opencli/skills/` → project `.agents/skills/` → user `~/.opencli/skills/` → bundled built-ins. Invoke with `/skill-name [args]` or the model calls `activate_skill`.
 
@@ -88,14 +91,14 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 
 **Full engineering practices are in [`docs/engineering-practices.md`](docs/engineering-practices.md).** Check it before writing code. Key rules:
 - Colocate tests next to source (`context.ts` → `context.test.ts`)
-- Each layer owns its concern — `model/` never touches filesystem, `tools/` never imports `@google/genai`
+- Each layer owns its concern — `model/` never touches filesystem, `tools/` never imports provider SDKs
 - No circular imports: `cli → agent → model/tools/skills/state`
 - Mock at system boundaries only; use real filesystem for file tool tests
 - Document non-obvious decisions in `docs/`
 
 ## Configuration
 
-- `.env` — `GEMINI_API_KEY`, `OPENCLI_MODEL`
+- `.env` — `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENCLI_MODEL`
 - `OPENCLI_SYSTEM_MD` — path to a Markdown file that overrides the default system instruction (for prompt hill-climbing)
 - `~/.opencli/config.json` — persisted user config (model, temperature, historySize, etc.)
 - `~/.opencli/projects/<encoded-cwd>/<session-id>.jsonl` — session conversation logs

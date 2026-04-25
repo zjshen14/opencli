@@ -17,7 +17,7 @@ A missing test file is immediately visible. Moving a module moves its test autom
 
 **Use the filesystem for file tool tests.** The `read`, `write`, `edit`, `glob`, `grep` tools are tested against a real `tmpdir` created in `beforeEach` and cleaned up in `afterEach`. No mocking of `fs` — mocks hide real bugs.
 
-**Mock at boundaries.** The Gemini API client and `SkillRegistry` are mocked in agent tests because they cross a system boundary. Internal collaborators (e.g. `ContextManager`, `ToolRegistry`) are used directly.
+**Mock at boundaries.** LLM clients (`GeminiClient`, `AnthropicClient`) and `SkillRegistry` are mocked in agent tests because they cross a system boundary. Internal collaborators (e.g. `ContextManager`, `ToolRegistry`) are used directly.
 
 **Run before every commit:**
 ```bash
@@ -41,9 +41,9 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 ## Code Organisation
 
 **Each layer owns its concern exclusively:**
-- Model Layer (`src/model/`) — Gemini API wire protocol only. Never touches the filesystem.
-- Tool System (`src/tools/`) — tool execution only. Never imports from `@google/genai`.
-- Agent Core (`src/agent/`) — orchestration only. Never calls Gemini directly.
+- Model Layer (`src/model/`) — LLM provider abstraction only. Never touches the filesystem. Provider SDKs (`@google/genai`, `@anthropic-ai/sdk`) are imported only inside the respective client files.
+- Tool System (`src/tools/`) — tool execution only. Never imports provider SDKs.
+- Agent Core (`src/agent/`) — orchestration only. Depends on `LLMClient` interface, never a concrete provider.
 - Skill System (`src/skills/`) — SKILL.md parsing and injection only.
 
 **No circular imports.** Dependency direction: `cli → agent → model/tools/skills/state`. Nothing in `model/` imports from `agent/`.
@@ -101,4 +101,4 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 **No path traversal.** File tools use `resolve()` to normalise paths. Don't add file tools that accept raw user-supplied paths without resolving them first.
 
-**Sensitive config** (API key) is read from environment variables first, config file second. Never logged.
+**Sensitive config** (API keys) is read from environment variables first (`GEMINI_API_KEY`, `ANTHROPIC_API_KEY`), config file second. Never logged.

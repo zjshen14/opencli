@@ -1,5 +1,7 @@
 # API Choice and Token Efficiency
 
+> This document covers the Gemini provider specifically (`src/model/gemini.ts`). The Anthropic client uses the standard `messages.stream()` API which is stateless by design; equivalent token efficiency considerations for Anthropic are tracked separately.
+
 ## API Choice: `generateContent` vs Interactions API
 
 ### Current: `generateContent` (stateless)

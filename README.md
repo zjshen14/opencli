@@ -1,6 +1,6 @@
-# Gemini Agent CLI
+# OpenCLI
 
-A lightweight, unofficial CLI agent powered by Google Gemini. Interact via natural-language prompts to perform developer tasks (code review, explanations, debugging, testing, and file operations) with explicit, auditable tool execution and safety checks.
+A lightweight, open-source AI agent CLI that supports Google Gemini and Anthropic Claude models. Interact via natural-language prompts to perform developer tasks (code review, explanations, debugging, testing, and file operations) with explicit, auditable tool execution and safety checks.
 
 > **Status**: Early prototype. Architecture spec in [`docs/architecture.md`](docs/architecture.md).
 
@@ -12,16 +12,23 @@ npm install
 
 ## Setup
 
-Set your Gemini API key in `.env`:
+**Gemini** — set your API key in `.env`:
 
 ```bash
 echo "GEMINI_API_KEY=your-key-here" > .env
 ```
 
-Or configure it permanently:
+**Claude (Anthropic)** — set your API key in `.env`:
 
 ```bash
-npm run dev -- config --api-key your-key-here
+echo "ANTHROPIC_API_KEY=your-key-here" > .env
+```
+
+Or configure permanently:
+
+```bash
+npm run dev -- config --api-key your-gemini-key
+npm run dev -- config --anthropic-api-key your-anthropic-key
 ```
 
 ## Usage
@@ -36,9 +43,18 @@ npm run dev
 npm run dev run "explain src/agent/core.ts"
 ```
 
-**Change model:**
+**Select a model:**
 ```bash
-npm run dev -- config --model gemini-3.1-pro-preview
+# Gemini (default)
+npm run dev -- chat --model gemini-3.1-pro-preview
+
+# Claude
+npm run dev -- chat --model claude-sonnet-4-6
+```
+
+**Set default model:**
+```bash
+npm run dev -- config --model claude-sonnet-4-6
 ```
 
 ## Skills
@@ -59,12 +75,12 @@ Invoke with `/skill-name [args]` or let the model auto-activate based on your re
 
 Project-scoped (this repo only):
 ```bash
-mkdir -p .gemini-agent/skills/my-skill
+mkdir -p .opencli/skills/my-skill
 ```
 
 User-global (all projects):
 ```bash
-mkdir -p ~/.gemini-agent/skills/my-skill
+mkdir -p ~/.opencli/skills/my-skill
 ```
 
 Create `SKILL.md` in the directory:
@@ -110,23 +126,31 @@ npm test             # Vitest
 
 ## Configuration
 
-Config is stored at `~/.gemini-agent/config.json`.
+Config is stored at `~/.opencli/config.json`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `model` | `gemini-3.1-flash-lite-preview` | Gemini model ID |
+| `model` | `gemini-3.1-flash-lite-preview` | Model ID (Gemini or Claude) |
+| `apiKey` | — | Gemini API key (prefer env var) |
+| `anthropicApiKey` | — | Anthropic API key (prefer env var) |
 | `temperature` | `0.7` | Generation temperature |
 | `maxTokens` | `8192` | Max output tokens |
 | `historySize` | `50` | Messages to keep in context |
 
-Environment variables take precedence: `GEMINI_API_KEY`, `GEMINI_MODEL`.
+Environment variables take precedence over config file:
+
+| Variable | Description |
+|----------|-------------|
+| `GEMINI_API_KEY` | Gemini API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `OPENCLI_MODEL` | Model override (beats `--model` and config) |
 
 ## Architecture
 
 Five-layer design — see [`docs/architecture.md`](docs/architecture.md) for the full spec.
 
 ```
-CLI Layer  →  Agent Core  →  Gemini API
+CLI Layer  →  Agent Core  →  LLM Provider (Gemini / Claude)
                   ↓
           Tool System  |  Skill System  |  State
 ```

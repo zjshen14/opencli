@@ -1,4 +1,4 @@
-# Architecture Design - Gemini Agent CLI
+# Architecture Design - OpenCLI
 
 ## Overview
 
@@ -120,7 +120,7 @@ src/agent/
   ├── core.ts            # Main agent loop
   ├── context.ts         # Context management, ContextManager class
   ├── executor.ts        # Tool execution coordinator
-  └── prompt.ts          # DEFAULT_SYSTEM_INSTRUCTION; loadSystemInstruction() respects GEMINI_SYSTEM_MD
+  └── prompt.ts          # DEFAULT_SYSTEM_INSTRUCTION; loadSystemInstruction() respects OPENCLI_SYSTEM_MD
 ```
 
 ### 3. Model Layer (Gemini Integration)
@@ -134,9 +134,9 @@ src/agent/
 - Rate limiting
 
 **Gemini API Features Used:**
-- Model: `gemini-3.1-flash-lite-preview` (default) — override with `GEMINI_MODEL` or `--model`
+- Model: `gemini-3.1-flash-lite-preview` (default) — override with `OPENCLI_MODEL` or `--model`
 - Function calling for tool execution
-- System instructions for agent behavior (swappable via `GEMINI_SYSTEM_MD`)
+- System instructions for agent behavior (swappable via `OPENCLI_SYSTEM_MD`)
 - Large context window (1M+ tokens)
 - Multi-turn conversations with `thoughtSignature` threading for thinking models
 
@@ -290,8 +290,8 @@ Current branch info:
 
 **Directory structure (scoped, earlier takes precedence):**
 ```
-~/.gemini-agent/skills/<name>/SKILL.md      # user-global
-<project>/.gemini-agent/skills/<name>/SKILL.md  # project-scoped
+~/.opencli/skills/<name>/SKILL.md      # user-global
+<project>/.opencli/skills/<name>/SKILL.md  # project-scoped
 <project>/.agents/skills/<name>/SKILL.md    # cross-client convention (agentskills.io)
 ```
 
@@ -335,7 +335,7 @@ src/skills/
 
 **Session storage layout** (mirrors Claude Code's pattern — never written inside the project):
 ```
-~/.gemini-agent/
+~/.opencli/
   config.json                                    # persisted user config
   projects/
     -Users-alice-myproject/                      # encoded cwd (/ → -)
@@ -347,7 +347,7 @@ Each JSONL line is a timestamped entry: `session_start`, `user`, `assistant`, `t
 
 **Session resume** — `Session.loadMessages(id | "latest")` reconstructs `Message[]` from the log, skipping tool call entries (text content is sufficient for context). Pass `"latest"` to resume the most recent session that has actual conversation content.
 
-**Scratch directory** — `session.tmpDir` resolves to `<cwd>/.gemini-agent/tmp/<session-id>/`. Agent-generated temporary files land here, scoped to the session, and never pollute the project root.
+**Scratch directory** — `session.tmpDir` resolves to `<cwd>/.opencli/tmp/<session-id>/`. Agent-generated temporary files land here, scoped to the session, and never pollute the project root.
 
 **Key Files:**
 ```
@@ -466,7 +466,7 @@ const result = await tools.execute("edit", {
 
 ## Configuration
 
-**User Configuration** (`~/.gemini-agent/config.json`):
+**User Configuration** (`~/.opencli/config.json`):
 ```json
 {
   "apiKey": "...",
@@ -481,8 +481,8 @@ const result = await tools.execute("edit", {
 
 **Environment Variables**:
 - `GEMINI_API_KEY` — API key (takes precedence over config file)
-- `GEMINI_MODEL` — Model override (takes precedence over `--model` flag and config)
-- `GEMINI_SYSTEM_MD` — Path to a Markdown file that replaces the default system instruction
+- `OPENCLI_MODEL` — Model override (takes precedence over `--model` flag and config)
+- `OPENCLI_SYSTEM_MD` — Path to a Markdown file that replaces the default system instruction
 
 ## Security Considerations
 

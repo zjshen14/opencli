@@ -5,19 +5,19 @@ import { tmpdir } from "node:os";
 import { loadSystemInstruction, DEFAULT_SYSTEM_INSTRUCTION } from "./prompt.js";
 
 afterEach(() => {
-  delete process.env.GEMINI_SYSTEM_MD;
+  delete process.env.OPENCLI_SYSTEM_MD;
 });
 
 describe("loadSystemInstruction", () => {
-  it("returns DEFAULT_SYSTEM_INSTRUCTION when GEMINI_SYSTEM_MD is not set", async () => {
+  it("returns DEFAULT_SYSTEM_INSTRUCTION when OPENCLI_SYSTEM_MD is not set", async () => {
     const result = await loadSystemInstruction();
     expect(result).toBe(DEFAULT_SYSTEM_INSTRUCTION);
   });
 
-  it("loads from file when GEMINI_SYSTEM_MD is set", async () => {
+  it("loads from file when OPENCLI_SYSTEM_MD is set", async () => {
     const path = join(tmpdir(), `prompt-test-${Date.now()}.md`);
     await writeFile(path, "Custom prompt for testing.");
-    process.env.GEMINI_SYSTEM_MD = path;
+    process.env.OPENCLI_SYSTEM_MD = path;
 
     const result = await loadSystemInstruction();
     expect(result).toBe("Custom prompt for testing.");
@@ -25,8 +25,8 @@ describe("loadSystemInstruction", () => {
     await rm(path);
   });
 
-  it("throws when GEMINI_SYSTEM_MD points to a missing file", async () => {
-    process.env.GEMINI_SYSTEM_MD = "/nonexistent/path/prompt.md";
+  it("throws when OPENCLI_SYSTEM_MD points to a missing file", async () => {
+    process.env.OPENCLI_SYSTEM_MD = "/nonexistent/path/prompt.md";
     await expect(loadSystemInstruction()).rejects.toThrow();
   });
 });

@@ -12,8 +12,8 @@ import { printError, printInfo } from "./renderer.js";
 const program = new Command();
 
 program
-  .name("gemini-agent")
-  .description("A general-purpose AI agent CLI powered by Google Gemini")
+  .name("opencli")
+  .description("An open-source AI agent CLI powered by Google Gemini")
   .version("0.1.0");
 
 // Default command: start interactive REPL
@@ -98,7 +98,7 @@ async function runSingle(prompt: string, modelOverride?: string): Promise<void> 
 async function createAgent(modelOverride?: string) {
   const config = await loadConfig();
   const apiKey = resolveApiKey(config);
-  const model = process.env.GEMINI_MODEL ?? modelOverride ?? config.model;
+  const model = process.env.OPENCLI_MODEL ?? modelOverride ?? config.model;
 
   const gemini = new GeminiClient(apiKey, model);
   const tools = createDefaultRegistry();

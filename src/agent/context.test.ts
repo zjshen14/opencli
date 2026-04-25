@@ -23,14 +23,14 @@ describe("ContextManager", () => {
   it("uses DEFAULT_SYSTEM_INSTRUCTION when no template is passed", () => {
     const ctx = new ContextManager();
     const instruction = ctx.getSystemInstruction();
-    expect(instruction).toContain("Gemini Agent");
+    expect(instruction).toContain("OpenCLI");
     expect(instruction).toContain(process.cwd());
   });
 
   it("uses the provided custom instruction template", () => {
     const ctx = new ContextManager("Custom prompt. CWD={CWD}\n{TOOL_CATALOG}");
     expect(ctx.getSystemInstruction()).toContain("Custom prompt.");
-    expect(ctx.getSystemInstruction()).not.toContain("Gemini Agent");
+    expect(ctx.getSystemInstruction()).not.toContain("OpenCLI");
   });
 
   it("substitutes {CWD} in the instruction", () => {
@@ -194,7 +194,7 @@ describe("DEFAULT_SYSTEM_INSTRUCTION", () => {
   });
 
   it("defines the agent persona", () => {
-    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("Gemini Agent");
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("OpenCLI");
   });
 
   it("includes all major sections", () => {

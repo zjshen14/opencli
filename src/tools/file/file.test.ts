@@ -11,7 +11,7 @@ import { grepTool } from "./grep.js";
 let tmpDir: string;
 
 beforeEach(async () => {
-  tmpDir = join(tmpdir(), `gemini-agent-test-${Date.now()}`);
+  tmpDir = join(tmpdir(), `opencli-test-${Date.now()}`);
   await mkdir(tmpDir, { recursive: true });
 });
 

@@ -92,7 +92,7 @@ The current CLI (`src/cli/`) is a minimal readline REPL:
 ### Tier 1 — High impact, achievable within current readline stack
 
 1. **Spinner during model response** — `ora` is already a dependency; show "Thinking…" while waiting for the first token, stop on first chunk
-2. **Persistent input history** — write readline history to `~/.gemini-agent/history`; Up/Down across sessions
+2. **Persistent input history** — write readline history to `~/.opencli/history`; Up/Down across sessions
 3. **Inline diff for `edit` tool results** — render colored `+`/`-` lines instead of truncated string
 4. **Tool compact mode** — `read`/`glob`/`grep` collapse to `← read: path/to/file (42 lines)` one-liners
 5. **`/compact` command** — summarize conversation history with a model call; reduces token usage for long sessions
@@ -100,7 +100,7 @@ The current CLI (`src/cli/`) is a minimal readline REPL:
 
 ### Tier 2 — Medium impact, meaningful differentiation
 
-7. **Session persistence + `/resume`** — serialize conversation to `~/.gemini-agent/sessions/<project_hash>.json`; resume with `--continue` flag or `/resume`
+7. **Session persistence + `/resume`** — serialize conversation to `~/.opencli/sessions/<project_hash>.json`; resume with `--continue` flag or `/resume`
 8. **`/context` command** — display token count estimate, context window %, suggestion to `/compact`
 9. **`@file` mentions** — parse `@path` in user prompt, auto-read and inline content before sending
 10. **`/rewind`** — pop last turn from history; simple version (no Git snapshot needed)

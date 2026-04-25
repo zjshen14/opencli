@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-export const AGENT_DIR = join(homedir(), ".gemini-agent");
+export const AGENT_DIR = join(homedir(), ".opencli");
 const CONFIG_FILE = join(AGENT_DIR, "config.json");
 
 export interface Config {
@@ -44,7 +44,7 @@ export function resolveApiKey(config: Config): string {
   const key = process.env.GEMINI_API_KEY ?? config.apiKey;
   if (!key) {
     throw new Error(
-      "No API key found. Set GEMINI_API_KEY environment variable or run: gemini-agent config --api-key <key>",
+      "No API key found. Set GEMINI_API_KEY environment variable or run: opencli config --api-key <key>",
     );
   }
   return key;

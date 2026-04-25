@@ -8,9 +8,9 @@ import { loadSkillFile, type SkillMeta } from "./loader.js";
 function getSkillDirs(projectRoot: string): string[] {
   const builtinDir = join(fileURLToPath(import.meta.url), "../../skills/builtin");
   return [
-    join(projectRoot, ".gemini-agent", "skills"), // project-scoped
+    join(projectRoot, ".opencli", "skills"), // project-scoped
     join(projectRoot, ".agents", "skills"), // cross-client standard
-    join(homedir(), ".gemini-agent", "skills"), // user-global
+    join(homedir(), ".opencli", "skills"), // user-global
     resolve(builtinDir), // bundled built-ins
   ];
 }

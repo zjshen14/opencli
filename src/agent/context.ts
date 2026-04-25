@@ -34,7 +34,7 @@ export class ContextManager {
         ? `## Available Tools\n${tools.map((t) => `- ${t.name}: ${t.description ?? ""}`).join("\n")}`
         : "";
 
-    const tmpDir = this.sessionTmpDir ?? `${process.cwd()}/.gemini-agent/tmp`;
+    const tmpDir = this.sessionTmpDir ?? `${process.cwd()}/.opencli/tmp`;
     const rendered = this.systemInstructionTemplate
       .replace("{CWD}", process.cwd())
       .replace("{SESSION_TMP}", tmpDir)

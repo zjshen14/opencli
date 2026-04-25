@@ -155,7 +155,7 @@ export class Session {
 
   /** Scratch directory for agent-generated temporary files, scoped to this session. */
   get tmpDir(): string {
-    return join(this.cwd, ".gemini-agent", "tmp", this.id);
+    return join(this.cwd, ".opencli", "tmp", this.id);
   }
 
   static async create(cwd: string = process.cwd()): Promise<Session> {

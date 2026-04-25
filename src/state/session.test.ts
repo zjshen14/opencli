@@ -31,7 +31,7 @@ describe("Session.create", () => {
 
   it("exposes tmpDir scoped to session id", async () => {
     const session = await Session.create(CWD);
-    expect(session.tmpDir).toBe(join(CWD, ".gemini-agent", "tmp", session.id));
+    expect(session.tmpDir).toBe(join(CWD, ".opencli", "tmp", session.id));
   });
 });
 

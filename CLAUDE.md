@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-An unofficial Gemini Agent CLI — a general-purpose AI agent CLI powered by Google Gemini, modeled after Claude Code. The implementation is a working prototype in TypeScript/Node.js (ESM, Node 20+).
+OpenCLI — an open-source AI agent CLI powered by Google Gemini, modeled after Claude Code. The implementation is a working prototype in TypeScript/Node.js (ESM, Node 20+).
 
 ## Commands
 
@@ -36,7 +36,7 @@ src/
     core.ts         # Agentic loop: stream → collect function calls → execute → feed back
     executor.ts     # Parallel tool execution + skill activation dispatch
     context.ts      # Conversation history, skill content injection, context pruning
-    prompt.ts       # DEFAULT_SYSTEM_INSTRUCTION template + loadSystemInstruction() (GEMINI_SYSTEM_MD)
+    prompt.ts       # DEFAULT_SYSTEM_INSTRUCTION template + loadSystemInstruction() (OPENCLI_SYSTEM_MD)
   model/
     types.ts        # Shared types: Message, StreamEvent, ToolResult, thoughtSignature
     gemini.ts       # Gemini streaming client, exponential backoff retry
@@ -52,8 +52,8 @@ src/
     loader.ts       # Parse SKILL.md frontmatter, !{cmd} preprocessing, $ARGUMENTS substitution
     builtin/        # review, commit, explain, debug, test
   state/
-    config.ts       # ~/.gemini-agent/config.json load/save, API key resolution; exports AGENT_DIR
-    session.ts      # JSONL session logs at ~/.gemini-agent/projects/<cwd>/; create, list, resume
+    config.ts       # ~/.opencli/config.json load/save, API key resolution; exports AGENT_DIR
+    session.ts      # JSONL session logs at ~/.opencli/projects/<cwd>/; create, list, resume
 ```
 
 ## Architecture
@@ -71,7 +71,7 @@ src/
 
 **Thinking models + `thoughtSignature`**: Gemini thinking models (e.g. `gemini-3.1-*`) require `thoughtSignature` to be captured from each `functionCall` part and echoed back in the corresponding `functionResponse`. This is threaded through `FunctionCallPart` → `FunctionResultPart` → the API request in `gemini.ts`.
 
-**Skill system**: Skills are `SKILL.md` files (YAML frontmatter + Markdown instructions) injected into the agent context on activation. They follow the [Agent Skills open standard](https://agentskills.io). Discovery priority: project `.gemini-agent/skills/` → project `.agents/skills/` → user `~/.gemini-agent/skills/` → bundled built-ins. Invoke with `/skill-name [args]` or the model calls `activate_skill`.
+**Skill system**: Skills are `SKILL.md` files (YAML frontmatter + Markdown instructions) injected into the agent context on activation. They follow the [Agent Skills open standard](https://agentskills.io). Discovery priority: project `.opencli/skills/` → project `.agents/skills/` → user `~/.opencli/skills/` → bundled built-ins. Invoke with `/skill-name [args]` or the model calls `activate_skill`.
 
 ## Key Conventions
 
@@ -95,10 +95,10 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 
 ## Configuration
 
-- `.env` — `GEMINI_API_KEY`, `GEMINI_MODEL`
-- `GEMINI_SYSTEM_MD` — path to a Markdown file that overrides the default system instruction (for prompt hill-climbing)
-- `~/.gemini-agent/config.json` — persisted user config (model, temperature, historySize, etc.)
-- `~/.gemini-agent/projects/<encoded-cwd>/<session-id>.jsonl` — session conversation logs
+- `.env` — `GEMINI_API_KEY`, `OPENCLI_MODEL`
+- `OPENCLI_SYSTEM_MD` — path to a Markdown file that overrides the default system instruction (for prompt hill-climbing)
+- `~/.opencli/config.json` — persisted user config (model, temperature, historySize, etc.)
+- `~/.opencli/projects/<encoded-cwd>/<session-id>.jsonl` — session conversation logs
 - `.gitignore` excludes `.env` and `dist/`
 
 ## Session Management
@@ -106,9 +106,9 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 Sessions are JSONL logs stored globally (not in the project directory):
 
 ```bash
-gemini-agent sessions              # list sessions for current directory
-gemini-agent chat --resume         # resume most recent session with conversation content
-gemini-agent chat --session <id>   # resume a specific session by ID
+opencli sessions              # list sessions for current directory
+opencli chat --resume         # resume most recent session with conversation content
+opencli chat --session <id>   # resume a specific session by ID
 ```
 
 Session ID format: `YYYY-MM-DDTHH-mm-ss` (human-readable, lexicographically sortable).

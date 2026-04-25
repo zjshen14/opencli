@@ -30,7 +30,7 @@ export async function runRepl(
   skills: SkillRegistry,
   resumeSessionId?: string,
 ): Promise<void> {
-  printInfo(`Gemini Agent — type /help for commands, Ctrl+C to exit\n`);
+  printInfo(`OpenCLI — type /help for commands, Ctrl+C to exit\n`);
 
   let session: Session;
   if (resumeSessionId) {

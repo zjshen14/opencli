@@ -6,13 +6,13 @@
  *   {SESSION_TMP}  — session-scoped scratch directory
  *   {TOOL_CATALOG} — injected list of available tools
  *
- * To use a custom instruction without recompiling, set GEMINI_SYSTEM_MD to a
+ * To use a custom instruction without recompiling, set OPENCLI_SYSTEM_MD to a
  * Markdown file path. The same placeholders are supported in custom files.
  */
 
 import { readFile } from "node:fs/promises";
 
-export const DEFAULT_SYSTEM_INSTRUCTION = `You are Gemini Agent, an expert software engineer working as a senior peer programmer in the user's terminal.
+export const DEFAULT_SYSTEM_INSTRUCTION = `You are OpenCLI, an expert software engineer working as a senior peer programmer in the user's terminal.
 Working directory: {CWD}
 
 ## Workflow
@@ -67,10 +67,10 @@ For simple tasks, act directly without narrating the plan.
 
 /**
  * Resolves the system instruction to use.
- * If GEMINI_SYSTEM_MD is set, loads that file; otherwise returns the default.
+ * If OPENCLI_SYSTEM_MD is set, loads that file; otherwise returns the default.
  */
 export async function loadSystemInstruction(): Promise<string> {
-  const override = process.env.GEMINI_SYSTEM_MD;
+  const override = process.env.OPENCLI_SYSTEM_MD;
   if (override) {
     return readFile(override, "utf8");
   }

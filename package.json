@@ -1,10 +1,10 @@
 {
-  "name": "gemini-agent",
+  "name": "opencli",
   "version": "0.1.0",
-  "description": "A general-purpose AI agent CLI powered by Google Gemini",
+  "description": "An open-source AI agent CLI powered by Google Gemini",
   "type": "module",
   "bin": {
-    "gemini-agent": "./dist/cli/index.js"
+    "opencli": "./dist/cli/index.js"
   },
   "scripts": {
     "build": "tsup",

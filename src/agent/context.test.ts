@@ -41,8 +41,8 @@ describe("ContextManager", () => {
   it("embeds tool names in system instruction for implicit cache prefix", () => {
     const ctx = new ContextManager(STUB);
     const tools = [
-      { name: "read", description: "Read a file" },
-      { name: "bash", description: "Run a command" },
+      { name: "read", description: "Read a file", parameters: { type: "object" } },
+      { name: "bash", description: "Run a command", parameters: { type: "object" } },
     ];
     const instruction = ctx.getSystemInstruction(tools);
     expect(instruction).toContain("read");
@@ -51,7 +51,7 @@ describe("ContextManager", () => {
 
   it("returns cached system instruction when tools unchanged", () => {
     const ctx = new ContextManager(STUB);
-    const tools = [{ name: "read", description: "Read a file" }];
+    const tools = [{ name: "read", description: "Read a file", parameters: { type: "object" } }];
     const first = ctx.getSystemInstruction(tools);
     const second = ctx.getSystemInstruction(tools);
     expect(first).toBe(second); // same reference = cached
@@ -59,10 +59,12 @@ describe("ContextManager", () => {
 
   it("clears system instruction cache on clear()", () => {
     const ctx = new ContextManager(STUB);
-    const tools = [{ name: "read", description: "Read a file" }];
+    const tools = [{ name: "read", description: "Read a file", parameters: { type: "object" } }];
     ctx.getSystemInstruction(tools);
     ctx.clear();
-    const afterDifferentTools = ctx.getSystemInstruction([{ name: "bash", description: "Run" }]);
+    const afterDifferentTools = ctx.getSystemInstruction([
+      { name: "bash", description: "Run", parameters: { type: "object" } },
+    ]);
     expect(afterDifferentTools).toContain("bash");
     expect(afterDifferentTools).not.toContain("read: Read a file");
   });

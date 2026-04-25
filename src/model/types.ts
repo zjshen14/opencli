@@ -1,4 +1,12 @@
+// "model" is used internally; each client translates to its provider's role name ("assistant" for Anthropic)
 export type Role = "user" | "model";
+
+// Provider-agnostic tool definition passed to LLMClient.stream(); parameters is plain JSONSchema
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+}
 
 export interface TextPart {
   type: "text";

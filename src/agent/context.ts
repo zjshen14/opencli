@@ -1,5 +1,4 @@
-import type { Message } from "../model/types.js";
-import type { FunctionDeclaration } from "@google/genai";
+import type { Message, ToolDefinition } from "../model/types.js";
 import { DEFAULT_SYSTEM_INSTRUCTION } from "./prompt.js";
 
 export class ContextManager {
@@ -23,7 +22,7 @@ export class ContextManager {
     this.cachedToolSignature = null;
   }
 
-  getSystemInstruction(tools: FunctionDeclaration[] = []): string {
+  getSystemInstruction(tools: ToolDefinition[] = []): string {
     const signature = tools.map((t) => t.name).join(",");
     if (this.cachedSystemInstruction && this.cachedToolSignature === signature) {
       return this.cachedSystemInstruction;

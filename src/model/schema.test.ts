@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toolToFunctionDeclaration, activateSkillDeclaration } from "./schema.js";
+import { toolToDefinition, activateSkillDefinition } from "./schema.js";
 import type { Tool } from "../tools/base.js";
 
 const simpleTool: Tool = {
@@ -16,28 +16,34 @@ const simpleTool: Tool = {
   execute: async () => ({ success: true, output: "" }),
 };
 
-describe("toolToFunctionDeclaration", () => {
+describe("toolToDefinition", () => {
   it("preserves name and description", () => {
-    const decl = toolToFunctionDeclaration(simpleTool);
-    expect(decl.name).toBe("read");
-    expect(decl.description).toBe("Read a file");
+    const def = toolToDefinition(simpleTool);
+    expect(def.name).toBe("read");
+    expect(def.description).toBe("Read a file");
   });
 
-  it("converts type strings to uppercase", () => {
-    const decl = toolToFunctionDeclaration(simpleTool);
-    expect(decl.parameters?.type).toBe("OBJECT");
-    expect(decl.parameters?.properties?.file_path.type).toBe("STRING");
-    expect(decl.parameters?.properties?.offset.type).toBe("NUMBER");
+  it("passes parameters through as plain JSONSchema (lowercase types)", () => {
+    const def = toolToDefinition(simpleTool);
+    const params = def.parameters as Record<string, unknown>;
+    expect(params.type).toBe("object");
+    const props = params.properties as Record<string, Record<string, unknown>>;
+    expect(props.file_path.type).toBe("string");
+    expect(props.offset.type).toBe("number");
   });
 
   it("preserves required fields", () => {
-    const decl = toolToFunctionDeclaration(simpleTool);
-    expect(decl.parameters?.required).toEqual(["file_path"]);
+    const def = toolToDefinition(simpleTool);
+    expect((def.parameters as Record<string, unknown>).required).toEqual(["file_path"]);
   });
 
   it("preserves property descriptions", () => {
-    const decl = toolToFunctionDeclaration(simpleTool);
-    expect(decl.parameters?.properties?.file_path.description).toBe("Path to the file");
+    const def = toolToDefinition(simpleTool);
+    const props = (def.parameters as Record<string, Record<string, unknown>>).properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(props.file_path.description).toBe("Path to the file");
   });
 
   it("handles nested array items", () => {
@@ -52,9 +58,13 @@ describe("toolToFunctionDeclaration", () => {
       },
       execute: async () => ({ success: true, output: "" }),
     };
-    const decl = toolToFunctionDeclaration(tool);
-    expect(decl.parameters?.properties?.tags.type).toBe("ARRAY");
-    expect(decl.parameters?.properties?.tags.items?.type).toBe("STRING");
+    const def = toolToDefinition(tool);
+    const props = (def.parameters as Record<string, unknown>).properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(props.tags.type).toBe("array");
+    expect((props.tags.items as Record<string, unknown>).type).toBe("string");
   });
 
   it("handles enum values", () => {
@@ -69,17 +79,23 @@ describe("toolToFunctionDeclaration", () => {
       },
       execute: async () => ({ success: true, output: "" }),
     };
-    const decl = toolToFunctionDeclaration(tool);
-    expect(decl.parameters?.properties?.mode.enum).toEqual(["fast", "slow"]);
+    const def = toolToDefinition(tool);
+    const props = (def.parameters as Record<string, unknown>).properties as Record<
+      string,
+      Record<string, unknown>
+    >;
+    expect(props.mode.enum).toEqual(["fast", "slow"]);
   });
 });
 
-describe("activateSkillDeclaration", () => {
+describe("activateSkillDefinition", () => {
   it("has the correct name", () => {
-    expect(activateSkillDeclaration.name).toBe("activate_skill");
+    expect(activateSkillDefinition.name).toBe("activate_skill");
   });
 
   it("requires the name parameter", () => {
-    expect(activateSkillDeclaration.parameters?.required).toContain("name");
+    expect((activateSkillDefinition.parameters as Record<string, unknown>).required).toContain(
+      "name",
+    );
   });
 });

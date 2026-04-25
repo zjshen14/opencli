@@ -7,6 +7,7 @@ const CONFIG_FILE = join(AGENT_DIR, "config.json");
 
 export interface Config {
   apiKey?: string;
+  anthropicApiKey?: string;
   model: string;
   temperature: number;
   maxTokens: number;
@@ -38,14 +39,4 @@ export async function saveConfig(config: Partial<Config>): Promise<void> {
   const updated = { ...current, ...config };
   await mkdir(AGENT_DIR, { recursive: true });
   await writeFile(CONFIG_FILE, JSON.stringify(updated, null, 2), "utf8");
-}
-
-export function resolveApiKey(config: Config): string {
-  const key = process.env.GEMINI_API_KEY ?? config.apiKey;
-  if (!key) {
-    throw new Error(
-      "No API key found. Set GEMINI_API_KEY environment variable or run: opencli config --api-key <key>",
-    );
-  }
-  return key;
 }

@@ -1,11 +1,12 @@
-import { GoogleGenAI, type Content, type FunctionDeclaration } from "@google/genai";
-import type { Message, StreamEvent } from "./types.js";
+import { GoogleGenAI, type Content, type FunctionDeclaration, type Schema } from "@google/genai";
+import type { LLMClient } from "./client.js";
+import type { Message, StreamEvent, ToolDefinition } from "./types.js";
 
 const DEFAULT_MODEL = "gemini-3-flash-preview";
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
 
-export class GeminiClient {
+export class GeminiClient implements LLMClient {
   private client: GoogleGenAI;
   private model: string;
 
@@ -17,9 +18,10 @@ export class GeminiClient {
   async *stream(
     messages: Message[],
     systemInstruction: string,
-    tools: FunctionDeclaration[],
+    tools: ToolDefinition[],
   ): AsyncGenerator<StreamEvent> {
     const contents = messagesToContents(messages);
+    const functionDeclarations = tools.map(definitionToFunctionDeclaration);
 
     let lastError: Error | undefined;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -29,7 +31,7 @@ export class GeminiClient {
           contents,
           config: {
             systemInstruction,
-            tools: tools.length > 0 ? [{ functionDeclarations: tools }] : undefined,
+            tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
           },
         });
 
@@ -97,6 +99,38 @@ function messagesToContents(messages: Message[]): Content[] {
       };
     }),
   }));
+}
+
+function definitionToFunctionDeclaration(def: ToolDefinition): FunctionDeclaration {
+  return {
+    name: def.name,
+    description: def.description,
+    parameters: convertSchema(def.parameters),
+  };
+}
+
+function convertSchema(schema: Record<string, unknown>): Schema {
+  const result: Schema = {
+    type: (schema.type as string).toUpperCase() as Schema["type"],
+  };
+
+  if (schema.description) result.description = schema.description as string;
+  if (schema.enum) result.enum = schema.enum as string[];
+
+  if (schema.properties) {
+    result.properties = {};
+    for (const [key, val] of Object.entries(schema.properties as Record<string, unknown>)) {
+      result.properties[key] = convertSchema(val as Record<string, unknown>);
+    }
+  }
+
+  if (schema.items) {
+    result.items = convertSchema(schema.items as Record<string, unknown>);
+  }
+
+  if (schema.required) result.required = schema.required as string[];
+
+  return result;
 }
 
 function sleep(ms: number): Promise<void> {

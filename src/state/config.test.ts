@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -12,7 +12,7 @@ vi.mock("node:os", async (importOriginal) => {
 });
 
 // Import after mock is set up
-const { loadConfig, saveConfig, resolveApiKey } = await import("./config.js");
+const { loadConfig, saveConfig } = await import("./config.js");
 
 afterEach(async () => {
   await rm(tmpHome, { recursive: true, force: true });
@@ -49,39 +49,5 @@ describe("saveConfig", () => {
     const config = await loadConfig();
     expect(config.model).toBe("gemini-2.5-flash");
     expect(config.historySize).toBe(25);
-  });
-});
-
-describe("resolveApiKey", () => {
-  beforeEach(() => {
-    delete process.env.GEMINI_API_KEY;
-  });
-
-  afterEach(() => {
-    delete process.env.GEMINI_API_KEY;
-  });
-
-  it("returns key from environment variable", async () => {
-    process.env.GEMINI_API_KEY = "env-key-123";
-    const config = await loadConfig();
-    expect(resolveApiKey(config)).toBe("env-key-123");
-  });
-
-  it("falls back to config file key", async () => {
-    await saveConfig({ apiKey: "config-key-456" });
-    const config = await loadConfig();
-    expect(resolveApiKey(config)).toBe("config-key-456");
-  });
-
-  it("env key takes precedence over config key", async () => {
-    process.env.GEMINI_API_KEY = "env-wins";
-    await saveConfig({ apiKey: "config-loses" });
-    const config = await loadConfig();
-    expect(resolveApiKey(config)).toBe("env-wins");
-  });
-
-  it("throws when no key is available", async () => {
-    const config = await loadConfig();
-    expect(() => resolveApiKey(config)).toThrow(/API key/);
   });
 });

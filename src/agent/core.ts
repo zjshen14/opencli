@@ -1,7 +1,7 @@
-import type { GeminiClient } from "../model/gemini.js";
+import type { LLMClient } from "../model/client.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SkillRegistry } from "../skills/registry.js";
-import { toolToFunctionDeclaration, activateSkillDeclaration } from "../model/schema.js";
+import { toolToDefinition, activateSkillDefinition } from "../model/schema.js";
 import { ContextManager } from "./context.js";
 import { executeCalls } from "./executor.js";
 import type { FunctionCallPart, Message } from "../model/types.js";
@@ -17,7 +17,7 @@ export class Agent {
   private context: ContextManager;
 
   constructor(
-    private gemini: GeminiClient,
+    private client: LLMClient,
     private tools: ToolRegistry,
     private skills: SkillRegistry,
     systemInstruction?: string,
@@ -41,29 +41,21 @@ export class Agent {
   }
 
   async *run(userInput: string): AsyncGenerator<AgentEvent> {
-    // Add user message to history
     this.context.addMessage({
       role: "user",
       parts: [{ type: "text", text: userInput }],
     });
 
-    const functionDeclarations = [
-      ...this.tools.all().map(toolToFunctionDeclaration),
-      activateSkillDeclaration,
-    ];
+    const toolDefinitions = [...this.tools.all().map(toolToDefinition), activateSkillDefinition];
 
-    // Agentic loop: keep going until Gemini returns a final text response with no function calls
     while (true) {
       const pendingCalls: FunctionCallPart[] = [];
       let responseText = "";
 
-      // Stream response from Gemini
-      // Pass functionDeclarations to getSystemInstruction so tool names are embedded
-      // in the static prefix, maximising implicit cache hits across turns.
-      for await (const event of this.gemini.stream(
+      for await (const event of this.client.stream(
         this.context.getMessages(),
-        this.context.getSystemInstruction(functionDeclarations),
-        functionDeclarations,
+        this.context.getSystemInstruction(toolDefinitions),
+        toolDefinitions,
       )) {
         if (event.type === "text") {
           responseText += event.text;
@@ -80,7 +72,6 @@ export class Agent {
         }
       }
 
-      // Record assistant turn in history
       const assistantParts: Message["parts"] = [];
       if (responseText) assistantParts.push({ type: "text", text: responseText });
       assistantParts.push(...pendingCalls);
@@ -88,20 +79,17 @@ export class Agent {
         this.context.addMessage({ role: "model", parts: assistantParts });
       }
 
-      // No function calls → final response, we're done
       if (pendingCalls.length === 0) {
         yield { type: "done" };
         return;
       }
 
-      // Execute all calls, then feed results back
       const { results } = await executeCalls(pendingCalls, {
         tools: this.tools,
         skills: this.skills,
         context: this.context,
       });
 
-      // Emit events and record results in history
       const skillCalls = pendingCalls.filter((c) => c.name === "activate_skill");
       for (const call of skillCalls) {
         yield { type: "skill_activated", name: call.args.name as string };

@@ -2,7 +2,7 @@
  * Session management — stores per-session conversation logs as JSONL files.
  *
  * Storage layout (mirrors Claude Code's pattern):
- *   ~/.gemini-agent/projects/<encoded-cwd>/<session-id>.jsonl
+ *   ~/.opencli/projects/<encoded-cwd>/<session-id>.jsonl
  *
  * Sessions are never written to the project directory itself, keeping the
  * workspace clean. The project path is encoded by replacing "/" with "-".

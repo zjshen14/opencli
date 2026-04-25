@@ -3,8 +3,8 @@ import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-// We patch homedir to isolate config from the real ~/.gemini-agent
-const tmpHome = join(tmpdir(), `gemini-config-test-${Date.now()}`);
+// We patch homedir to isolate config from the real ~/.opencli
+const tmpHome = join(tmpdir(), `opencli-config-test-${Date.now()}`);
 
 vi.mock("node:os", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:os")>();

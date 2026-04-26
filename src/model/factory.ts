@@ -10,6 +10,18 @@ export function detectProvider(model: string): Provider {
   return "gemini";
 }
 
+/**
+ * Returns true if the model has built-in reasoning/thinking capabilities,
+ * making a separate `think` tool redundant.
+ */
+export function hasNativeThinking(model: string): boolean {
+  // Gemini thinking models (e.g. gemini-3.1-flash-thinking, gemini-2.5-flash)
+  if (/thinking/i.test(model)) return true;
+  // Gemini 2.5+ models have native thinking enabled by default
+  if (/gemini-2\.5/i.test(model) || /gemini-3/i.test(model)) return true;
+  return false;
+}
+
 export function createClient(model: string, config: Config): LLMClient {
   const provider = detectProvider(model);
 

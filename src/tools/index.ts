@@ -16,9 +16,22 @@ import { globTool } from "./file/glob.js";
 import { grepTool } from "./file/grep.js";
 import { bashTool } from "./exec/bash.js";
 import { thinkTool } from "./think.js";
+import { hasNativeThinking } from "../model/factory.js";
 
-export function createDefaultRegistry(): ToolRegistry {
+/**
+ * Creates a tool registry with all built-in tools.
+ * When a model name is provided, the `think` tool is omitted for models
+ * with native thinking/reasoning (e.g. Gemini 2.5+) since their built-in
+ * reasoning is cheaper and faster than a tool-call round-trip.
+ */
+export function createDefaultRegistry(model?: string): ToolRegistry {
   const registry = new ToolRegistry();
-  registry.registerAll([readTool, writeTool, editTool, globTool, grepTool, bashTool, thinkTool]);
+  const tools = [readTool, writeTool, editTool, globTool, grepTool, bashTool];
+
+  if (!model || !hasNativeThinking(model)) {
+    tools.push(thinkTool);
+  }
+
+  registry.registerAll(tools);
   return registry;
 }

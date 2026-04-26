@@ -119,7 +119,7 @@ async function createAgent(modelOverride?: string, maxTurns?: number) {
   const model = process.env.OPENCLI_MODEL ?? modelOverride ?? config.model;
 
   const client = createClient(model, config);
-  const tools = createDefaultRegistry();
+  const tools = createDefaultRegistry(model);
   const skills = new SkillRegistry();
   await skills.discover();
 

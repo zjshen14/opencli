@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { executeCalls } from "./executor.js";
+import { executeCalls, truncateOutput } from "./executor.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { ContextManager } from "./context.js";
 import type { SkillRegistry } from "../skills/registry.js";
@@ -156,6 +156,52 @@ describe("executeCalls", () => {
     expect(results[0].thoughtSignature).toBe("sig-abc");
   });
 
+  it("truncates bash output exceeding the limit (middle-truncation)", async () => {
+    const big = "A".repeat(5000) + "MIDDLE" + "B".repeat(5000);
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "bash",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ success: true, output: big }),
+    });
+
+    const prev = process.env.OPENCLI_MAX_TOOL_OUTPUT;
+    process.env.OPENCLI_MAX_TOOL_OUTPUT = "100";
+    const { results } = await executeCalls([makeToolCall("bash")], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+    });
+    process.env.OPENCLI_MAX_TOOL_OUTPUT = prev;
+
+    expect(results[0].result).toContain("[... ");
+    expect(results[0].result).toContain("truncated");
+    expect(results[0].result.length).toBeLessThan(big.length);
+  });
+
+  it("does not truncate read output", async () => {
+    const big = "X".repeat(100_000);
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "read",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ success: true, output: big }),
+    });
+
+    const prev = process.env.OPENCLI_MAX_TOOL_OUTPUT;
+    process.env.OPENCLI_MAX_TOOL_OUTPUT = "100";
+    const { results } = await executeCalls([makeToolCall("read")], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+    });
+    process.env.OPENCLI_MAX_TOOL_OUTPUT = prev;
+
+    expect(results[0].result).toBe(big);
+  });
+
   it("returns (no output) when tool output is empty", async () => {
     const registry = new ToolRegistry();
     registry.register({
@@ -172,5 +218,31 @@ describe("executeCalls", () => {
     });
 
     expect(results[0].result).toBe("(no output)");
+  });
+});
+
+describe("truncateOutput", () => {
+  it("returns output unchanged when within limit", () => {
+    const prev = process.env.OPENCLI_MAX_TOOL_OUTPUT;
+    process.env.OPENCLI_MAX_TOOL_OUTPUT = "100";
+    expect(truncateOutput("short", "id1")).toBe("short");
+    process.env.OPENCLI_MAX_TOOL_OUTPUT = prev;
+  });
+
+  it("middle-truncates output exceeding the limit", () => {
+    const prev = process.env.OPENCLI_MAX_TOOL_OUTPUT;
+    process.env.OPENCLI_MAX_TOOL_OUTPUT = "100";
+    // head = 30, tail = 70; input = 50 A's + 500 M's + 50 B's (600 total)
+    const input = "A".repeat(50) + "M".repeat(500) + "B".repeat(50);
+    const result = truncateOutput(input, "id1");
+    // Head (first 30 chars) preserved
+    expect(result.startsWith("A".repeat(30))).toBe(true);
+    // Tail (last 50 B's fit within 70-char tail) preserved
+    expect(result.endsWith("B".repeat(50))).toBe(true);
+    // Truncation marker present
+    expect(result).toContain("truncated");
+    // Result is shorter than input
+    expect(result.length).toBeLessThan(input.length);
+    process.env.OPENCLI_MAX_TOOL_OUTPUT = prev;
   });
 });

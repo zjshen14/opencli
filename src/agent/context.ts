@@ -22,6 +22,10 @@ export class ContextManager {
     this.cachedToolSignature = null;
   }
 
+  getSessionTmpDir(): string | undefined {
+    return this.sessionTmpDir;
+  }
+
   getSystemInstruction(tools: ToolDefinition[] = []): string {
     const signature = tools.map((t) => t.name).join(",");
     if (this.cachedSystemInstruction && this.cachedToolSignature === signature) {

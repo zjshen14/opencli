@@ -123,6 +123,7 @@ export class Agent {
         tools: this.tools,
         skills: this.skills,
         context: this.context,
+        tmpDir: this.context.getSessionTmpDir(),
       });
 
       const skillCalls = pendingCalls.filter((c) => c.name === "activate_skill");

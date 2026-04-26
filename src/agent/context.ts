@@ -1,5 +1,5 @@
 import type { Message, ToolDefinition } from "../model/types.js";
-import { DEFAULT_SYSTEM_INSTRUCTION } from "./prompt.js";
+import { DEFAULT_SYSTEM_INSTRUCTION, getGitContext } from "./prompt.js";
 
 export class ContextManager {
   private history: Message[] = [];
@@ -34,10 +34,12 @@ export class ContextManager {
         : "";
 
     const tmpDir = this.sessionTmpDir ?? `${process.cwd()}/.opencli/tmp`;
+    const gitContext = getGitContext();
     const rendered = this.systemInstructionTemplate
       .replace("{CWD}", process.cwd())
       .replace("{SESSION_TMP}", tmpDir)
-      .replace("{TOOL_CATALOG}", toolCatalog);
+      .replace("{TOOL_CATALOG}", toolCatalog)
+      .replace("{GIT_CONTEXT}", gitContext ? gitContext + "\n\n" : "");
     this.cachedSystemInstruction = rendered;
     this.cachedToolSignature = signature;
     return rendered;

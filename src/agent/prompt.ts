@@ -11,9 +11,58 @@
  */
 
 import { readFile } from "node:fs/promises";
+import { execSync } from "node:child_process";
+
+export function getGitContext(): string {
+  try {
+    const run = (cmd: string) =>
+      execSync(cmd, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], timeout: 3000 }).trim();
+
+    const branch = run("git branch --show-current");
+    if (!branch) return ""; // detached HEAD — not useful to inject
+
+    let defaultBranch = branch;
+    try {
+      defaultBranch = run("git symbolic-ref refs/remotes/origin/HEAD --short").replace(
+        /^origin\//,
+        "",
+      );
+    } catch {
+      /* no remote configured */
+    }
+
+    const statusRaw = run("git status --short");
+    const status = statusRaw || "(clean)";
+    const cappedStatus = status.length > 2000 ? status.slice(0, 2000) + "\n[...truncated]" : status;
+
+    const log = run("git log --oneline -5");
+
+    const parts = [
+      `Branch: ${branch}${defaultBranch !== branch ? `  •  Default: ${defaultBranch}` : ""}`,
+      `Status:\n${cappedStatus
+        .split("\n")
+        .map((l) => `  ${l}`)
+        .join("\n")}`,
+    ];
+    if (log) {
+      parts.push(
+        `Recent commits:\n${log
+          .split("\n")
+          .map((l) => `  ${l}`)
+          .join("\n")}`,
+      );
+    }
+
+    return `## Repository\n_Snapshot at session start — will not update during the conversation._\n${parts.join("\n")}`;
+  } catch {
+    return ""; // not a git repo or git unavailable
+  }
+}
 
 export const DEFAULT_SYSTEM_INSTRUCTION = `You are OpenCLI, an expert software engineer working as a senior peer programmer in the user's terminal.
 Working directory: {CWD}
+
+{GIT_CONTEXT}
 
 ## Workflow
 

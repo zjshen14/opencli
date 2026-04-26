@@ -58,11 +58,14 @@ export class GeminiClient implements LLMClient {
         yield { type: "done" };
         return;
       } catch (err) {
-        lastError = err as Error;
+        lastError = err instanceof Error ? err : new Error(String(err));
+        const msg = lastError.message;
         const isRetryable =
-          lastError.message.includes("429") ||
-          lastError.message.includes("503") ||
-          lastError.message.includes("RESOURCE_EXHAUSTED");
+          msg.includes("429") ||
+          msg.includes("500") ||
+          msg.includes("502") ||
+          msg.includes("503") ||
+          msg.includes("RESOURCE_EXHAUSTED");
 
         if (!isRetryable || attempt === MAX_RETRIES - 1) throw lastError;
 

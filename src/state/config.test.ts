@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { rm } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -49,5 +49,12 @@ describe("saveConfig", () => {
     const config = await loadConfig();
     expect(config.model).toBe("gemini-2.5-flash");
     expect(config.historySize).toBe(25);
+  });
+
+  it("writes config file with owner-only permissions (0o600)", async () => {
+    await saveConfig({ model: "gemini-2.5-flash" });
+    const configFile = join(tmpHome, ".opencli", "config.json");
+    const info = await stat(configFile);
+    expect(info.mode & 0o777).toBe(0o600);
   });
 });

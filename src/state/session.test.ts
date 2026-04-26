@@ -200,3 +200,51 @@ describe("Session.log", () => {
     await expect(session.log({ type: "custom_event", data: 42 })).resolves.toBeUndefined();
   });
 });
+
+describe("Session.loadMessages — malformed JSONL resilience", () => {
+  it("skips malformed lines and still returns valid messages", async () => {
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const { AGENT_DIR } = await import("./config.js");
+    const { join } = await import("node:path");
+
+    const projectDir = join(AGENT_DIR, "projects", CWD.replace(/\//g, "-"));
+    await mkdir(projectDir, { recursive: true });
+    const id = "2025-01-01T00-00-00";
+    const logPath = join(projectDir, `${id}.jsonl`);
+
+    const goodEntry = (obj: object) => JSON.stringify({ ...obj, timestamp: "t" });
+    const lines = [
+      goodEntry({ type: "session_start", cwd: CWD }),
+      goodEntry({ type: "user", content: "Hello" }),
+      "{ this is not valid JSON {{{{",
+      goodEntry({ type: "assistant", content: "Hi there" }),
+      "another bad line",
+    ].join("\n");
+
+    await writeFile(logPath, lines, "utf8");
+
+    const { messages } = await Session.loadMessages(id, CWD);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({ role: "user", parts: [{ type: "text", text: "Hello" }] });
+    expect(messages[1]).toMatchObject({
+      role: "model",
+      parts: [{ type: "text", text: "Hi there" }],
+    });
+  });
+
+  it("returns empty messages when all lines are malformed", async () => {
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const { AGENT_DIR } = await import("./config.js");
+    const { join } = await import("node:path");
+
+    const projectDir = join(AGENT_DIR, "projects", CWD.replace(/\//g, "-"));
+    await mkdir(projectDir, { recursive: true });
+    const id = "2025-01-01T00-00-01";
+    const logPath = join(projectDir, `${id}.jsonl`);
+
+    await writeFile(logPath, "not json\nalso bad\n{incomplete", "utf8");
+
+    const { messages } = await Session.loadMessages(id, CWD);
+    expect(messages).toHaveLength(0);
+  });
+});

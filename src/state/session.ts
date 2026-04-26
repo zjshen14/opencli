@@ -214,7 +214,14 @@ export class Session {
     const entries: SessionEntry[] = raw
       .split("\n")
       .filter(Boolean)
-      .map((line) => JSON.parse(line));
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as SessionEntry];
+        } catch {
+          process.stderr.write("[opencli] skipping malformed session log entry\n");
+          return [];
+        }
+      });
 
     return {
       session: new Session(sessionId, cwd, logPath),

@@ -184,6 +184,42 @@ describe("Session.loadMessages", () => {
     expect(messages[5]).toMatchObject({ role: "model", parts: [{ type: "text", text: "Done." }] });
   });
 
+  it("pairs tool_call and tool_result with matching IDs (single call)", async () => {
+    const session = await Session.create(CWD);
+    await session.log({ type: "user", content: "Do something" });
+    await session.log({ type: "tool_call", name: "bash", args: { command: "echo hi" } });
+    await session.log({ type: "tool_result", name: "bash", result: "hi" });
+    await session.log({ type: "assistant", content: "Done." });
+
+    const { messages } = await Session.loadMessages(session.id, CWD);
+    const callPart = messages[1].parts[0] as { type: string; id: string };
+    const resultPart = messages[2].parts[0] as { type: string; id: string };
+    expect(callPart.type).toBe("function_call");
+    expect(resultPart.type).toBe("function_result");
+    expect(resultPart.id).toBe(callPart.id);
+  });
+
+  it("pairs tool_call and tool_result IDs in parallel multi-call rounds", async () => {
+    const session = await Session.create(CWD);
+    await session.log({ type: "user", content: "Go" });
+    await session.log({ type: "tool_call", name: "glob", args: { pattern: "*.ts" } });
+    await session.log({ type: "tool_call", name: "grep", args: { pattern: "foo" } });
+    await session.log({ type: "tool_result", name: "glob", result: "a.ts" });
+    await session.log({ type: "tool_result", name: "grep", result: "a.ts:1" });
+    await session.log({ type: "assistant", content: "Done." });
+
+    const { messages } = await Session.loadMessages(session.id, CWD);
+    // messages[1] = model with 2 function_call parts; messages[2] = user with 2 function_result parts
+    const calls = messages[1].parts as Array<{ type: string; id: string }>;
+    const results = messages[2].parts as Array<{ type: string; id: string }>;
+    expect(calls).toHaveLength(2);
+    expect(results).toHaveLength(2);
+    expect(results[0].id).toBe(calls[0].id);
+    expect(results[1].id).toBe(calls[1].id);
+    // IDs must be distinct across the two calls
+    expect(calls[0].id).not.toBe(calls[1].id);
+  });
+
   it("ignores session_start and unknown entries", async () => {
     const session = await Session.create(CWD);
     await session.log({ type: "user", content: "Hi" });

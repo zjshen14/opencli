@@ -21,10 +21,11 @@ import {
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
 describe("COMPACT_TOOLS", () => {
-  it("includes read, glob, grep", () => {
+  it("includes read, glob, grep, think", () => {
     expect(COMPACT_TOOLS.has("read")).toBe(true);
     expect(COMPACT_TOOLS.has("glob")).toBe(true);
     expect(COMPACT_TOOLS.has("grep")).toBe(true);
+    expect(COMPACT_TOOLS.has("think")).toBe(true);
   });
 
   it("does not include bash, write, edit", () => {
@@ -394,6 +395,26 @@ describe("print functions write to stderr/stdout", () => {
     const output = stripAnsi(stderr());
     expect(output).toContain("✓");
     expect(output).toContain("2 files");
+  });
+
+  it("printToolCallCompact renders think tool with dim thinking line", () => {
+    printToolCallCompact("think", { thought: "Let me consider the options" });
+    const output = stripAnsi(stderr());
+    expect(output).toContain("thinking…");
+    expect(output).toContain("Let me consider the options");
+  });
+
+  it("printToolCallCompact truncates long think thoughts at 80 chars", () => {
+    const longThought = "x".repeat(120);
+    printToolCallCompact("think", { thought: longThought });
+    const output = stripAnsi(stderr());
+    expect(output).toContain("thinking…");
+    expect(output).toContain("…"); // trailing ellipsis
+  });
+
+  it("printToolResultCompact is silent for think tool", () => {
+    printToolResultCompact("think", "");
+    expect(stderrSpy).not.toHaveBeenCalled();
   });
 
   it("printEditDiff writes + and - lines to stderr", () => {

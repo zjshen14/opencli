@@ -8,7 +8,7 @@ import TerminalRenderer from "marked-terminal";
 marked.setOptions({ renderer: new TerminalRenderer() });
 
 // Tools that render as compact one-liners (read-only, low noise)
-export const COMPACT_TOOLS = new Set(["read", "glob", "grep"]);
+export const COMPACT_TOOLS = new Set(["read", "glob", "grep", "think"]);
 
 export function renderMarkdown(text: string): string {
   return marked(text) as string;
@@ -91,12 +91,21 @@ export function printToolResult(name: string, result: string): void {
 
 // Compact one-liner for read/glob/grep — printed when the call is issued
 export function printToolCallCompact(name: string, args: Record<string, unknown>): void {
+  if (name === "think") {
+    const thought = typeof args.thought === "string" ? args.thought : "";
+    const preview = thought.replace(/\n/g, " ").slice(0, 80);
+    process.stderr.write(
+      chalk.dim(`  ◦ thinking… ${preview}${thought.length > 80 ? "…" : ""}`) + "\n",
+    );
+    return;
+  }
   const arg = compactArg(args);
   process.stderr.write(chalk.dim(`  ○ ${name.padEnd(6)}${arg}`) + "\n");
 }
 
 // Overwrites the compact call line with a ✓ result summary
 export function printToolResultCompact(name: string, result: string): void {
+  if (name === "think") return; // think results are silent — the call line is enough
   const summary = summariseResult(name, result);
   process.stderr.write(chalk.dim(`  ✓ ${summary}`) + "\n");
 }

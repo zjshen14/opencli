@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -39,4 +39,5 @@ export async function saveConfig(config: Partial<Config>): Promise<void> {
   const updated = { ...current, ...config };
   await mkdir(AGENT_DIR, { recursive: true });
   await writeFile(CONFIG_FILE, JSON.stringify(updated, null, 2), "utf8");
+  await chmod(CONFIG_FILE, 0o600);
 }

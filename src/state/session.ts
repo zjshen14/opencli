@@ -78,17 +78,23 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
   // Pending batches accumulate until we know where they belong
   let pendingCalls: FunctionCallPart[] = [];
   let pendingResults: FunctionResultPart[] = [];
+  // Queue of call IDs waiting for their matching results; ensures each
+  // function_result references the same ID as its function_call (required by
+  // the Anthropic API, which validates tool_result.tool_use_id against prior tool_use blocks).
+  let pendingCallIds: string[] = [];
 
   function flushCalls(): void {
     if (pendingCalls.length === 0) return;
     messages.push({ role: "model", parts: pendingCalls });
     pendingCalls = [];
+    // pendingCallIds intentionally kept — results still need them
   }
 
   function flushResults(): void {
     if (pendingResults.length === 0) return;
     messages.push({ role: "user", parts: pendingResults });
     pendingResults = [];
+    pendingCallIds = [];
   }
 
   for (const entry of entries) {
@@ -101,6 +107,7 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
       // New tool_call batch: if there were results from a previous round, flush them first
       flushResults();
       const id = `resume-call-${++idCounter}`;
+      pendingCallIds.push(id);
       pendingCalls.push({
         type: "function_call",
         id,
@@ -110,7 +117,7 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
     } else if (entry.type === "tool_result") {
       // Results follow their calls — flush the pending call batch into a model message
       flushCalls();
-      const id = `resume-call-${++idCounter}`;
+      const id = pendingCallIds.shift() ?? `resume-call-${++idCounter}`;
       pendingResults.push({
         type: "function_result",
         id,

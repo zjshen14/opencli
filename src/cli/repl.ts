@@ -125,6 +125,8 @@ export async function runRepl(
               firstToken = false;
             }
             mdRenderer.flush();
+            // Design question: should `think` remain resumable/debuggable via session logs,
+            // or should we redact/drop its args to keep that scratchpad ephemeral?
             void session.log({ type: "tool_call", name: event.name, args: event.args });
             if (COMPACT_TOOLS.has(event.name)) {
               printToolCallCompact(event.name, event.args);

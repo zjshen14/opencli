@@ -401,15 +401,15 @@ describe("print functions write to stderr/stdout", () => {
     printToolCallCompact("think", { thought: "Let me consider the options" });
     const output = stripAnsi(stderr());
     expect(output).toContain("thinking…");
-    expect(output).toContain("Let me consider the options");
+    expect(output).not.toContain("Let me consider the options");
   });
 
-  it("printToolCallCompact truncates long think thoughts at 80 chars", () => {
+  it("printToolCallCompact does not reveal long think thoughts", () => {
     const longThought = "x".repeat(120);
     printToolCallCompact("think", { thought: longThought });
     const output = stripAnsi(stderr());
     expect(output).toContain("thinking…");
-    expect(output).toContain("…"); // trailing ellipsis
+    expect(output).not.toContain(longThought.slice(0, 20));
   });
 
   it("printToolResultCompact is silent for think tool", () => {

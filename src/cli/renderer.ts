@@ -92,11 +92,7 @@ export function printToolResult(name: string, result: string): void {
 // Compact one-liner for read/glob/grep — printed when the call is issued
 export function printToolCallCompact(name: string, args: Record<string, unknown>): void {
   if (name === "think") {
-    const thought = typeof args.thought === "string" ? args.thought : "";
-    const preview = thought.replace(/\n/g, " ").slice(0, 80);
-    process.stderr.write(
-      chalk.dim(`  ◦ thinking… ${preview}${thought.length > 80 ? "…" : ""}`) + "\n",
-    );
+    process.stderr.write(chalk.dim("  ◦ thinking…") + "\n");
     return;
   }
   const arg = compactArg(args);

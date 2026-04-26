@@ -52,8 +52,9 @@ program
   .description("Run a single prompt and exit")
   .option("-m, --model <model>", "Model to use")
   .option("--max-turns <n>", "Maximum agent iterations (default: 50)", parseInt)
+  .option("--plan", "Run a read-only planning pass first, then auto-execute the plan")
   .action(async (prompt: string, opts) => {
-    await runSingle(prompt, opts.model, opts.maxTurns);
+    await runSingle(prompt, opts.model, opts.maxTurns, opts.plan as boolean | undefined);
   });
 
 program
@@ -105,12 +106,38 @@ async function startChat(
   await runRepl(agent, skills, resumeSessionId);
 }
 
-async function runSingle(prompt: string, modelOverride?: string, maxTurns?: number): Promise<void> {
+async function runSingle(
+  prompt: string,
+  modelOverride?: string,
+  maxTurns?: number,
+  planMode?: boolean,
+): Promise<void> {
   const { agent } = await createAgent(modelOverride, maxTurns);
-  for await (const event of agent.run(prompt)) {
-    if (event.type === "text") process.stdout.write(event.text);
-    if (event.type === "error") process.stderr.write(`Error: ${event.message}\n`);
-    if (event.type === "done") process.stdout.write("\n");
+
+  const stream = async (input: string, mode: "react" | "plan") => {
+    let text = "";
+    for await (const event of agent.run(input, mode)) {
+      if (event.type === "text") {
+        process.stdout.write(event.text);
+        text += event.text;
+      }
+      if (event.type === "error") process.stderr.write(`Error: ${event.message}\n`);
+      if (event.type === "done") process.stdout.write("\n");
+    }
+    return text;
+  };
+
+  if (planMode) {
+    const planText = await stream(prompt, "plan");
+    if (planText.trim()) {
+      process.stderr.write("\nExecuting plan…\n");
+      await stream(
+        `I have approved the following plan. Execute it step by step:\n\n${planText}`,
+        "react",
+      );
+    }
+  } else {
+    await stream(prompt, "react");
   }
 }
 

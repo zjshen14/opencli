@@ -66,6 +66,107 @@ describe("Agent max turns guard", () => {
   });
 });
 
+describe("Agent plan mode", () => {
+  it("filters write/edit/bash from tool definitions in plan mode", async () => {
+    let receivedTools: ToolDefinition[] = [];
+    const client: LLMClient = {
+      async *stream(_messages: Message[], _sys: string, tools: ToolDefinition[]) {
+        receivedTools = tools;
+        yield { type: "text", text: "## Plan: noop\n1. nothing" } as StreamEvent;
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+
+    const registry = new ToolRegistry();
+    for (const name of ["read", "glob", "grep", "write", "edit", "bash", "think"]) {
+      registry.register({
+        name,
+        description: "",
+        parameters: { type: "object", properties: {} },
+        execute: async () => ({ success: true, output: "" }),
+      });
+    }
+
+    const agent = new Agent(client, registry, new SkillRegistry());
+    const events = [];
+    for await (const e of agent.run("plan something", "plan")) events.push(e);
+
+    const names = receivedTools.map((t) => t.name);
+    expect(names).toContain("read");
+    expect(names).toContain("glob");
+    expect(names).toContain("grep");
+    expect(names).toContain("think");
+    expect(names).not.toContain("write");
+    expect(names).not.toContain("edit");
+    expect(names).not.toContain("bash");
+  });
+
+  it("appends plan-mode instructions to the system prompt in plan mode", async () => {
+    let receivedSystem = "";
+    const client: LLMClient = {
+      async *stream(_messages: Message[], sys: string, _tools: ToolDefinition[]) {
+        receivedSystem = sys;
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+
+    const agent = new Agent(client, makeNoopRegistry(), new SkillRegistry());
+    for await (const _e of agent.run("plan x", "plan")) {
+      void _e;
+    }
+
+    expect(receivedSystem).toContain("Plan Mode");
+    expect(receivedSystem).toContain("Output format");
+  });
+
+  it("does not append plan-mode instructions in react mode", async () => {
+    let receivedSystem = "";
+    const client: LLMClient = {
+      async *stream(_messages: Message[], sys: string, _tools: ToolDefinition[]) {
+        receivedSystem = sys;
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+
+    const agent = new Agent(client, makeNoopRegistry(), new SkillRegistry());
+    for await (const _e of agent.run("hi")) {
+      void _e;
+    }
+
+    expect(receivedSystem).not.toContain("Plan Mode");
+  });
+
+  it("blocks write tool calls at the executor in plan mode", async () => {
+    // Client that requests a write call (which should be filtered out, but the executor
+    // also enforces the guard as defence-in-depth)
+    const client: LLMClient = {
+      async *stream() {
+        yield { type: "function_call", id: "c1", name: "write", args: {} } as StreamEvent;
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+
+    const writeMock = async () => ({ success: true, output: "wrote!" });
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "write",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: writeMock,
+    });
+
+    const agent = new Agent(client, registry, new SkillRegistry(), undefined, undefined, 2);
+    const events = [];
+    for await (const e of agent.run("plan x", "plan")) events.push(e);
+
+    const result = events.find((e) => e.type === "tool_result") as
+      | { type: "tool_result"; result: string }
+      | undefined;
+    expect(result).toBeDefined();
+    expect(result?.result).toContain("blocked in plan mode");
+  });
+});
+
 describe("Agent stuck-loop detection", () => {
   it("emits an error after 3 identical consecutive tool calls", async () => {
     const agent = new Agent(

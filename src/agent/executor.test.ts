@@ -202,6 +202,68 @@ describe("executeCalls", () => {
     expect(results[0].result).toBe(big);
   });
 
+  it("blocks write tool when readOnly is set", async () => {
+    const writeMock = vi.fn(async () => ({ success: true, output: "wrote" }));
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "write",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: writeMock,
+    });
+
+    const { results } = await executeCalls([makeToolCall("write", { file_path: "/tmp/x" })], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      readOnly: true,
+    });
+
+    expect(writeMock).not.toHaveBeenCalled();
+    expect(results[0].result).toContain("blocked in plan mode");
+    expect(results[0].result).toContain("'write'");
+  });
+
+  it("blocks edit and bash tools when readOnly is set", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "edit",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ success: true, output: "" }),
+    });
+    registry.register({
+      name: "bash",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ success: true, output: "" }),
+    });
+
+    const { results } = await executeCalls(
+      [makeToolCall("edit", {}, "c1"), makeToolCall("bash", {}, "c2")],
+      {
+        tools: registry,
+        skills: makeSkillRegistry({}),
+        context: new ContextManager(),
+        readOnly: true,
+      },
+    );
+
+    expect(results[0].result).toContain("blocked in plan mode");
+    expect(results[1].result).toContain("blocked in plan mode");
+  });
+
+  it("allows read/glob/grep when readOnly is set", async () => {
+    const registry = makeToolRegistry("read", "file contents");
+    const { results } = await executeCalls([makeToolCall("read")], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      readOnly: true,
+    });
+    expect(results[0].result).toBe("file contents");
+  });
+
   it("returns (no output) when tool output is empty", async () => {
     const registry = new ToolRegistry();
     registry.register({

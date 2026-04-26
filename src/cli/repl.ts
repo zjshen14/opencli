@@ -1,5 +1,9 @@
 import chalk from "chalk";
-import type { Agent } from "../agent/core.js";
+import { select, isCancel } from "@clack/prompts";
+import { execFileSync } from "node:child_process";
+import { writeFile, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import type { Agent, AgentRunMode } from "../agent/core.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import { loadSkillFile, processBody } from "../skills/loader.js";
 import { join } from "node:path";
@@ -21,6 +25,7 @@ import {
 // Built-in slash commands (always available)
 const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: "help", description: "list available skills and commands" },
+  { name: "plan", description: "explore and draft a plan, then approve before executing" },
   { name: "clear", description: "clear conversation history" },
   { name: "exit", description: "exit the agent" },
 ];
@@ -79,6 +84,40 @@ export async function runRepl(
       break;
     }
 
+    // /plan <task> — read-only planning pass with user approval before execution
+    if (input === "/plan" || input.startsWith("/plan ")) {
+      const planPrompt = input.slice(5).trim();
+      if (!planPrompt) {
+        printError("Usage: /plan <task description>");
+        continue;
+      }
+      const planText = await runAgentTurn(agent, session, planPrompt, "plan");
+      if (!planText.trim()) continue;
+
+      const decision = await promptPlanApproval();
+      if (decision === "cancel") {
+        printInfo("Plan cancelled.");
+        continue;
+      }
+      let finalPlan = planText;
+      if (decision === "edit") {
+        const edited = await editPlanInEditor(planText);
+        if (!edited) {
+          printInfo("Edit cancelled.");
+          continue;
+        }
+        finalPlan = edited;
+      }
+      printInfo("\nExecuting approved plan…\n");
+      await runAgentTurn(
+        agent,
+        session,
+        `I have approved the following plan. Execute it step by step, checking off each item as you complete it:\n\n${finalPlan}`,
+        "react",
+      );
+      continue;
+    }
+
     // Skill invocation: /skill-name [args]
     let userMessage = input;
     if (input.startsWith("/")) {
@@ -99,92 +138,7 @@ export async function runRepl(
       userMessage = args || `Please follow the ${entry.name} skill instructions.`;
     }
 
-    // Run the agent loop
-    const spinner = createSpinner("Thinking…");
-    spinner.start();
-    let firstToken = true;
-    const mdRenderer = new MarkdownStreamRenderer();
-    const pendingEdits: { file_path: string; old_string: string; new_string: string }[] = [];
-
-    try {
-      let assistantText = "";
-      for await (const event of agent.run(userMessage)) {
-        switch (event.type) {
-          case "text":
-            if (firstToken) {
-              spinner.stop();
-              firstToken = false;
-            }
-            assistantText += event.text;
-            mdRenderer.push(event.text);
-            break;
-
-          case "tool_call":
-            if (firstToken) {
-              spinner.stop();
-              firstToken = false;
-            }
-            mdRenderer.flush();
-            // Design question: should `think` remain resumable/debuggable via session logs,
-            // or should we redact/drop its args to keep that scratchpad ephemeral?
-            void session.log({ type: "tool_call", name: event.name, args: event.args });
-            if (COMPACT_TOOLS.has(event.name)) {
-              printToolCallCompact(event.name, event.args);
-            } else {
-              printToolCall(event.name, event.args);
-              if (
-                event.name === "edit" &&
-                typeof event.args.file_path === "string" &&
-                typeof event.args.old_string === "string" &&
-                typeof event.args.new_string === "string"
-              ) {
-                pendingEdits.push({
-                  file_path: event.args.file_path as string,
-                  old_string: event.args.old_string as string,
-                  new_string: event.args.new_string as string,
-                });
-              }
-            }
-            break;
-
-          case "tool_result":
-            void session.log({ type: "tool_result", name: event.name, result: event.result });
-            if (COMPACT_TOOLS.has(event.name)) {
-              printToolResultCompact(event.name, event.result);
-            } else if (event.name === "edit") {
-              const edit = pendingEdits.shift();
-              if (edit) printEditDiff(edit.old_string, edit.new_string, edit.file_path);
-            } else {
-              printToolResult(event.name, event.result);
-            }
-            break;
-
-          case "skill_activated":
-            printSkillActivated(event.name);
-            break;
-
-          case "error":
-            spinner.stop();
-            mdRenderer.flush();
-            printError(event.message);
-            break;
-
-          case "done":
-            if (firstToken) {
-              spinner.stop();
-              firstToken = false;
-            }
-            mdRenderer.flush();
-            void session.log({ type: "assistant", content: assistantText });
-            assistantText = "";
-            break;
-        }
-      }
-    } catch (err) {
-      spinner.stop();
-      const message = err instanceof Error ? err.message : String(err);
-      printError(message);
-    }
+    await runAgentTurn(agent, session, userMessage);
   }
 
   await saveHistory(history);
@@ -192,6 +146,131 @@ export async function runRepl(
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+export async function runAgentTurn(
+  agent: Agent,
+  session: Session,
+  userMessage: string,
+  mode: AgentRunMode = "react",
+): Promise<string> {
+  const spinner = createSpinner("Thinking…");
+  spinner.start();
+  let firstToken = true;
+  const mdRenderer = new MarkdownStreamRenderer();
+  const pendingEdits: { file_path: string; old_string: string; new_string: string }[] = [];
+  let fullText = "";
+  let turnText = "";
+
+  try {
+    for await (const event of agent.run(userMessage, mode)) {
+      switch (event.type) {
+        case "text":
+          if (firstToken) {
+            spinner.stop();
+            firstToken = false;
+          }
+          turnText += event.text;
+          fullText += event.text;
+          mdRenderer.push(event.text);
+          break;
+
+        case "tool_call":
+          if (firstToken) {
+            spinner.stop();
+            firstToken = false;
+          }
+          mdRenderer.flush();
+          void session.log({ type: "tool_call", name: event.name, args: event.args });
+          if (COMPACT_TOOLS.has(event.name)) {
+            printToolCallCompact(event.name, event.args);
+          } else {
+            printToolCall(event.name, event.args);
+            if (
+              event.name === "edit" &&
+              typeof event.args.file_path === "string" &&
+              typeof event.args.old_string === "string" &&
+              typeof event.args.new_string === "string"
+            ) {
+              pendingEdits.push({
+                file_path: event.args.file_path as string,
+                old_string: event.args.old_string as string,
+                new_string: event.args.new_string as string,
+              });
+            }
+          }
+          break;
+
+        case "tool_result":
+          void session.log({ type: "tool_result", name: event.name, result: event.result });
+          if (COMPACT_TOOLS.has(event.name)) {
+            printToolResultCompact(event.name, event.result);
+          } else if (event.name === "edit") {
+            const edit = pendingEdits.shift();
+            if (edit) printEditDiff(edit.old_string, edit.new_string, edit.file_path);
+          } else {
+            printToolResult(event.name, event.result);
+          }
+          break;
+
+        case "skill_activated":
+          printSkillActivated(event.name);
+          break;
+
+        case "error":
+          spinner.stop();
+          mdRenderer.flush();
+          printError(event.message);
+          break;
+
+        case "done":
+          if (firstToken) {
+            spinner.stop();
+            firstToken = false;
+          }
+          mdRenderer.flush();
+          void session.log({ type: "assistant", content: turnText });
+          turnText = "";
+          break;
+      }
+    }
+  } catch (err) {
+    spinner.stop();
+    const message = err instanceof Error ? err.message : String(err);
+    printError(message);
+  }
+
+  return fullText;
+}
+
+async function promptPlanApproval(): Promise<"approve" | "edit" | "cancel"> {
+  const choice = await select({
+    message: "Plan ready — what next?",
+    options: [
+      { value: "approve", label: "Approve & execute" },
+      { value: "edit", label: "Edit plan in $EDITOR first" },
+      { value: "cancel", label: "Cancel" },
+    ],
+  });
+  if (isCancel(choice)) return "cancel";
+  return choice as "approve" | "edit" | "cancel";
+}
+
+async function editPlanInEditor(plan: string): Promise<string | null> {
+  const tmpPath = join(tmpdir(), `opencli-plan-${Date.now()}.md`);
+  await writeFile(tmpPath, plan);
+  const editor = process.env.EDITOR ?? process.env.VISUAL ?? "vi";
+  try {
+    execFileSync(editor, [tmpPath], { stdio: "inherit" });
+    const edited = await readFile(tmpPath, "utf8");
+    return edited.trim() || null;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    printError(`Failed to open editor (${editor}): ${message}`);
+    return null;
+  } finally {
+    await rm(tmpPath).catch(() => {});
+  }
+}
 
 function printCommandList(commands: SlashCommand[], skills: SkillRegistry): void {
   const builtins = commands.filter((c) => BUILTIN_COMMANDS.some((b) => b.name === c.name));

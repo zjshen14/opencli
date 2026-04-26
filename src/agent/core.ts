@@ -18,6 +18,52 @@ export type AgentEvent =
 const DEFAULT_MAX_TURNS = 50;
 const STUCK_THRESHOLD = 3;
 
+export type AgentRunMode = "react" | "plan";
+
+// Tools exposed in plan mode — exploration only, no writes.
+// Bash is excluded: read/glob/grep cover 95% of exploration, and reliably
+// validating bash as read-only is hard (subshells, redirects, find -exec).
+const PLAN_MODE_TOOLS = new Set(["read", "glob", "grep", "think", "activate_skill"]);
+
+const PLAN_SYSTEM_SUFFIX = `
+
+## Plan Mode
+
+You are in **Plan Mode**. Your only task is to explore the codebase and produce a concrete numbered execution plan. You CANNOT and MUST NOT modify any files.
+
+Available tools: \`read\`, \`glob\`, \`grep\`, \`think\`.
+Write tools (\`write\`, \`edit\`, \`bash\`) are blocked at the executor level.
+
+### Process
+
+1. **Understand** — Restate the goal in one sentence. Make assumptions explicit; do not ask the user clarifying questions (flag any uncertainties in the Risks section instead).
+2. **Explore** — Use glob/grep to map relevant files, then read the ones most central to the task. Follow imports as needed. Skip files you don't need.
+3. **Design** — Use think to reason about the approach, constraints, and alternatives.
+4. **Plan** — Output the final plan in the format below, then stop.
+
+### Output format
+
+## Plan: <short title>
+
+- [ ] 1. **<step title>** — \`path/to/file.ts\` — one-line description
+- [ ] 2. **<step title>** — \`path/to/file.ts\` — one-line description
+- [ ] N. **Verify** — \`npm test\` (or relevant command)
+
+### Critical files
+- \`path/to/file1.ts\` — why this is central
+- \`path/to/file2.ts\` — why
+
+### Risks / assumptions
+- ⚠️ <risk or unverified assumption — one line>
+
+### Rules
+
+- 3–10 steps for most tasks
+- Each step must name a specific file path
+- Use ⚠️ for any step that depends on an unverified assumption
+- Do NOT include full file contents or large code blocks
+- Do NOT begin execution — stop after producing the plan`;
+
 export class Agent {
   private context: ContextManager;
 
@@ -46,13 +92,19 @@ export class Agent {
     }
   }
 
-  async *run(userInput: string): AsyncGenerator<AgentEvent> {
+  async *run(userInput: string, mode: AgentRunMode = "react"): AsyncGenerator<AgentEvent> {
     this.context.addMessage({
       role: "user",
       parts: [{ type: "text", text: userInput }],
     });
 
-    const toolDefinitions = [...this.tools.all().map(toolToDefinition), activateSkillDefinition];
+    const allToolDefs = [...this.tools.all().map(toolToDefinition), activateSkillDefinition];
+    const toolDefinitions =
+      mode === "plan" ? allToolDefs.filter((t) => PLAN_MODE_TOOLS.has(t.name)) : allToolDefs;
+
+    const baseInstruction = this.context.getSystemInstruction(toolDefinitions);
+    const systemInstruction =
+      mode === "plan" ? baseInstruction + PLAN_SYSTEM_SUFFIX : baseInstruction;
 
     let turns = 0;
     let lastCallSig = "";
@@ -64,7 +116,7 @@ export class Agent {
 
       for await (const event of this.client.stream(
         this.context.getMessages(),
-        this.context.getSystemInstruction(toolDefinitions),
+        systemInstruction,
         toolDefinitions,
       )) {
         if (event.type === "text") {
@@ -125,6 +177,7 @@ export class Agent {
         skills: this.skills,
         context: this.context,
         tmpDir: this.context.getSessionTmpDir(),
+        readOnly: mode === "plan",
       });
 
       // Append an event-driven reminder to the last tool result based on what

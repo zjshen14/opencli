@@ -80,11 +80,21 @@ Current docs:
 
 ---
 
-## Git
+## Git, Branching & Issue Management
 
 **One logical change per commit.** Don't bundle unrelated changes.
 
 **Commit message format:** imperative mood, present tense, concise subject line. Body explains *why* if non-obvious.
+
+**Linking & Closing Issues:**
+- Always link your work to the relevant GitHub issue.
+- To auto-close an issue, use `Closes #<issue_number>` or `Fixes #<issue_number>` in the commit message of the commit that fully resolves it.
+- If a commit is related but doesn't resolve the issue entirely, use `Part of #<issue_number>` or `References #<issue_number>`.
+- If you forget to link an issue in the commit message, manually comment on the issue with the commit hash to establish the link.
+
+**Branching Strategy:**
+- **Direct to `main`**: Acceptable for quick bug fixes, small scoped features, documentation updates, and changes that are well-tested and low-risk. When working with AI coding assistants, direct commits to `main` are standard for low-risk changes.
+- **Issue Branches (`feature/issue-123` or `fix/issue-123`)**: Required for large architectural changes, experimental features, or complex refactors that span multiple components or require extensive testing before integration. Merge via Pull Request once verified.
 
 **Never commit secrets.** `.env` is gitignored. API keys go in `.env` only. Run `git diff --cached | grep -i "AIza\|api_key\|secret"` before committing if unsure.
 

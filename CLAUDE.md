@@ -96,6 +96,12 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 - Mock at system boundaries only; use real filesystem for file tool tests
 - Document non-obvious decisions in `docs/`
 
+## Issue Management & Branching
+
+- **Always check for a related GitHub issue.** If your work addresses an issue, format your commit message to include `Closes #<issue_number>` (if fully resolved) or `Part of #<issue_number>` (if partial).
+- **If you forget to link an issue in the commit message**, use the GitHub CLI to comment on the issue with the commit hash.
+- **Before starting a complex or risky task**, explicitly ask the user if they would prefer you to create a feature branch (`git checkout -b feature/issue-123`) instead of committing directly to `main`. Small, well-scoped fixes should be committed directly to `main`.
+
 ## Configuration
 
 - `.env` — `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENCLI_MODEL`

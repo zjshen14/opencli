@@ -25,9 +25,10 @@ program
   )
   .option("-r, --resume", "Resume the most recent session")
   .option("-s, --session <id>", "Resume a specific session by ID")
+  .option("--max-turns <n>", "Maximum agent iterations per prompt (default: 50)", parseInt)
   .action(async (opts) => {
     const sessionId = opts.session ?? (opts.resume ? "latest" : undefined);
-    await startChat(opts.model, sessionId);
+    await startChat(opts.model, sessionId, opts.maxTurns);
   });
 
 program
@@ -50,8 +51,9 @@ program
   .command("run <prompt>")
   .description("Run a single prompt and exit")
   .option("-m, --model <model>", "Model to use")
+  .option("--max-turns <n>", "Maximum agent iterations (default: 50)", parseInt)
   .action(async (prompt: string, opts) => {
-    await runSingle(prompt, opts.model);
+    await runSingle(prompt, opts.model, opts.maxTurns);
   });
 
 program
@@ -94,20 +96,25 @@ program.parseAsync(process.argv).catch((err) => {
   process.exit(1);
 });
 
-async function startChat(modelOverride?: string, resumeSessionId?: string): Promise<void> {
-  const { agent, skills } = await createAgent(modelOverride);
+async function startChat(
+  modelOverride?: string,
+  resumeSessionId?: string,
+  maxTurns?: number,
+): Promise<void> {
+  const { agent, skills } = await createAgent(modelOverride, maxTurns);
   await runRepl(agent, skills, resumeSessionId);
 }
 
-async function runSingle(prompt: string, modelOverride?: string): Promise<void> {
-  const { agent } = await createAgent(modelOverride);
+async function runSingle(prompt: string, modelOverride?: string, maxTurns?: number): Promise<void> {
+  const { agent } = await createAgent(modelOverride, maxTurns);
   for await (const event of agent.run(prompt)) {
     if (event.type === "text") process.stdout.write(event.text);
+    if (event.type === "error") process.stderr.write(`Error: ${event.message}\n`);
     if (event.type === "done") process.stdout.write("\n");
   }
 }
 
-async function createAgent(modelOverride?: string) {
+async function createAgent(modelOverride?: string, maxTurns?: number) {
   const config = await loadConfig();
   const model = process.env.OPENCLI_MODEL ?? modelOverride ?? config.model;
 
@@ -117,6 +124,6 @@ async function createAgent(modelOverride?: string) {
   await skills.discover();
 
   const systemInstruction = await loadSystemInstruction();
-  const agent = new Agent(client, tools, skills, systemInstruction, config.historySize);
+  const agent = new Agent(client, tools, skills, systemInstruction, config.historySize, maxTurns);
   return { agent, skills };
 }

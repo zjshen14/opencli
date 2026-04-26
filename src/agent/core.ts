@@ -11,7 +11,11 @@ export type AgentEvent =
   | { type: "tool_call"; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: string }
   | { type: "skill_activated"; name: string }
+  | { type: "error"; message: string }
   | { type: "done" };
+
+const DEFAULT_MAX_TURNS = 50;
+const STUCK_THRESHOLD = 3;
 
 export class Agent {
   private context: ContextManager;
@@ -22,6 +26,7 @@ export class Agent {
     private skills: SkillRegistry,
     systemInstruction?: string,
     maxHistoryMessages?: number,
+    private maxTurns: number = DEFAULT_MAX_TURNS,
   ) {
     this.context = new ContextManager(systemInstruction, maxHistoryMessages);
   }
@@ -47,6 +52,10 @@ export class Agent {
     });
 
     const toolDefinitions = [...this.tools.all().map(toolToDefinition), activateSkillDefinition];
+
+    let turns = 0;
+    let lastCallSig = "";
+    let stuckCount = 0;
 
     while (true) {
       const pendingCalls: FunctionCallPart[] = [];
@@ -82,6 +91,32 @@ export class Agent {
       if (pendingCalls.length === 0) {
         yield { type: "done" };
         return;
+      }
+
+      // Max turns guard
+      turns++;
+      if (turns > this.maxTurns) {
+        yield {
+          type: "error",
+          message: `Reached maximum iterations (${this.maxTurns}). Try breaking the task into smaller steps.`,
+        };
+        return;
+      }
+
+      // Stuck-loop detection: same tool(s) + same args N times in a row
+      const sig = JSON.stringify(pendingCalls.map((c) => ({ name: c.name, args: c.args })));
+      if (sig === lastCallSig) {
+        stuckCount++;
+        if (stuckCount >= STUCK_THRESHOLD) {
+          yield {
+            type: "error",
+            message: `Detected ${STUCK_THRESHOLD} identical tool calls in a row — stopping to avoid a loop.`,
+          };
+          return;
+        }
+      } else {
+        lastCallSig = sig;
+        stuckCount = 1;
       }
 
       const { results } = await executeCalls(pendingCalls, {

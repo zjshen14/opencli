@@ -161,6 +161,12 @@ export async function runRepl(
             printSkillActivated(event.name);
             break;
 
+          case "error":
+            spinner.stop();
+            mdRenderer.flush();
+            printError(event.message);
+            break;
+
           case "done":
             if (firstToken) {
               spinner.stop();

@@ -5,7 +5,7 @@ export default defineConfig({
   format: ["esm"],
   target: "node20",
   outDir: "dist",
-  clean: true,
+  clean: false,
   sourcemap: true,
   banner: {
     js: "#!/usr/bin/env node",

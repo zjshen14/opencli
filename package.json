@@ -1,12 +1,30 @@
 {
-  "name": "opencli",
-  "version": "0.1.0",
+  "name": "@zjshen/opencli",
+  "version": "0.1.1",
   "description": "An open-source AI agent CLI powered by Google Gemini",
   "type": "module",
   "bin": {
-    "opencli": "./dist/cli/index.js"
+    "opencli": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "cli",
+    "ai",
+    "agent",
+    "gemini",
+    "claude"
+  ],
+  "author": "Zhijie Shen",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zjshen14/opencli.git"
   },
   "scripts": {
+    "release": "./scripts/publish.sh",
+    "prepack": "npm run build",
     "build": "tsup",
     "dev": "tsx --env-file=.env src/cli/index.ts",
     "lint": "eslint src",

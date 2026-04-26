@@ -2,7 +2,12 @@ import { describe, it, expect, afterEach } from "vitest";
 import { writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadSystemInstruction, DEFAULT_SYSTEM_INSTRUCTION, getGitContext } from "./prompt.js";
+import {
+  loadSystemInstruction,
+  DEFAULT_SYSTEM_INSTRUCTION,
+  getGitContext,
+  buildReminder,
+} from "./prompt.js";
 
 afterEach(() => {
   delete process.env.OPENCLI_SYSTEM_MD;
@@ -44,5 +49,46 @@ describe("getGitContext", () => {
       expect(ctx).toContain("Branch:");
       expect(ctx).toContain("Status:");
     }
+  });
+});
+
+describe("buildReminder", () => {
+  it("returns empty string for read-only tool calls", () => {
+    const calls = [
+      { name: "read", args: {} },
+      { name: "glob", args: {} },
+      { name: "grep", args: {} },
+    ];
+    expect(buildReminder(calls)).toBe("");
+  });
+
+  it("fires test reminder after edit call", () => {
+    const calls = [{ name: "edit", args: { file_path: "foo.ts" } }];
+    const reminder = buildReminder(calls);
+    expect(reminder).toContain("run tests after making code changes");
+  });
+
+  it("fires test reminder after write call", () => {
+    const calls = [{ name: "write", args: { file_path: "foo.ts" } }];
+    expect(buildReminder(calls)).toContain("run tests after making code changes");
+  });
+
+  it("fires git reminder only when bash command includes git", () => {
+    const gitCall = [{ name: "bash", args: { command: "git status" } }];
+    const nonGitCall = [{ name: "bash", args: { command: "npm test" } }];
+    expect(buildReminder(gitCall)).toContain("never commit or push");
+    expect(buildReminder(nonGitCall)).not.toContain("never commit or push");
+  });
+
+  it("combines multiple relevant reminders in one block", () => {
+    const calls = [
+      { name: "edit", args: {} },
+      { name: "bash", args: { command: "git diff" } },
+    ];
+    const reminder = buildReminder(calls);
+    expect(reminder).toContain("run tests after making code changes");
+    expect(reminder).toContain("never commit or push");
+    // Single [reminder: ...] block
+    expect(reminder.split("[reminder:").length).toBe(2);
   });
 });

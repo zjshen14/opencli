@@ -59,6 +59,39 @@ export function getGitContext(): string {
   }
 }
 
+// ── Event-driven reminders ────────────────────────────────────────────────────
+
+export interface AgentReminder {
+  text: string;
+  shouldFire: (calls: ReadonlyArray<{ name: string; args: Record<string, unknown> }>) => boolean;
+}
+
+export const AGENT_REMINDERS: AgentReminder[] = [
+  {
+    text: "run tests after making code changes",
+    shouldFire: (calls) => calls.some((c) => c.name === "write" || c.name === "edit"),
+  },
+  {
+    text: "never commit or push without an explicit user request",
+    shouldFire: (calls) =>
+      calls.some((c) => c.name === "bash" && String(c.args.command ?? "").includes("git")),
+  },
+  {
+    text: "don't add features or refactoring beyond what was asked",
+    shouldFire: (calls) => calls.some((c) => c.name === "write" || c.name === "edit"),
+  },
+];
+
+export function buildReminder(
+  calls: ReadonlyArray<{ name: string; args: Record<string, unknown> }>,
+): string {
+  const triggered = AGENT_REMINDERS.filter((r) => r.shouldFire(calls)).map((r) => r.text);
+  if (triggered.length === 0) return "";
+  return `\n\n[reminder: ${triggered.join("; ")}]`;
+}
+
+// ── System instruction template ───────────────────────────────────────────────
+
 export const DEFAULT_SYSTEM_INSTRUCTION = `You are OpenCLI, an expert software engineer working as a senior peer programmer in the user's terminal.
 Working directory: {CWD}
 

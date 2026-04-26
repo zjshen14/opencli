@@ -4,6 +4,7 @@ import type { SkillRegistry } from "../skills/registry.js";
 import { toolToDefinition, activateSkillDefinition } from "../model/schema.js";
 import { ContextManager } from "./context.js";
 import { executeCalls } from "./executor.js";
+import { buildReminder } from "./prompt.js";
 import type { FunctionCallPart, Message } from "../model/types.js";
 
 export type AgentEvent =
@@ -125,6 +126,16 @@ export class Agent {
         context: this.context,
         tmpDir: this.context.getSessionTmpDir(),
       });
+
+      // Append an event-driven reminder to the last tool result based on what
+      // tools just ran — fires only when relevant (e.g. edit → "run tests").
+      const reminder = buildReminder(pendingCalls.map((c) => ({ name: c.name, args: c.args })));
+      if (reminder && results.length > 0) {
+        results[results.length - 1] = {
+          ...results[results.length - 1],
+          result: results[results.length - 1].result + reminder,
+        };
+      }
 
       const skillCalls = pendingCalls.filter((c) => c.name === "activate_skill");
       for (const call of skillCalls) {

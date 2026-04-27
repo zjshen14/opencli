@@ -62,6 +62,10 @@ A general-purpose AI agent CLI that supports Google Gemini and Anthropic Claude 
 - `marked` + `marked-terminal` — Markdown rendering (`MarkdownStreamRenderer` buffers to paragraph boundaries before rendering)
 - Raw Node.js `readline` — per-keystroke input, slash-command popup
 
+**Built-in slash commands:**
+- `/plan <task>` — read-only planning pass → `@clack/prompts` approval → react-mode execution
+- `/help`, `/clear`, `/exit` — REPL housekeeping
+
 **Skill Invocation (CLI Layer responsibilities):**
 - Intercept input starting with `/` before forwarding to Agent Core
 - Parse `/<skill-name> [args]`, look up skill in registry
@@ -89,9 +93,11 @@ src/cli/
 
 **Agent Loop Flow:**
 ```
-1. User Input
+1. User Input  (+ optional mode: "react" | "plan")
    ↓
 2. Build Context (history + tool results + system prompt)
+   In plan mode: filter tool list to read/glob/grep/think only
+                 append PLAN_SYSTEM_SUFFIX to system instruction
    ↓
 3. Call LLM provider (via LLMClient interface)
    ↓
@@ -100,13 +106,27 @@ src/cli/
    └─→ Function calls → Execute tools
        ↓
 5. If function calls:
-   ├─→ Execute tools (parallel where possible)
+   ├─→ Execute tools (parallel, Promise.all)
+   │    In plan mode: write/edit/bash blocked at executor level (readOnly guard)
+   ├─→ Append event-driven reminders to last tool result
+   │    e.g. after edit/write → "run tests after making code changes"
    ├─→ Collect results
    └─→ Feed back to LLM (goto step 2)
 
-6. If final response:
+6. Safety guards (checked each turn):
+   ├─→ Max-turns exceeded (default 50) → emit error event, stop
+   └─→ Stuck-loop: 3+ identical call signatures in a row → emit error event, stop
+
+7. If final response (no function calls):
    └─→ Display to user
 ```
+
+**Plan mode** (`/plan <task>` in REPL, `--plan` flag on `opencli run`):
+- Runs a read-only exploration pass with `Agent.run(input, "plan")`
+- Tool definitions filtered to `read/glob/grep/think/activate_skill`; executor additionally enforces `readOnly` as defence-in-depth
+- System prompt extended with a structured plan template (4-step process: Understand → Explore → Design → Plan; mandatory checklist output with file paths and ⚠️ risk flagging)
+- REPL shows a `@clack/prompts` select (Approve & execute / Edit in $EDITOR / Cancel) after the plan is generated
+- On approval: plan injected as a synthetic user message, agent switches to `"react"` mode for execution
 
 **Skill responsibilities in Agent Core:**
 - At session start: call `SkillRegistry.discover()`, inject skill catalog (name + description only, ~50–100 tokens/skill) into the system prompt so the model knows which skills are available
@@ -118,10 +138,10 @@ src/cli/
 **Key Files:**
 ```
 src/agent/
-  ├── core.ts            # Main agent loop
+  ├── core.ts            # Main agent loop; AgentRunMode type; plan-mode tool filtering + prompt suffix
   ├── context.ts         # Context management, ContextManager class
-  ├── executor.ts        # Tool execution coordinator
-  └── prompt.ts          # DEFAULT_SYSTEM_INSTRUCTION; loadSystemInstruction() respects OPENCLI_SYSTEM_MD
+  ├── executor.ts        # Tool execution; middle-truncation (bash/grep/glob >20k); readOnly guard for plan mode
+  └── prompt.ts          # DEFAULT_SYSTEM_INSTRUCTION; AGENT_REMINDERS (event-driven); getGitContext()
 ```
 
 ### 3. Model Layer (LLM Provider Abstraction)
@@ -205,7 +225,7 @@ src/model/
 **Tool Categories:**
 
 **File Operations:**
-- `read` — Read file contents (with offset/limit support)
+- `read` — Read file contents (with offset/limit support; output never truncated — agents rely on exact line spans for follow-up edits)
 - `write` — Write/create files
 - `edit` — Edit files (exact old_string → new_string; fails if match is ambiguous)
 - `glob` — Find files by pattern
@@ -213,6 +233,11 @@ src/model/
 
 **Execution:**
 - `bash` — Execute shell commands (blocks dangerous patterns: `rm -rf`, `git push --force`, etc.)
+
+**Reasoning:**
+- `think` — Private scratchpad for multi-step reasoning; output suppressed in the REPL UI. Omitted from the registry when the active model has native thinking (e.g. Gemini 2.5+/3.x) to avoid double-paying for reasoning.
+
+**Output truncation:** `bash`, `grep`, and `glob` results exceeding `OPENCLI_MAX_TOOL_OUTPUT` (default 20 000 chars) are middle-truncated: 30% head + 70% tail, with the full output saved to `{SESSION_TMP}/tool-output-{id}.txt` when a session tmp directory is set.
 
 **Tool Interface:**
 ```typescript
@@ -235,7 +260,8 @@ interface ToolResult {
 src/tools/
   ├── registry.ts        # Tool registration and lookup
   ├── base.ts            # Tool interface + JSONSchema type
-  ├── index.ts           # createDefaultRegistry() factory
+  ├── index.ts           # createDefaultRegistry(model?) — omits think for native-thinking models
+  ├── think.ts           # think tool (private scratchpad)
   ├── file/              # read, write, edit, glob, grep
   └── exec/              # bash
 ```

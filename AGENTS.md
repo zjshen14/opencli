@@ -1,10 +1,11 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This file provides guidance to Codex when working with code in this repository.
+It must be kept in sync with `CLAUDE.md` — see `docs/engineering-practices.md`.
 
 ## Project Overview
 
-OpenCLI — an open-source AI agent CLI that supports Google Gemini and Anthropic Codex models, modeled after Codex. The implementation is a working prototype in TypeScript/Node.js (ESM, Node 20+).
+OpenCLI — an open-source AI agent CLI that supports Google Gemini and Anthropic Claude models, modeled after Claude Code. The implementation is a working prototype in TypeScript/Node.js (ESM, Node 20+).
 
 ## Commands
 
@@ -21,7 +22,7 @@ npm test                  # Vitest
 npm run test:single       # Vitest verbose (single run)
 ```
 
-API keys are loaded from `.env` (`GEMINI_API_KEY` for Gemini models, `ANTHROPIC_API_KEY` for Codex models). Default model: `gemini-3.1-flash-lite-preview`.
+API keys are loaded from `.env` (`GEMINI_API_KEY` for Gemini models, `ANTHROPIC_API_KEY` for Claude models). Default model: `gemini-3.1-flash-lite-preview`.
 
 ## Source Structure
 
@@ -49,7 +50,8 @@ src/
     registry.ts     # ToolRegistry: register, execute, list
     file/           # read, write, edit, glob, grep
     exec/           # bash (with dangerous-command guard)
-    index.ts        # createDefaultRegistry() factory
+    think.ts        # think tool — private scratchpad; skipped for native-thinking models
+    index.ts        # createDefaultRegistry(model?) factory — omits think for native-thinking models
   skills/
     registry.ts     # Discover SKILL.md files across 4 scoped directories
     loader.ts       # Parse SKILL.md frontmatter, !{cmd} preprocessing, $ARGUMENTS substitution
@@ -65,12 +67,16 @@ src/
 
 **Agentic loop** (`src/agent/core.ts`):
 1. Add user message to context
-2. Stream from the active `LLMClient` with all tool + `activate_skill` definitions
+2. Stream from the active `LLMClient` with tool + `activate_skill` definitions (filtered to read-only tools in plan mode)
 3. Collect text chunks (display immediately) and function calls
-4. Execute all tool calls in parallel (`Promise.all`); skill activations inject content into context
-5. Feed results back as a user message; repeat from step 2 until no function calls
+4. Execute all tool calls in parallel (`Promise.all`); skill activations inject content into context; write tools are blocked when `readOnly` is set (plan mode)
+5. Append event-driven reminders to the last tool result (e.g. after `edit` → "run tests")
+6. Feed results back as a user message; repeat from step 2 until no function calls
+7. **Safety guards**: max-turns limit (default 50, `--max-turns` to override); stuck-loop detection aborts after 3 identical consecutive call signatures
 
-**Provider abstraction**: `LLMClient` (in `model/client.ts`) is the single interface the Agent Core depends on. `schema.ts` converts `Tool` objects to generic `ToolDefinition` (plain JSONSchema). Each provider client translates `ToolDefinition[]` and `Message[]` into its own wire format internally — Gemini converts types to uppercase and uses `functionCall`/`functionResponse`; Anthropic maps `role: "model"` → `"assistant"` and uses `tool_use`/`tool_result` blocks. The provider is selected by `createClient()` in `factory.ts` based on model name prefix (`Codex-` → Anthropic, otherwise Gemini).
+**Plan mode** (`Agent.run(input, "plan")`): restricts tools to `read/glob/grep/think`, appends a plan-specific system prompt suffix, and sets `readOnly` on the executor so write tools are blocked at two layers. The REPL's `/plan <task>` command runs a plan pass, then shows `[@clack/prompts select]` Approve / Edit / Cancel before switching to react mode for execution.
+
+**Provider abstraction**: `LLMClient` (in `model/client.ts`) is the single interface the Agent Core depends on. `schema.ts` converts `Tool` objects to generic `ToolDefinition` (plain JSONSchema). Each provider client translates `ToolDefinition[]` and `Message[]` into its own wire format internally — Gemini converts types to uppercase and uses `functionCall`/`functionResponse`; Anthropic maps `role: "model"` → `"assistant"` and uses `tool_use`/`tool_result` blocks. The provider is selected by `createClient()` in `factory.ts` based on model name prefix (`claude-` → Anthropic, otherwise Gemini).
 
 **Thinking models + `thoughtSignature`**: Gemini thinking models (e.g. `gemini-3.1-*`) require `thoughtSignature` to be captured from each `functionCall` part and echoed back in the corresponding `functionResponse`. This is threaded through `FunctionCallPart` → `FunctionResultPart` → the API request in `gemini.ts`. The Anthropic client ignores this field.
 
@@ -106,6 +112,7 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 
 - `.env` — `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENCLI_MODEL`
 - `OPENCLI_SYSTEM_MD` — path to a Markdown file that overrides the default system instruction (for prompt hill-climbing)
+- `OPENCLI_MAX_TOOL_OUTPUT` — max chars before bash/grep/glob output is middle-truncated (default: 20 000)
 - `~/.opencli/config.json` — persisted user config (model, temperature, historySize, etc.)
 - `~/.opencli/projects/<encoded-cwd>/<session-id>.jsonl` — session conversation logs
 - `.gitignore` excludes `.env` and `dist/`

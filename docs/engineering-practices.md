@@ -76,7 +76,7 @@ Current docs:
 - `docs/cli-ui-research.md` — visual design research (rendering, popups, spinners)
 - `docs/engineering-practices.md` — this file
 
-**CLAUDE.md is for Claude Code.** Keep it current when commands, file structure, or key conventions change. It's the first thing Claude reads.
+**CLAUDE.md and AGENTS.md must stay in sync.** This project is worked on by both Claude Code and Codex. The two files are identical except for the first-line header. When you update one, update the other in the same commit. `CLAUDE.md` is the source of truth — copy the changed sections into `AGENTS.md`.
 
 ---
 

@@ -9,7 +9,7 @@ import type { FunctionCallPart, Message } from "../model/types.js";
 
 export type AgentEvent =
   | { type: "text"; text: string }
-  | { type: "tool_call"; name: string; args: Record<string, unknown> }
+  | { type: "tool_call"; name: string; args: Record<string, unknown>; thoughtSignature?: string }
   | { type: "tool_result"; name: string; result: string }
   | { type: "skill_activated"; name: string }
   | { type: "error"; message: string }
@@ -130,7 +130,12 @@ export class Agent {
             args: event.args,
             thoughtSignature: event.thoughtSignature,
           });
-          yield { type: "tool_call", name: event.name, args: event.args };
+          yield {
+            type: "tool_call",
+            name: event.name,
+            args: event.args,
+            thoughtSignature: event.thoughtSignature,
+          };
         }
       }
 

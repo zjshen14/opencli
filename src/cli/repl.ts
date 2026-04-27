@@ -180,7 +180,12 @@ export async function runAgentTurn(
             firstToken = false;
           }
           mdRenderer.flush();
-          void session.log({ type: "tool_call", name: event.name, args: event.args });
+          void session.log({
+            type: "tool_call",
+            name: event.name,
+            args: event.args,
+            thoughtSignature: event.thoughtSignature,
+          });
           if (COMPACT_TOOLS.has(event.name)) {
             printToolCallCompact(event.name, event.args);
           } else {

@@ -78,10 +78,11 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
   // Pending batches accumulate until we know where they belong
   let pendingCalls: FunctionCallPart[] = [];
   let pendingResults: FunctionResultPart[] = [];
-  // Queue of call IDs waiting for their matching results; ensures each
-  // function_result references the same ID as its function_call (required by
-  // the Anthropic API, which validates tool_result.tool_use_id against prior tool_use blocks).
+  // Queue of call IDs (and their thoughtSignatures) waiting for their matching results;
+  // ensures each function_result references the same ID as its function_call (required by
+  // the Anthropic API) and echoes back thoughtSignature (required by Gemini thinking models).
   let pendingCallIds: string[] = [];
+  let pendingCallSignatures: (string | undefined)[] = [];
 
   function flushCalls(): void {
     if (pendingCalls.length === 0) return;
@@ -95,6 +96,7 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
     messages.push({ role: "user", parts: pendingResults });
     pendingResults = [];
     pendingCallIds = [];
+    pendingCallSignatures = [];
   }
 
   for (const entry of entries) {
@@ -107,22 +109,28 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
       // New tool_call batch: if there were results from a previous round, flush them first
       flushResults();
       const id = `resume-call-${++idCounter}`;
+      const thoughtSignature =
+        typeof entry.thoughtSignature === "string" ? entry.thoughtSignature : undefined;
       pendingCallIds.push(id);
+      pendingCallSignatures.push(thoughtSignature);
       pendingCalls.push({
         type: "function_call",
         id,
         name: String(entry.name ?? ""),
         args: (entry.args as Record<string, unknown>) ?? {},
+        thoughtSignature,
       });
     } else if (entry.type === "tool_result") {
       // Results follow their calls — flush the pending call batch into a model message
       flushCalls();
       const id = pendingCallIds.shift() ?? `resume-call-${++idCounter}`;
+      const resultSignature = pendingCallSignatures.shift();
       pendingResults.push({
         type: "function_result",
         id,
         name: String(entry.name ?? ""),
         result: String(entry.result ?? ""),
+        thoughtSignature: resultSignature,
       });
     } else if (entry.type === "assistant" && typeof entry.content === "string" && entry.content) {
       flushCalls();

@@ -38,6 +38,18 @@ describe("ContextManager", () => {
     expect(ctx.getSystemInstruction()).toContain(process.cwd());
   });
 
+  it("replaces all occurrences of each placeholder when the template repeats them", () => {
+    const ctx = new ContextManager(
+      "CWD={CWD} again CWD={CWD}\nTMP={SESSION_TMP} and {SESSION_TMP}\n{TOOL_CATALOG}",
+    );
+    ctx.setSessionTmpDir("/tmp/test-session");
+    const result = ctx.getSystemInstruction();
+    expect(result).not.toContain("{CWD}");
+    expect(result).not.toContain("{SESSION_TMP}");
+    expect(result.split(process.cwd()).length - 1).toBe(2);
+    expect(result.split("/tmp/test-session").length - 1).toBe(2);
+  });
+
   it("embeds tool names in system instruction for implicit cache prefix", () => {
     const ctx = new ContextManager(STUB);
     const tools = [

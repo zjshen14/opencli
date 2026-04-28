@@ -40,10 +40,10 @@ export class ContextManager {
     const tmpDir = this.sessionTmpDir ?? `${process.cwd()}/.opencli/tmp`;
     const gitContext = getGitContext();
     const rendered = this.systemInstructionTemplate
-      .replace("{CWD}", process.cwd())
-      .replace("{SESSION_TMP}", tmpDir)
-      .replace("{TOOL_CATALOG}", toolCatalog)
-      .replace("{GIT_CONTEXT}", gitContext ? gitContext + "\n\n" : "");
+      .replaceAll("{CWD}", process.cwd())
+      .replaceAll("{SESSION_TMP}", tmpDir)
+      .replaceAll("{TOOL_CATALOG}", toolCatalog)
+      .replaceAll("{GIT_CONTEXT}", gitContext ? gitContext + "\n\n" : "");
     this.cachedSystemInstruction = rendered;
     this.cachedToolSignature = signature;
     return rendered;

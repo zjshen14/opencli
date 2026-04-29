@@ -14,6 +14,25 @@ function modelMsg(text: string): Message {
   return { role: "model", parts: [{ type: "text", text }] };
 }
 
+function modelWithCalls(calls: Array<{ id: string; name: string }>): Message {
+  return {
+    role: "model",
+    parts: calls.map((c) => ({ type: "function_call" as const, id: c.id, name: c.name, args: {} })),
+  };
+}
+
+function userWithResults(results: Array<{ id: string; name: string }>): Message {
+  return {
+    role: "user",
+    parts: results.map((r) => ({
+      type: "function_result" as const,
+      id: r.id,
+      name: r.name,
+      result: "ok",
+    })),
+  };
+}
+
 describe("ContextManager", () => {
   it("returns empty messages initially", () => {
     const ctx = new ContextManager(STUB);
@@ -197,6 +216,52 @@ describe("ContextManager", () => {
     expect((ctx.getMessages()[4].parts[0] as { type: string; text: string }).text).toBe(
       "message 9",
     );
+  });
+
+  it("prune does not leave an orphaned function_result as the first message", () => {
+    // maxHistoryMessages=4: slice will start at the user function_results message,
+    // which has no matching model function_call — prune must skip it.
+    const ctx = new ContextManager(STUB, 4);
+    ctx.addMessage(userMsg("task one"));
+    ctx.addMessage(modelWithCalls([{ id: "c1", name: "read" }]));
+    ctx.addMessage(userWithResults([{ id: "c1", name: "read" }]));
+    ctx.addMessage(userMsg("task two"));
+    ctx.addMessage(modelWithCalls([{ id: "c2", name: "edit" }]));
+    ctx.addMessage(userWithResults([{ id: "c2", name: "edit" }])); // 6th message triggers prune
+
+    const msgs = ctx.getMessages();
+    // First message must not be a function_result message
+    expect(msgs[0].role).toBe("user");
+    expect(msgs[0].parts.every((p) => p.type !== "function_result")).toBe(true);
+  });
+
+  it("prune does not leave a model message as the first message", () => {
+    // maxHistoryMessages=3: slice starts at a model message with function_calls,
+    // which must not be the first message sent to the API.
+    const ctx = new ContextManager(STUB, 3);
+    ctx.addMessage(userMsg("start"));
+    ctx.addMessage(modelWithCalls([{ id: "c1", name: "bash" }]));
+    ctx.addMessage(userWithResults([{ id: "c1", name: "bash" }]));
+    ctx.addMessage(userMsg("next")); // 4th message triggers prune
+
+    const msgs = ctx.getMessages();
+    expect(msgs[0].role).toBe("user");
+    expect(msgs[0].parts.every((p) => p.type !== "function_result")).toBe(true);
+  });
+
+  it("prune retains the function_call/result pair when the boundary falls cleanly", () => {
+    // maxHistoryMessages=4: slice starts exactly at a user text message — no skipping needed.
+    const ctx = new ContextManager(STUB, 4);
+    ctx.addMessage(userMsg("a"));
+    ctx.addMessage(modelWithCalls([{ id: "c1", name: "read" }]));
+    ctx.addMessage(userWithResults([{ id: "c1", name: "read" }]));
+    ctx.addMessage(userMsg("b"));
+    ctx.addMessage(modelWithCalls([{ id: "c2", name: "edit" }])); // 5th → prune
+
+    const msgs = ctx.getMessages();
+    // Slice of 4 starts at userWithResults — skipped; next clean start is userMsg("b")
+    expect(msgs[0].role).toBe("user");
+    expect((msgs[0].parts[0] as { type: string; text: string }).text).toBe("b");
   });
 });
 

@@ -88,7 +88,21 @@ export class ContextManager {
 
   private prune(): void {
     if (this.history.length <= this.maxHistoryMessages) return;
-    // Keep the most recent messages; never prune the first user message if it has skill content
-    this.history = this.history.slice(-this.maxHistoryMessages);
+
+    const sliced = this.history.slice(-this.maxHistoryMessages);
+
+    // Advance past any orphaned messages at the head of the slice so we never
+    // send a function_result without its matching function_call (Gemini returns
+    // 400 Bad Request) or start with a model message (history must begin with user).
+    let startIdx = 0;
+    while (startIdx < sliced.length) {
+      const msg = sliced[startIdx];
+      if (msg.role === "user" && !msg.parts.some((p) => p.type === "function_result")) {
+        break;
+      }
+      startIdx++;
+    }
+
+    this.history = sliced.slice(startIdx);
   }
 }

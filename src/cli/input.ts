@@ -64,6 +64,42 @@ const A = {
   right: (n: number) => (n > 0 ? `\x1b[${n}C` : ""),
 };
 
+// ── Cursor-aware string helpers ───────────────────────────────────────────────
+
+export function insertAtCursor(
+  input: string,
+  cursorPos: number,
+  char: string,
+): { input: string; cursorPos: number } {
+  return {
+    input: input.slice(0, cursorPos) + char + input.slice(cursorPos),
+    cursorPos: cursorPos + char.length,
+  };
+}
+
+export function deleteBeforeCursor(
+  input: string,
+  cursorPos: number,
+): { input: string; cursorPos: number } {
+  if (cursorPos === 0) return { input, cursorPos };
+  return {
+    input: input.slice(0, cursorPos - 1) + input.slice(cursorPos),
+    cursorPos: cursorPos - 1,
+  };
+}
+
+export function deleteWordBeforeCursor(
+  input: string,
+  cursorPos: number,
+): { input: string; cursorPos: number } {
+  const before = input.slice(0, cursorPos);
+  const after = input.slice(cursorPos);
+  const trimmed = before.trimEnd();
+  const lastSpace = trimmed.lastIndexOf(" ");
+  const newBefore = lastSpace >= 0 ? trimmed.slice(0, lastSpace + 1) : "";
+  return { input: newBefore + after, cursorPos: newBefore.length };
+}
+
 // Visible length of a string (strips ANSI escape codes)
 // eslint-disable-next-line no-control-regex
 const visLen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
@@ -116,6 +152,7 @@ export async function readLine(
 
   return new Promise((resolve) => {
     let input = "";
+    let cursorPos = 0; // insertion point; 0 = start, input.length = end
     let histIdx = -1; // -1 = live input; ≥0 = browsing history
     let savedInput = ""; // snapshot of live input while browsing history
     let selectedIdx = -1; // popup selection; -1 = none
@@ -137,11 +174,11 @@ export async function readLine(
       // Draw popup (if any)
       out += renderPopup(matches, selectedIdx);
 
-      // Reposition cursor back on the prompt line at end of input
+      // Reposition cursor on the prompt line at cursorPos
       if (matches.length > 0) {
         out += A.up(matches.length);
-        out += "\r" + A.right(PROMPT_STR.length + input.length);
       }
+      out += "\r" + A.right(PROMPT_STR.length + cursorPos);
 
       stdout.write(out);
     };
@@ -184,6 +221,7 @@ export async function readLine(
         if (selectedIdx >= 0 && matches[selectedIdx]) {
           // Complete the selected slash command
           input = "/" + matches[selectedIdx].name + " ";
+          cursorPos = input.length;
           selectedIdx = -1;
           render();
           return;
@@ -197,6 +235,7 @@ export async function readLine(
         const pick = selectedIdx >= 0 ? matches[selectedIdx] : matches[0];
         if (pick) {
           input = "/" + pick.name + " ";
+          cursorPos = input.length;
           selectedIdx = -1;
         }
         render();
@@ -221,6 +260,7 @@ export async function readLine(
           if (histIdx < history.length - 1) {
             histIdx++;
             input = history[histIdx];
+            cursorPos = input.length;
           }
         }
         render();
@@ -237,23 +277,41 @@ export async function readLine(
           if (histIdx > 0) {
             histIdx--;
             input = history[histIdx];
+            cursorPos = input.length;
           } else if (histIdx === 0) {
             histIdx = -1;
             input = savedInput;
+            cursorPos = input.length;
           }
         }
         render();
         return;
       }
 
-      // Ctrl+A → beginning of line
-      if (key.ctrl && key.name === "a") {
-        render(); // cursor is always at end for now; just re-render
+      // Left arrow → move cursor left
+      if (key.name === "left") {
+        if (cursorPos > 0) cursorPos--;
+        render();
         return;
       }
 
-      // Ctrl+E → end of line (no-op, cursor is always at end)
+      // Right arrow → move cursor right
+      if (key.name === "right") {
+        if (cursorPos < input.length) cursorPos++;
+        render();
+        return;
+      }
+
+      // Ctrl+A → beginning of line
+      if (key.ctrl && key.name === "a") {
+        cursorPos = 0;
+        render();
+        return;
+      }
+
+      // Ctrl+E → end of line
       if (key.ctrl && key.name === "e") {
+        cursorPos = input.length;
         render();
         return;
       }
@@ -261,35 +319,32 @@ export async function readLine(
       // Ctrl+U → clear entire line
       if (key.ctrl && key.name === "u") {
         input = "";
+        cursorPos = 0;
         selectedIdx = -1;
         histIdx = -1;
         render();
         return;
       }
 
-      // Ctrl+W → delete last word
+      // Ctrl+W → delete word before cursor
       if (key.ctrl && key.name === "w") {
-        const trimmed = input.trimEnd();
-        const lastSpace = trimmed.lastIndexOf(" ");
-        input = lastSpace >= 0 ? trimmed.slice(0, lastSpace + 1) : "";
+        ({ input, cursorPos } = deleteWordBeforeCursor(input, cursorPos));
         selectedIdx = -1;
         render();
         return;
       }
 
-      // Backspace
+      // Backspace → delete character before cursor
       if (key.name === "backspace") {
-        if (input.length > 0) {
-          input = input.slice(0, -1);
-          selectedIdx = -1;
-        }
+        ({ input, cursorPos } = deleteBeforeCursor(input, cursorPos));
+        selectedIdx = -1;
         render();
         return;
       }
 
       // Printable characters (ignore other control sequences)
       if (key.sequence && !key.ctrl && !key.meta && visLen(key.sequence) === 1) {
-        input += key.sequence;
+        ({ input, cursorPos } = insertAtCursor(input, cursorPos, key.sequence));
         selectedIdx = -1;
         render();
         return;

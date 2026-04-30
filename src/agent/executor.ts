@@ -54,6 +54,31 @@ export interface ExecutionResult {
   // Skill activations return no tool result — they mutate context directly
 }
 
+async function executeOneCall(
+  call: FunctionCallPart,
+  deps: ExecutorDeps,
+): Promise<FunctionResultPart> {
+  if (deps.readOnly && WRITE_TOOLS.has(call.name)) {
+    return {
+      type: "function_result",
+      id: call.id,
+      name: call.name,
+      result: `Error: '${call.name}' is blocked in plan mode. Use read, glob, or grep to explore the codebase.`,
+      thoughtSignature: call.thoughtSignature,
+    };
+  }
+  const result = await deps.tools.execute(call.name, call.args as Record<string, unknown>);
+  const raw = result.error ? `Error: ${result.error}` : result.output || "(no output)";
+  const output = TRUNCATE_TOOLS.has(call.name) ? truncateOutput(raw, call.id, deps.tmpDir) : raw;
+  return {
+    type: "function_result",
+    id: call.id,
+    name: call.name,
+    result: output,
+    thoughtSignature: call.thoughtSignature,
+  };
+}
+
 export async function executeCalls(
   calls: FunctionCallPart[],
   deps: ExecutorDeps,
@@ -73,32 +98,19 @@ export async function executeCalls(
     }
   }
 
-  // Execute all tool calls in parallel
-  const results = await Promise.all(
-    toolCalls.map(async (call): Promise<FunctionResultPart> => {
-      if (deps.readOnly && WRITE_TOOLS.has(call.name)) {
-        return {
-          type: "function_result",
-          id: call.id,
-          name: call.name,
-          result: `Error: '${call.name}' is blocked in plan mode. Use read, glob, or grep to explore the codebase.`,
-          thoughtSignature: call.thoughtSignature,
-        };
-      }
-      const result = await deps.tools.execute(call.name, call.args as Record<string, unknown>);
-      const raw = result.error ? `Error: ${result.error}` : result.output || "(no output)";
-      const output = TRUNCATE_TOOLS.has(call.name)
-        ? truncateOutput(raw, call.id, deps.tmpDir)
-        : raw;
-      return {
-        type: "function_result",
-        id: call.id,
-        name: call.name,
-        result: output,
-        thoughtSignature: call.thoughtSignature,
-      };
-    }),
-  );
+  // If any call mutates state, execute all sequentially in declared order to
+  // prevent race conditions (e.g. two edits to the same file, or a write
+  // followed by a read that depends on it). Pure read batches still run in
+  // parallel for speed.
+  let results: FunctionResultPart[];
+  if (toolCalls.some((c) => WRITE_TOOLS.has(c.name))) {
+    results = [];
+    for (const call of toolCalls) {
+      results.push(await executeOneCall(call, deps));
+    }
+  } else {
+    results = await Promise.all(toolCalls.map((call) => executeOneCall(call, deps)));
+  }
 
   return { results };
 }

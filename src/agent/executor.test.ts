@@ -50,7 +50,7 @@ describe("executeCalls", () => {
     expect(results[0].id).toBe("call-1");
   });
 
-  it("executes multiple tool calls in parallel", async () => {
+  it("executes multiple read-only tool calls in parallel", async () => {
     const order: string[] = [];
     const registry = new ToolRegistry();
     registry.register({
@@ -88,6 +88,85 @@ describe("executeCalls", () => {
     // fast should finish before slow due to parallel execution
     expect(order[0]).toBe("fast");
     expect(order[1]).toBe("slow");
+  });
+
+  it("executes write tool calls sequentially in declared order", async () => {
+    const order: string[] = [];
+    const registry = new ToolRegistry();
+    // "edit" is a WRITE_TOOL; "slow-edit" simulates a slow edit
+    registry.register({
+      name: "edit",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async (_args) => {
+        await new Promise((r) => setTimeout(r, 20));
+        order.push("edit");
+        return { success: true, output: "edited" };
+      },
+    });
+    registry.register({
+      name: "write",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => {
+        order.push("write");
+        return { success: true, output: "written" };
+      },
+    });
+
+    const { results } = await executeCalls(
+      [makeToolCall("edit", {}, "c1"), makeToolCall("write", {}, "c2")],
+      {
+        tools: registry,
+        skills: makeSkillRegistry({}),
+        context: new ContextManager(),
+      },
+    );
+
+    expect(results).toHaveLength(2);
+    // edit must complete before write despite being slower
+    expect(order[0]).toBe("edit");
+    expect(order[1]).toBe("write");
+    expect(results[0].name).toBe("edit");
+    expect(results[1].name).toBe("write");
+  });
+
+  it("executes sequentially when a write tool is mixed with read tools", async () => {
+    const order: string[] = [];
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "read",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => {
+        order.push("read");
+        return { success: true, output: "content" };
+      },
+    });
+    registry.register({
+      name: "bash",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        order.push("bash");
+        return { success: true, output: "done" };
+      },
+    });
+
+    const { results } = await executeCalls(
+      [makeToolCall("bash", {}, "c1"), makeToolCall("read", {}, "c2")],
+      {
+        tools: registry,
+        skills: makeSkillRegistry({}),
+        context: new ContextManager(),
+      },
+    );
+
+    expect(results).toHaveLength(2);
+    // declared order preserved: bash first, then read
+    expect(order[0]).toBe("bash");
+    expect(order[1]).toBe("read");
   });
 
   it("returns error message in result on tool failure", async () => {

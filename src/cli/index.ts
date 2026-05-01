@@ -60,13 +60,13 @@ program
 program
   .command("config")
   .description("View or set configuration")
-  .option("--api-key <key>", "Set your Gemini API key")
+  .option("--gemini-api-key <key>", "Set your Gemini API key")
   .option("--anthropic-api-key <key>", "Set your Anthropic API key")
   .option("--openai-api-key <key>", "Set your OpenAI API key")
   .option("--model <model>", "Set the default model")
   .action(async (opts) => {
-    if (opts.apiKey) {
-      await saveConfig({ apiKey: opts.apiKey });
+    if (opts.geminiApiKey) {
+      await saveConfig({ geminiApiKey: opts.geminiApiKey });
       printInfo("Gemini API key saved.");
     }
     if (opts.anthropicApiKey) {
@@ -81,13 +81,13 @@ program
       await saveConfig({ model: opts.model });
       printInfo(`Default model set to ${opts.model}.`);
     }
-    if (!opts.apiKey && !opts.anthropicApiKey && !opts.openaiApiKey && !opts.model) {
+    if (!opts.geminiApiKey && !opts.anthropicApiKey && !opts.openaiApiKey && !opts.model) {
       const config = await loadConfig();
       console.log(
         JSON.stringify(
           {
             ...config,
-            apiKey: config.apiKey ? "***" : undefined,
+            geminiApiKey: config.geminiApiKey ? "***" : undefined,
             anthropicApiKey: config.anthropicApiKey ? "***" : undefined,
             openaiApiKey: config.openaiApiKey ? "***" : undefined,
           },

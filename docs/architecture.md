@@ -158,7 +158,7 @@ src/agent/
 
 `createClient(model, config)` in `factory.ts` detects the provider by model name prefix:
 - `claude-*` → `AnthropicClient` (reads `ANTHROPIC_API_KEY` / `config.anthropicApiKey`)
-- anything else → `GeminiClient` (reads `GEMINI_API_KEY` / `config.apiKey`)
+- anything else → `GeminiClient` (reads `GEMINI_API_KEY` / `config.geminiApiKey`)
 
 **Tool definitions vs tool execution:**
 
@@ -474,7 +474,7 @@ const result = await tools.execute("edit", {
 **User Configuration** (`~/.opencli/config.json`):
 ```json
 {
-  "apiKey": "...",
+  "geminiApiKey": "...",
   "anthropicApiKey": "...",
   "model": "gemini-3.1-flash-lite-preview",
   "maxTokens": 8192,

@@ -6,7 +6,7 @@ export const AGENT_DIR = join(homedir(), ".opencli");
 const CONFIG_FILE = join(AGENT_DIR, "config.json");
 
 export interface Config {
-  apiKey?: string;
+  geminiApiKey?: string;
   anthropicApiKey?: string;
   openaiApiKey?: string;
   model: string;
@@ -29,7 +29,13 @@ const DEFAULTS: Config = {
 export async function loadConfig(): Promise<Config> {
   try {
     const raw = await readFile(CONFIG_FILE, "utf8");
-    return { ...DEFAULTS, ...JSON.parse(raw) };
+    const saved = JSON.parse(raw) as Record<string, unknown>;
+    // Migrate legacy apiKey → geminiApiKey
+    if (typeof saved["apiKey"] === "string" && !saved["geminiApiKey"]) {
+      saved["geminiApiKey"] = saved["apiKey"];
+      delete saved["apiKey"];
+    }
+    return { ...DEFAULTS, ...(saved as Partial<Config>) };
   } catch {
     return { ...DEFAULTS };
   }

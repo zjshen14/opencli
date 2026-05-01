@@ -53,10 +53,10 @@ export function createClient(model: string, config: Config): LLMClient {
     return new OpenAIClient(key, model);
   }
 
-  const key = process.env.GEMINI_API_KEY ?? config.apiKey;
+  const key = process.env.GEMINI_API_KEY ?? config.geminiApiKey;
   if (!key) {
     throw new Error(
-      "No Gemini API key found. Set GEMINI_API_KEY or run: opencli config --api-key <key>",
+      "No Gemini API key found. Set GEMINI_API_KEY or run: opencli config --gemini-api-key <key>",
     );
   }
   return new GeminiClient(key, model);

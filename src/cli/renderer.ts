@@ -8,7 +8,15 @@ import TerminalRenderer from "marked-terminal";
 marked.setOptions({ renderer: new TerminalRenderer() });
 
 // Tools that render as compact one-liners (read-only, low noise)
-export const COMPACT_TOOLS = new Set(["read", "glob", "grep", "think"]);
+export const COMPACT_TOOLS = new Set([
+  "read",
+  "glob",
+  "grep",
+  "ls",
+  "think",
+  "todo_read",
+  "todo_write",
+]);
 
 export function renderMarkdown(text: string): string {
   return marked(text) as string;

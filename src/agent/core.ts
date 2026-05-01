@@ -23,7 +23,16 @@ export type AgentRunMode = "react" | "plan";
 // Tools exposed in plan mode — exploration only, no writes.
 // Bash is excluded: read/glob/grep cover 95% of exploration, and reliably
 // validating bash as read-only is hard (subshells, redirects, find -exec).
-const PLAN_MODE_TOOLS = new Set(["read", "glob", "grep", "think", "activate_skill"]);
+const PLAN_MODE_TOOLS = new Set([
+  "read",
+  "glob",
+  "grep",
+  "ls",
+  "web_fetch",
+  "todo_read",
+  "think",
+  "activate_skill",
+]);
 
 const PLAN_SYSTEM_SUFFIX = `
 
@@ -31,8 +40,8 @@ const PLAN_SYSTEM_SUFFIX = `
 
 You are in **Plan Mode**. Your only task is to explore the codebase and produce a concrete numbered execution plan. You CANNOT and MUST NOT modify any files.
 
-Available tools: \`read\`, \`glob\`, \`grep\`, \`think\`.
-Write tools (\`write\`, \`edit\`, \`bash\`) are blocked at the executor level.
+Available tools: \`read\`, \`glob\`, \`grep\`, \`ls\`, \`web_fetch\`, \`todo_read\`, \`think\`.
+Write tools (\`write\`, \`edit\`, \`bash\`, \`todo_write\`) are blocked at the executor level.
 
 ### Process
 

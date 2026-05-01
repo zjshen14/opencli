@@ -13,7 +13,7 @@ const DEFAULT_MAX_OUTPUT = 20_000;
 
 // Tools blocked when `readOnly` is set on ExecutorDeps (used by plan mode).
 // Defence-in-depth: even if the filtered tool list leaks, the executor refuses.
-const WRITE_TOOLS = new Set(["write", "edit", "bash"]);
+const WRITE_TOOLS = new Set(["write", "edit", "bash", "todo_write"]);
 
 export interface ExecutorDeps {
   tools: ToolRegistry;

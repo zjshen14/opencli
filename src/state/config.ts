@@ -8,6 +8,7 @@ const CONFIG_FILE = join(AGENT_DIR, "config.json");
 export interface Config {
   apiKey?: string;
   anthropicApiKey?: string;
+  openaiApiKey?: string;
   model: string;
   temperature: number;
   maxTokens: number;

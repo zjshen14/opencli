@@ -8,6 +8,21 @@ describe("detectProvider", () => {
     expect(detectProvider("claude-haiku-4-5-20251001")).toBe("anthropic");
   });
 
+  it("detects openai for gpt- prefix", () => {
+    expect(detectProvider("gpt-4o")).toBe("openai");
+    expect(detectProvider("gpt-4-turbo")).toBe("openai");
+    expect(detectProvider("gpt-3.5-turbo")).toBe("openai");
+  });
+
+  it("detects openai for o1/o3/o4 reasoning model prefixes", () => {
+    expect(detectProvider("o1")).toBe("openai");
+    expect(detectProvider("o1-mini")).toBe("openai");
+    expect(detectProvider("o1-preview")).toBe("openai");
+    expect(detectProvider("o3")).toBe("openai");
+    expect(detectProvider("o3-mini")).toBe("openai");
+    expect(detectProvider("o4-mini")).toBe("openai");
+  });
+
   it("defaults to gemini for all other model names", () => {
     expect(detectProvider("gemini-3.1-flash-lite-preview")).toBe("gemini");
     expect(detectProvider("gemini-2.5-pro")).toBe("gemini");

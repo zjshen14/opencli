@@ -1,5 +1,4 @@
 import chalk from "chalk";
-import { select, isCancel } from "@clack/prompts";
 import { execFileSync } from "node:child_process";
 import { writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -94,7 +93,7 @@ export async function runRepl(
       const planText = await runAgentTurn(agent, session, planPrompt, "plan");
       if (!planText.trim()) continue;
 
-      const decision = await promptPlanApproval();
+      const decision = await promptPlanApproval(history, allCommands);
       if (decision === "cancel") {
         printInfo("Plan cancelled.");
         continue;
@@ -247,17 +246,29 @@ export async function runAgentTurn(
   return fullText;
 }
 
-async function promptPlanApproval(): Promise<"approve" | "edit" | "cancel"> {
-  const choice = await select({
-    message: "Plan ready — what next?",
-    options: [
-      { value: "approve", label: "Approve & execute" },
-      { value: "edit", label: "Edit plan in $EDITOR first" },
-      { value: "cancel", label: "Cancel" },
-    ],
-  });
-  if (isCancel(choice)) return "cancel";
-  return choice as "approve" | "edit" | "cancel";
+async function promptPlanApproval(
+  history: string[],
+  commands: SlashCommand[],
+): Promise<"approve" | "edit" | "cancel"> {
+  process.stderr.write(
+    chalk.cyan("\n  Plan ready — what next?\n\n") +
+      chalk.bold("  [a]") +
+      "  Approve & execute\n" +
+      chalk.bold("  [e]") +
+      "  Edit in $EDITOR first\n" +
+      chalk.bold("  [c]") +
+      "  Cancel\n\n",
+  );
+  const raw = await readLine(history, commands);
+  if (raw === null) return "cancel";
+  switch (raw.trim().toLowerCase()[0]) {
+    case "a":
+      return "approve";
+    case "e":
+      return "edit";
+    default:
+      return "cancel";
+  }
 }
 
 async function editPlanInEditor(plan: string): Promise<string | null> {

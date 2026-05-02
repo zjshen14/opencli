@@ -74,6 +74,8 @@ Current docs:
 - `docs/api-and-efficiency.md` — Gemini API choice and token efficiency strategy
 - `docs/cli-ux-research.md` — REPL UX research and feature backlog
 - `docs/cli-ui-research.md` — visual design research (rendering, popups, spinners)
+- `docs/tools-design.md` — tool system architecture, per-tool rationale, how to add new tools, planned tools
+- `docs/tool-gaps-research.md` — research on web search and code navigation across frontier agents
 - `docs/engineering-practices.md` — this file
 
 **CLAUDE.md and AGENTS.md must stay in sync.** This project is worked on by both Claude Code and Codex. The two files are identical except for the first-line header. When you update one, update the other in the same commit. `CLAUDE.md` is the source of truth — copy the changed sections into `AGENTS.md`.

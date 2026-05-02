@@ -6,7 +6,7 @@ import type { Agent, AgentRunMode } from "../agent/core.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import { loadSkillFile, processBody } from "../skills/loader.js";
 import { join } from "node:path";
-import { readLine, loadHistory, saveHistory, type SlashCommand } from "./input.js";
+import { readLine, selectKey, loadHistory, saveHistory, type SlashCommand } from "./input.js";
 import { Session } from "../state/session.js";
 import {
   COMPACT_TOOLS,
@@ -93,7 +93,7 @@ export async function runRepl(
       const planText = await runAgentTurn(agent, session, planPrompt, "plan");
       if (!planText.trim()) continue;
 
-      const decision = await promptPlanApproval(history, allCommands);
+      const decision = await promptPlanApproval();
       if (decision === "cancel") {
         printInfo("Plan cancelled.");
         continue;
@@ -246,29 +246,15 @@ export async function runAgentTurn(
   return fullText;
 }
 
-async function promptPlanApproval(
-  history: string[],
-  commands: SlashCommand[],
-): Promise<"approve" | "edit" | "cancel"> {
-  process.stderr.write(
-    chalk.cyan("\n  Plan ready — what next?\n\n") +
-      chalk.bold("  [a]") +
-      "  Approve & execute\n" +
-      chalk.bold("  [e]") +
-      "  Edit in $EDITOR first\n" +
-      chalk.bold("  [c]") +
-      "  Cancel\n\n",
-  );
-  const raw = await readLine(history, commands);
-  if (raw === null) return "cancel";
-  switch (raw.trim().toLowerCase()[0]) {
-    case "a":
-      return "approve";
-    case "e":
-      return "edit";
-    default:
-      return "cancel";
-  }
+async function promptPlanApproval(): Promise<"approve" | "edit" | "cancel"> {
+  const choice = await selectKey("Plan ready — what next?", [
+    { key: "a", label: "Approve & execute" },
+    { key: "e", label: "Edit in $EDITOR first" },
+    { key: "c", label: "Cancel" },
+  ]);
+  if (choice === "a") return "approve";
+  if (choice === "e") return "edit";
+  return "cancel";
 }
 
 async function editPlanInEditor(plan: string): Promise<string | null> {

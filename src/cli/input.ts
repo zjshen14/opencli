@@ -136,6 +136,107 @@ function renderPopup(matches: SlashCommand[], selectedIdx: number): string {
   return out;
 }
 
+// ── Select widget ─────────────────────────────────────────────────────────────
+
+export interface SelectOption {
+  key: string;
+  label: string;
+}
+
+export function renderSelectOptions(options: SelectOption[], selectedIdx: number): string {
+  let out = "";
+  for (let i = 0; i < options.length; i++) {
+    const { key, label } = options[i];
+    const line = `  ${i === selectedIdx ? "›" : " "} ${label}  [${key}]`;
+    out += (i === selectedIdx ? chalk.bold(line) : chalk.dim(line)) + "\n";
+  }
+  return out;
+}
+
+/**
+ * Display a menu and return the key of the chosen option.
+ * - Pressing the option's single-character key selects immediately (no Enter).
+ * - Up / Down arrows navigate; Enter confirms the highlighted item.
+ * - Ctrl+C exits the process; returns null if the process should continue.
+ */
+export async function selectKey(prompt: string, options: SelectOption[]): Promise<string | null> {
+  emitKeypressEvents(stdin);
+  stdin.ref();
+  if (stdin.isTTY) stdin.setRawMode(true);
+
+  // prompt line + blank line + one line per option
+  const LINES = 2 + options.length;
+
+  return new Promise((resolve) => {
+    let selectedIdx = 0;
+    let rendered = false;
+
+    const render = () => {
+      let out = "";
+      if (rendered) {
+        out += A.up(LINES) + A.clearDown;
+      }
+      rendered = true;
+      out += chalk.cyan("  " + prompt) + "\n";
+      out += "\n";
+      out += renderSelectOptions(options, selectedIdx);
+      stdout.write(out);
+    };
+
+    const done = (result: string | null) => {
+      stdout.write(A.up(LINES) + A.clearDown);
+      if (stdin.isTTY) stdin.setRawMode(false);
+      stdin.removeListener("keypress", onKey);
+      stdin.unref();
+      resolve(result);
+    };
+
+    const onKey = (
+      _str: string,
+      key: { name: string; ctrl: boolean; meta: boolean; sequence: string },
+    ) => {
+      if (!key) return;
+
+      if (key.ctrl && key.name === "c") {
+        stdout.write("\n");
+        if (stdin.isTTY) stdin.setRawMode(false);
+        stdin.removeListener("keypress", onKey);
+        process.exit(0);
+      }
+
+      if (key.name === "return" || key.name === "enter") {
+        done(options[selectedIdx].key);
+        return;
+      }
+
+      if (key.name === "up") {
+        selectedIdx = Math.max(0, selectedIdx - 1);
+        render();
+        return;
+      }
+
+      if (key.name === "down") {
+        selectedIdx = Math.min(options.length - 1, selectedIdx + 1);
+        render();
+        return;
+      }
+
+      // Single-keypress shortcut — match against option keys
+      if (key.sequence && !key.ctrl && !key.meta) {
+        const pressed = key.sequence.toLowerCase();
+        const match = options.findIndex((o) => o.key.toLowerCase() === pressed);
+        if (match >= 0) {
+          done(options[match].key);
+          return;
+        }
+      }
+    };
+
+    stdin.on("keypress", onKey);
+    render();
+  });
+}
+
 // ── Main readLine ─────────────────────────────────────────────────────────────
 
 /**

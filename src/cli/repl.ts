@@ -8,6 +8,8 @@ import { loadSkillFile, processBody } from "../skills/loader.js";
 import { join } from "node:path";
 import { readLine, selectKey, loadHistory, saveHistory, type SlashCommand } from "./input.js";
 import type { ConfirmFn } from "../agent/executor.js";
+import { loadConfig, saveConfig } from "../state/config.js";
+import { loadSettings, saveSettings } from "../state/settings.js";
 import { Session } from "../state/session.js";
 import {
   COMPACT_TOOLS,
@@ -30,14 +32,17 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: "exit", description: "exit the agent" },
 ];
 
-export function createConfirmFn(): ConfirmFn {
-  const sessionAllowList = new Set<string>();
+export async function createConfirmFn(): Promise<ConfirmFn> {
+  const [config, settings] = await Promise.all([loadConfig(), loadSettings()]);
+
+  const globalAllowSet = new Set<string>(config.permissions?.allow ?? []);
+  const projectAllowSet = new Set<string>(settings.permissions?.allow ?? []);
 
   return async (toolName, args) => {
     if (!process.stdin.isTTY) return "deny";
 
     const key = `${toolName}:${JSON.stringify(args)}`;
-    if (sessionAllowList.has(key)) return "allow";
+    if (globalAllowSet.has(key) || projectAllowSet.has(key)) return "allow";
 
     const detail =
       toolName === "bash"
@@ -51,12 +56,22 @@ export function createConfirmFn(): ConfirmFn {
 
     const choice = await selectKey(`Allow ${toolName}?`, [
       { key: "y", label: "Yes, run once" },
-      { key: "s", label: "Yes, always this session" },
+      { key: "p", label: "Yes, always for this project  (.opencli/settings.json)" },
+      { key: "g", label: "Yes, always globally          (~/.opencli/config.json)" },
       { key: "n", label: "No, skip" },
     ]);
 
     if (choice === null || choice === "n") return "deny";
-    if (choice === "s") sessionAllowList.add(key);
+
+    if (choice === "p") {
+      projectAllowSet.add(key);
+      await saveSettings({ permissions: { allow: [...projectAllowSet] } });
+    } else if (choice === "g") {
+      globalAllowSet.add(key);
+      const cfg = await loadConfig();
+      await saveConfig({ permissions: { ...cfg.permissions, allow: [...globalAllowSet] } });
+    }
+
     return "allow";
   };
 }
@@ -66,7 +81,7 @@ export async function runRepl(
   skills: SkillRegistry,
   resumeSessionId?: string,
 ): Promise<void> {
-  agent.setConfirmFn(createConfirmFn());
+  agent.setConfirmFn(await createConfirmFn());
   printInfo(`OpenCLI — type /help for commands, Ctrl+C to exit\n`);
 
   let session: Session;

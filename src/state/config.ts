@@ -5,6 +5,10 @@ import { homedir } from "node:os";
 export const AGENT_DIR = join(homedir(), ".opencli");
 const CONFIG_FILE = join(AGENT_DIR, "config.json");
 
+export interface Permissions {
+  allow?: string[];
+}
+
 export interface Config {
   geminiApiKey?: string;
   anthropicApiKey?: string;
@@ -15,6 +19,7 @@ export interface Config {
   autoExecute: boolean;
   theme: "dark" | "light";
   historySize: number;
+  permissions?: Permissions;
 }
 
 const DEFAULTS: Config = {

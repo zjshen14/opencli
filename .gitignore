@@ -5,3 +5,4 @@ coverage/
 *.env.local
 .claude/
 .gemini-agent/tmp/
+.opencli/tmp/

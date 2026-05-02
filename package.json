@@ -1,7 +1,7 @@
 {
   "name": "@zjshen/opencli",
   "version": "0.1.1",
-  "description": "An open-source, model-agnostic AI coding agent CLI — supports Anthropic Claude, Google Gemini, and OpenAI models",
+  "description": "An open-source, model-agnostic AI coding agent CLI — works with any LLM provider",
   "type": "module",
   "bin": {
     "opencli": "./dist/index.js"

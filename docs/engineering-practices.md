@@ -94,6 +94,11 @@ Current docs:
 - If a commit is related but doesn't resolve the issue entirely, use `Part of #<issue_number>` or `References #<issue_number>`.
 - If you forget to link an issue in the commit message, manually comment on the issue with the commit hash to establish the link.
 
+**Progress updates on multi-phase issues:**
+- After completing each phase or milestone of a multi-phase issue, post a comment on the issue summarising: what was done, which commits landed, and what remains open.
+- Don't wait until the issue is fully closed — intermediate updates keep the issue as the canonical record of progress and make it easy to resume work in a future session without re-reading the full code diff.
+- A good update includes: a short summary of what changed, the commit hash(es), and an explicit list of what phases/steps are still open.
+
 **Branching Strategy:**
 - **Direct to `main`**: Acceptable for quick bug fixes, small scoped features, documentation updates, and changes that are well-tested and low-risk. When working with AI coding assistants, direct commits to `main` are standard for low-risk changes.
 - **Issue Branches (`feature/issue-123` or `fix/issue-123`)**: Required for large architectural changes, experimental features, or complex refactors that span multiple components or require extensive testing before integration. Merge via Pull Request once verified.

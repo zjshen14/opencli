@@ -107,6 +107,7 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 
 - **Always check for a related GitHub issue.** If your work addresses an issue, format your commit message to include `Closes #<issue_number>` (if fully resolved) or `Part of #<issue_number>` (if partial).
 - **If you forget to link an issue in the commit message**, use the GitHub CLI to comment on the issue with the commit hash.
+- **After completing each phase of a multi-phase issue**, post a comment on the issue summarising what landed (commit hash, what changed, what remains open). Don't wait until the issue is fully closed — intermediate updates keep the issue as the canonical record of progress.
 - **Before starting a complex or risky task**, explicitly ask the user if they would prefer you to create a feature branch (`git checkout -b feature/issue-123`) instead of committing directly to `main`. Small, well-scoped fixes should be committed directly to `main`.
 
 ## Configuration

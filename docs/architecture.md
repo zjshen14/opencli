@@ -108,6 +108,7 @@ src/cli/
 5. If function calls:
    ├─→ Execute tools (parallel, Promise.all)
    │    In plan mode: write/edit/bash blocked at executor level (readOnly guard)
+   │    For each call: check requiresConfirmation → invoke ConfirmFn if needed → deny or proceed
    ├─→ Append event-driven reminders to last tool result
    │    e.g. after edit/write → "run tests after making code changes"
    ├─→ Collect results
@@ -140,7 +141,7 @@ src/cli/
 src/agent/
   ├── core.ts            # Main agent loop; AgentRunMode type; plan-mode tool filtering + prompt suffix
   ├── context.ts         # Context management, ContextManager class
-  ├── executor.ts        # Tool execution; middle-truncation (bash/grep/glob >20k); readOnly guard for plan mode
+  ├── executor.ts        # Tool execution; middle-truncation (bash/grep/glob >20k); readOnly guard; HITL confirmation gate (ConfirmFn)
   └── prompt.ts          # DEFAULT_SYSTEM_INSTRUCTION; AGENT_REMINDERS (event-driven); getGitContext()
 ```
 
@@ -232,7 +233,7 @@ src/model/
 - `grep` — Search file contents with regex
 
 **Execution:**
-- `bash` — Execute shell commands (blocks dangerous patterns: `rm -rf`, `git push --force`, etc.)
+- `bash` — Execute shell commands. Commands not in the `SAFE_COMMANDS` allowlist require user confirmation via the HITL gate before running.
 
 **Reasoning:**
 - `think` — Private scratchpad for multi-step reasoning; output suppressed in the REPL UI. Omitted from the registry when the active model has native thinking (e.g. Gemini 2.5+/3.x) to avoid double-paying for reasoning.
@@ -246,6 +247,8 @@ interface Tool {
   description: string;
   parameters: JSONSchema;
   execute: (params: unknown) => Promise<ToolResult>;
+  /** Return true to require interactive user confirmation before execution. */
+  requiresConfirmation?: (args: Record<string, unknown>) => boolean;
 }
 
 interface ToolResult {
@@ -454,8 +457,9 @@ const result = await tools.execute("edit", {
 ```
 
 ### Safety Checks
-- Confirm dangerous operations (file deletion, force push)
-- Sandbox bash execution when possible
+- **HITL confirmation gate** — before executing a tool call, the executor checks `tool.requiresConfirmation?.(args)`. If true, it invokes the injected `ConfirmFn`:
+  - Interactive REPL: shows a `selectKey` prompt ("Yes once / Yes always this session / No"). The session allow-list is maintained as an in-memory `Set` inside the `ConfirmFn` closure.
+  - Non-interactive `run` mode: auto-denies unless `--yes` is passed (which installs an auto-approve `ConfirmFn`).
 - Validate file paths (prevent path traversal)
 - Rate limit API calls
 

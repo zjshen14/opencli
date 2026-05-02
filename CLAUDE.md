@@ -36,7 +36,7 @@ src/
     input.ts        # Raw-mode readline, /slash popup with arrow-key navigation
   agent/
     core.ts         # Agentic loop: stream → collect function calls → execute → feed back
-    executor.ts     # Parallel tool execution + skill activation dispatch
+    executor.ts     # Parallel tool execution, skill activation dispatch, HITL confirmation gate
     context.ts      # Conversation history, skill content injection, context pruning
     prompt.ts       # DEFAULT_SYSTEM_INSTRUCTION template + loadSystemInstruction() (OPENCLI_SYSTEM_MD)
   model/
@@ -50,7 +50,7 @@ src/
     base.ts         # Tool interface + JSONSchema type
     registry.ts     # ToolRegistry: register, execute, list
     file/           # read, write, edit, glob, grep
-    exec/           # bash (with dangerous-command guard)
+    exec/           # bash (with requiresConfirmation for non-safe commands)
     think.ts        # think tool — private scratchpad; skipped for native-thinking models
     index.ts        # createDefaultRegistry(model?) factory — omits think for native-thinking models
   skills/
@@ -71,6 +71,7 @@ src/
 2. Stream from the active `LLMClient` with tool + `activate_skill` definitions (filtered to read-only tools in plan mode)
 3. Collect text chunks (display immediately) and function calls
 4. Execute all tool calls in parallel (`Promise.all`); skill activations inject content into context; write tools are blocked when `readOnly` is set (plan mode)
+   - Before each execution, check `tool.requiresConfirmation(args)`; if true, invoke `confirmFn` (interactive y/n/always dialog in REPL; auto-deny in non-interactive mode unless `--yes`)
 5. Append event-driven reminders to the last tool result (e.g. after `edit` → "run tests")
 6. Feed results back as a user message; repeat from step 2 until no function calls
 7. **Safety guards**: max-turns limit (default 50, `--max-turns` to override); stuck-loop detection aborts after 3 identical consecutive call signatures
@@ -86,7 +87,7 @@ src/
 ## Key Conventions
 
 - All tools return `{ success: boolean; output: string; error?: string }`
-- Dangerous bash patterns (e.g. `rm -rf`, `git push --force`) are blocked at the tool level
+- Tools declare `requiresConfirmation?(args) => boolean` on their interface; the executor calls `confirmFn` when it returns true. Bash requires confirmation for any command not in its `SAFE_COMMANDS` allowlist; `write`/`edit` require it for paths outside `process.cwd()`.
 - `edit` tool requires `old_string` to appear exactly once — fails with a clear error if ambiguous
 - Prettier `printWidth: 100`, double quotes, trailing commas — run `npm run format` before committing
 - ESLint: `@typescript-eslint/recommended` + no unused vars (underscore prefix to suppress)

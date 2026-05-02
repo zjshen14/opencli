@@ -1,5 +1,5 @@
 import { writeFile, mkdir } from "node:fs/promises";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, sep } from "node:path";
 import type { Tool } from "../base.js";
 
 export const writeTool: Tool = {
@@ -13,6 +13,11 @@ export const writeTool: Tool = {
       content: { type: "string", description: "Content to write" },
     },
     required: ["file_path", "content"],
+  },
+  requiresConfirmation(args): boolean {
+    const absPath = resolve(args.file_path as string);
+    const cwd = process.cwd();
+    return !(absPath === cwd || absPath.startsWith(cwd + sep));
   },
   async execute({ file_path, content }) {
     const absPath = resolve(file_path as string);

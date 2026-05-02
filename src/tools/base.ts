@@ -14,4 +14,6 @@ export interface Tool {
   description: string;
   parameters: JSONSchema;
   execute: (params: Record<string, unknown>) => Promise<ToolResult>;
+  /** Return true if this call requires interactive user confirmation before execution. */
+  requiresConfirmation?: (args: Record<string, unknown>) => boolean;
 }

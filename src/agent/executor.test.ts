@@ -362,6 +362,113 @@ describe("executeCalls", () => {
   });
 });
 
+describe("executeCalls — confirmation", () => {
+  function makeConfirmableRegistry(name: string, output: string): ToolRegistry {
+    const registry = new ToolRegistry();
+    registry.register({
+      name,
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ success: true, output }),
+      requiresConfirmation: () => true,
+    });
+    return registry;
+  }
+
+  it("auto-denies when requiresConfirmation is true and no confirmFn is provided", async () => {
+    const executeMock = vi.fn(async () => ({ success: true, output: "ran" }));
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "risky",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: executeMock,
+      requiresConfirmation: () => true,
+    });
+
+    const { results } = await executeCalls([makeToolCall("risky")], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+    });
+
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(results[0].result).toContain("non-interactively");
+    expect(results[0].result).toContain("--yes");
+  });
+
+  it("calls confirmFn and executes when it returns allow", async () => {
+    const confirmFn = vi.fn(async () => "allow" as const);
+    const { results } = await executeCalls([makeToolCall("risky")], {
+      tools: makeConfirmableRegistry("risky", "executed"),
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      confirmFn,
+    });
+
+    expect(confirmFn).toHaveBeenCalledWith("risky", {});
+    expect(results[0].result).toBe("executed");
+  });
+
+  it("blocks execution and returns denial message when confirmFn returns deny", async () => {
+    const executeMock = vi.fn(async () => ({ success: true, output: "ran" }));
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "risky",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: executeMock,
+      requiresConfirmation: () => true,
+    });
+    const confirmFn = vi.fn(async () => "deny" as const);
+
+    const { results } = await executeCalls([makeToolCall("risky")], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      confirmFn,
+    });
+
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(results[0].result).toContain("denied");
+  });
+
+  it("skips confirmFn for tools where requiresConfirmation returns false", async () => {
+    const confirmFn = vi.fn(async () => "allow" as const);
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "safe",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ success: true, output: "ok" }),
+      requiresConfirmation: () => false,
+    });
+
+    const { results } = await executeCalls([makeToolCall("safe")], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      confirmFn,
+    });
+
+    expect(confirmFn).not.toHaveBeenCalled();
+    expect(results[0].result).toBe("ok");
+  });
+
+  it("passes tool name and args to confirmFn", async () => {
+    const confirmFn = vi.fn(async () => "allow" as const);
+    const { results } = await executeCalls([makeToolCall("risky", { command: "rm -rf /" }, "c1")], {
+      tools: makeConfirmableRegistry("risky", "done"),
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      confirmFn,
+    });
+
+    expect(confirmFn).toHaveBeenCalledWith("risky", { command: "rm -rf /" });
+    expect(results[0].result).toBe("done");
+  });
+});
+
 describe("truncateOutput", () => {
   it("returns output unchanged when within limit", () => {
     const prev = process.env.OPENCLI_MAX_TOOL_OUTPUT;

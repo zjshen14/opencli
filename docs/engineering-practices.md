@@ -109,7 +109,7 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
 
 ## Security
 
-**Validate at boundaries.** The `bash` tool blocks dangerous patterns (`rm -rf`, `git push --force`, etc.) at execution time. The `edit` tool requires exact unique matches to prevent unintended edits.
+**Validate at boundaries.** The `bash` tool uses a `SAFE_COMMANDS` allowlist; any command outside that list routes through the HITL confirmation gate (`requiresConfirmation` → `ConfirmFn`). The `edit` tool requires exact unique matches to prevent unintended edits. `write` and `edit` require confirmation for paths outside `process.cwd()`.
 
 **No path traversal.** File tools use `resolve()` to normalise paths. Don't add file tools that accept raw user-supplied paths without resolving them first.
 

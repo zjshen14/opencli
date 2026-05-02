@@ -4,6 +4,7 @@ import type { SkillRegistry } from "../skills/registry.js";
 import { toolToDefinition, activateSkillDefinition } from "../model/schema.js";
 import { ContextManager } from "./context.js";
 import { executeCalls } from "./executor.js";
+import type { ConfirmFn } from "./executor.js";
 import { buildReminder, buildPlanSuffix } from "./prompt.js";
 import type { FunctionCallPart, Message } from "../model/types.js";
 
@@ -38,6 +39,7 @@ const PLAN_SYSTEM_SUFFIX = buildPlanSuffix(PLAN_MODE_TOOLS);
 
 export class Agent {
   private context: ContextManager;
+  private confirmFn?: ConfirmFn;
 
   constructor(
     private client: LLMClient,
@@ -48,6 +50,10 @@ export class Agent {
     private maxTurns: number = DEFAULT_MAX_TURNS,
   ) {
     this.context = new ContextManager(systemInstruction, maxHistoryMessages);
+  }
+
+  setConfirmFn(fn: ConfirmFn): void {
+    this.confirmFn = fn;
   }
 
   setSessionTmpDir(dir: string): void {
@@ -155,6 +161,7 @@ export class Agent {
         context: this.context,
         tmpDir: this.context.getSessionTmpDir(),
         readOnly: mode === "plan",
+        confirmFn: this.confirmFn,
       });
 
       // Append an event-driven reminder to the last tool result based on what

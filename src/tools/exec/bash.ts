@@ -3,15 +3,40 @@ import type { Tool } from "../base.js";
 
 const TIMEOUT_MS = 30_000;
 
-// Commands that require user confirmation before executing
-const DANGEROUS_PATTERNS = [
-  /rm\s+-rf/,
-  /git\s+push\s+--force/,
-  /git\s+reset\s+--hard/,
-  /:\s*>\s*\S+/, // truncate file
-  /mkfs/,
-  /dd\s+if=/,
-  /chmod\s+-R\s+777/,
+// Commands matching these patterns are considered safe read-only operations that
+// do not require user confirmation before running.
+const SAFE_COMMANDS = [
+  // File inspection
+  /^ls(\s|$)/,
+  /^cat(\s|$)/,
+  /^head(\s|$)/,
+  /^tail(\s|$)/,
+  /^grep(\s|$)/,
+  /^rg(\s|$)/,
+  /^find(\s|$)/,
+  /^diff(\s|$)/,
+  /^stat(\s|$)/,
+  /^wc(\s|$)/,
+  /^sort(\s|$)/,
+  /^uniq(\s|$)/,
+  /^file(\s|$)/,
+  /^type(\s|$)/,
+  // Shell utilities
+  /^echo(\s|$)/,
+  /^printf(\s|$)/,
+  /^pwd$/,
+  /^which(\s|$)/,
+  /^whoami$/,
+  /^date(\s|$)/,
+  /^env(\s|$)/,
+  /^printenv(\s|$)/,
+  // Git read-only operations
+  /^git\s+(status|log|diff|show|branch|remote|tag|describe|rev-parse|shortlog|blame|ls-files|ls-tree|stash\s+list)(\s|$)/,
+  // npm / node read-only
+  /^npm\s+(test|run\s+(test|typecheck|lint|format:check)|ls|list|audit|outdated)(\s|$)/,
+  /^npx\s+tsc(\s|$)/,
+  /^node\s+(--version|-v)$/,
+  /^npm\s+(--version|-v)$/,
 ];
 
 export const bashTool: Tool = {
@@ -29,18 +54,12 @@ export const bashTool: Tool = {
     },
     required: ["command"],
   },
+  requiresConfirmation(args): boolean {
+    const cmd = (args.command as string).trim();
+    return !SAFE_COMMANDS.some((p) => p.test(cmd));
+  },
   async execute({ command, cwd }) {
     const cmd = command as string;
-
-    for (const pattern of DANGEROUS_PATTERNS) {
-      if (pattern.test(cmd)) {
-        return {
-          success: false,
-          output: "",
-          error: `Refusing to execute potentially destructive command. Pattern matched: ${pattern}`,
-        };
-      }
-    }
 
     return new Promise((resolve) => {
       const proc = spawn("bash", ["-c", cmd], {

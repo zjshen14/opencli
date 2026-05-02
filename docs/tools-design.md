@@ -14,6 +14,8 @@ interface Tool {
   description: string;        // what the model reads to decide when to call it
   parameters: JSONSchema;     // input schema
   execute: (params: Record<string, unknown>) => Promise<ToolResult>;
+  /** Return true to require interactive user confirmation before the executor runs this call. */
+  requiresConfirmation?: (args: Record<string, unknown>) => boolean;
 }
 ```
 
@@ -43,6 +45,26 @@ When `Agent.run(input, "plan")` is called, only read-only tools are exposed. The
 1. Filtered from the tool definitions sent to the LLM
 2. Refused by the executor (`WRITE_TOOLS` set in `executor.ts`) as defence-in-depth
 
+### Confirmation gate (HITL)
+
+Before executing any tool call, the executor checks the optional `requiresConfirmation?(args) => boolean` hook:
+
+- **Returns false / hook absent** → execute immediately (no dialog).
+- **Returns true + interactive REPL** → show a `selectKey` prompt:
+  ```
+    ⚠  bash requires confirmation
+       rm -rf ./dist
+
+    Allow bash?
+    › Yes, run once   [y]
+      Yes, always this session   [s]
+      No, skip   [n]
+  ```
+  "Always this session" adds a key to an in-memory set so the same call is auto-approved for the rest of the session.
+- **Returns true + non-interactive `run` mode** → auto-denied unless `--yes` flag was passed (which installs an auto-approve `ConfirmFn`).
+
+The `ConfirmFn` type is defined in `executor.ts` and injected via `ExecutorDeps`. This keeps the executor testable — tests pass a mock `vi.fn()` rather than triggering real terminal I/O.
+
 ### Renderer display
 
 Tools fall into two display categories in the CLI:
@@ -66,12 +88,16 @@ Read file contents with line numbers (`cat -n` style). Supports `offset` (1-base
 #### `write`
 Create or overwrite a file entirely. Requires `file_path` and `content`.
 
+**Confirmation:** `requiresConfirmation` returns `true` only for paths outside `process.cwd()`. Files within the project directory are written without prompting.
+
 **When to use:** creating new files, or rewriting a file completely. Prefer `edit` for targeted changes.
 
 **Plan mode:** ❌ blocked
 
 #### `edit`
 Exact `old_string → new_string` replacement. The `old_string` must appear **exactly once** in the file — fails with a clear error if ambiguous or not found.
+
+**Confirmation:** `requiresConfirmation` returns `true` only for paths outside `process.cwd()`. Edits within the project directory proceed without prompting.
 
 **When to use:** surgical changes to existing files. The uniqueness requirement prevents unintended edits.
 
@@ -101,7 +127,9 @@ List directory contents with file type and size. Directories are listed first, t
 ### Exec tools (`src/tools/exec/`)
 
 #### `bash`
-Execute a shell command. Dangerous patterns (`rm -rf`, `git push --force`, etc.) are blocked at the tool level. Output is truncated at `OPENCLI_MAX_TOOL_OUTPUT`.
+Execute a shell command. Output is truncated at `OPENCLI_MAX_TOOL_OUTPUT`.
+
+**Confirmation:** `requiresConfirmation` returns `false` only for commands matching the `SAFE_COMMANDS` allowlist (read-only file inspection, git status/log/diff/show, npm test/typecheck/lint). Every other command — including formerly hard-blocked patterns like `rm -rf` and `git push --force` — routes through the HITL confirmation gate so the user can approve or deny interactively.
 
 **When to use:** running tests, builds, git commands, package managers, or anything requiring a real shell. All other file tools are preferred over `bash` for file operations.
 
@@ -169,7 +197,8 @@ Providers without native search (OpenAI standard models, DeepSeek, Gemma) requir
 2. **Write a test** — colocate at `src/tools/<category>/<name>.test.ts`. Use a real `tmpdir` for filesystem tools; mock `fetch` / external services at the boundary.
 3. **Register in `src/tools/index.ts`** — add to the export list and to the `tools` array in `createDefaultRegistry`.
 4. **Plan mode** — decide if the tool is read-only. If yes, add its name to `PLAN_MODE_TOOLS` in `src/agent/core.ts`. If it mutates state, add it to `WRITE_TOOLS` in `src/agent/executor.ts`.
-5. **Renderer** — decide if it should render as compact or full-box. Add to `COMPACT_TOOLS` in `src/cli/renderer.ts` if it's a fast read-only tool.
+5. **Confirmation** — if the tool can have side effects outside the project or is irreversible, implement `requiresConfirmation(args) => boolean`. Return `true` for calls that warrant a user prompt; return `false` (or omit the hook entirely) for safe read-only calls. The executor handles the actual dialog — the tool just signals intent.
+6. **Renderer** — decide if it should render as compact or full-box. Add to `COMPACT_TOOLS` in `src/cli/renderer.ts` if it's a fast read-only tool.
 6. **Tool description** — the description is what the model reads to decide *when* to call the tool. It should state: what the tool does, what it returns, and when to prefer it over alternatives (e.g. "use `ls` for directory listing; use `glob` when you need pattern matching").
 
 ---

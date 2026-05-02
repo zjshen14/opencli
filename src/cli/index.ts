@@ -6,7 +6,7 @@ import { SkillRegistry } from "../skills/registry.js";
 import { loadConfig, saveConfig } from "../state/config.js";
 import { Session } from "../state/session.js";
 import { loadSystemInstruction } from "../agent/prompt.js";
-import { runRepl } from "./repl.js";
+import { runRepl, createConfirmFn } from "./repl.js";
 import { printError, printInfo } from "./renderer.js";
 
 const program = new Command();
@@ -53,8 +53,15 @@ program
   .option("-m, --model <model>", "Model to use")
   .option("--max-turns <n>", "Maximum agent iterations (default: 50)", parseInt)
   .option("--plan", "Run a read-only planning pass first, then auto-execute the plan")
+  .option("--yes", "Auto-approve all tool confirmations (skip interactive prompts)")
   .action(async (prompt: string, opts) => {
-    await runSingle(prompt, opts.model, opts.maxTurns, opts.plan as boolean | undefined);
+    await runSingle(
+      prompt,
+      opts.model,
+      opts.maxTurns,
+      opts.plan as boolean | undefined,
+      opts.yes as boolean | undefined,
+    );
   });
 
 program
@@ -117,8 +124,15 @@ async function runSingle(
   modelOverride?: string,
   maxTurns?: number,
   planMode?: boolean,
+  autoApprove?: boolean,
 ): Promise<void> {
   const { agent } = await createAgent(modelOverride, maxTurns);
+  if (autoApprove) {
+    agent.setConfirmFn(async () => "allow");
+  } else if (process.stdin.isTTY) {
+    agent.setConfirmFn(createConfirmFn());
+  }
+  // no confirmFn → executor auto-denies tools that require confirmation
 
   const stream = async (input: string, mode: "react" | "plan") => {
     let text = "";

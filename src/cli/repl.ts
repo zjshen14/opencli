@@ -7,6 +7,7 @@ import type { SkillRegistry } from "../skills/registry.js";
 import { loadSkillFile, processBody } from "../skills/loader.js";
 import { join } from "node:path";
 import { readLine, selectKey, loadHistory, saveHistory, type SlashCommand } from "./input.js";
+import type { ConfirmFn } from "../agent/executor.js";
 import { Session } from "../state/session.js";
 import {
   COMPACT_TOOLS,
@@ -29,11 +30,43 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: "exit", description: "exit the agent" },
 ];
 
+export function createConfirmFn(): ConfirmFn {
+  const sessionAllowList = new Set<string>();
+
+  return async (toolName, args) => {
+    if (!process.stdin.isTTY) return "deny";
+
+    const key = `${toolName}:${JSON.stringify(args)}`;
+    if (sessionAllowList.has(key)) return "allow";
+
+    const detail =
+      toolName === "bash"
+        ? (args.command as string)
+        : toolName === "write" || toolName === "edit"
+          ? (args.file_path as string)
+          : JSON.stringify(args);
+
+    process.stderr.write(chalk.yellow(`\n  ⚠  ${toolName} requires confirmation\n`));
+    process.stderr.write(chalk.dim(`     ${detail}\n`));
+
+    const choice = await selectKey(`Allow ${toolName}?`, [
+      { key: "y", label: "Yes, run once" },
+      { key: "s", label: "Yes, always this session" },
+      { key: "n", label: "No, skip" },
+    ]);
+
+    if (choice === null || choice === "n") return "deny";
+    if (choice === "s") sessionAllowList.add(key);
+    return "allow";
+  };
+}
+
 export async function runRepl(
   agent: Agent,
   skills: SkillRegistry,
   resumeSessionId?: string,
 ): Promise<void> {
+  agent.setConfirmFn(createConfirmFn());
   printInfo(`OpenCLI — type /help for commands, Ctrl+C to exit\n`);
 
   let session: Session;

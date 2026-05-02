@@ -1,5 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import type { Tool } from "../base.js";
 
 export const editTool: Tool = {
@@ -14,6 +14,11 @@ export const editTool: Tool = {
       new_string: { type: "string", description: "The replacement string" },
     },
     required: ["file_path", "old_string", "new_string"],
+  },
+  requiresConfirmation(args): boolean {
+    const absPath = resolve(args.file_path as string);
+    const cwd = process.cwd();
+    return !(absPath === cwd || absPath.startsWith(cwd + sep));
   },
   async execute({ file_path, old_string, new_string }) {
     const absPath = resolve(file_path as string);

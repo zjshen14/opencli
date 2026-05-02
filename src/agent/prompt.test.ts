@@ -7,6 +7,8 @@ import {
   DEFAULT_SYSTEM_INSTRUCTION,
   getGitContext,
   buildReminder,
+  renderSystemInstruction,
+  buildPlanSuffix,
 } from "./prompt.js";
 
 afterEach(() => {
@@ -90,5 +92,82 @@ describe("buildReminder", () => {
     expect(reminder).toContain("never commit or push");
     // Single [reminder: ...] block
     expect(reminder.split("[reminder:").length).toBe(2);
+  });
+});
+
+describe("renderSystemInstruction", () => {
+  const template = "cwd={CWD} tmp={SESSION_TMP} git={GIT_CONTEXT}tools={TOOL_CATALOG}";
+
+  it("substitutes all placeholders", () => {
+    const result = renderSystemInstruction(template, {
+      cwd: "/my/project",
+      tmpDir: "/tmp/session",
+      tools: [],
+      gitContext: "",
+    });
+    expect(result).toContain("cwd=/my/project");
+    expect(result).toContain("tmp=/tmp/session");
+  });
+
+  it("builds tool catalog from provided tools", () => {
+    const result = renderSystemInstruction(template, {
+      cwd: "/p",
+      tmpDir: "/t",
+      tools: [
+        { name: "read", description: "Read a file", parameters: {} },
+        { name: "write", description: "Write a file", parameters: {} },
+      ],
+      gitContext: "",
+    });
+    expect(result).toContain("## Available Tools");
+    expect(result).toContain("- read: Read a file");
+    expect(result).toContain("- write: Write a file");
+  });
+
+  it("omits tool catalog section when no tools provided", () => {
+    const result = renderSystemInstruction(template, {
+      cwd: "/p",
+      tmpDir: "/t",
+      tools: [],
+      gitContext: "",
+    });
+    expect(result).not.toContain("## Available Tools");
+    expect(result).toContain("tools=");
+  });
+
+  it("appends git context with trailing newlines when present", () => {
+    const result = renderSystemInstruction(template, {
+      cwd: "/p",
+      tmpDir: "/t",
+      tools: [],
+      gitContext: "## Repository\nBranch: main",
+    });
+    expect(result).toContain("## Repository");
+  });
+});
+
+describe("buildPlanSuffix", () => {
+  it("includes allowed tool names as backtick list", () => {
+    const suffix = buildPlanSuffix(new Set(["read", "glob", "grep", "activate_skill"]));
+    expect(suffix).toContain("`read`");
+    expect(suffix).toContain("`glob`");
+    expect(suffix).toContain("`grep`");
+  });
+
+  it("excludes activate_skill from the visible tool list", () => {
+    const suffix = buildPlanSuffix(new Set(["read", "activate_skill"]));
+    expect(suffix).not.toContain("`activate_skill`");
+  });
+
+  it("contains Plan Mode header and output format", () => {
+    const suffix = buildPlanSuffix(new Set(["read"]));
+    expect(suffix).toContain("## Plan Mode");
+    expect(suffix).toContain("## Plan:");
+    expect(suffix).toContain("Do NOT begin execution");
+  });
+
+  it("reflects new tools added to the set without code changes", () => {
+    const suffix = buildPlanSuffix(new Set(["read", "new_tool"]));
+    expect(suffix).toContain("`new_tool`");
   });
 });

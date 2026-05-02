@@ -4,7 +4,7 @@ import type { SkillRegistry } from "../skills/registry.js";
 import { toolToDefinition, activateSkillDefinition } from "../model/schema.js";
 import { ContextManager } from "./context.js";
 import { executeCalls } from "./executor.js";
-import { buildReminder } from "./prompt.js";
+import { buildReminder, buildPlanSuffix } from "./prompt.js";
 import type { FunctionCallPart, Message } from "../model/types.js";
 
 export type AgentEvent =
@@ -34,44 +34,7 @@ const PLAN_MODE_TOOLS = new Set([
   "activate_skill",
 ]);
 
-const PLAN_SYSTEM_SUFFIX = `
-
-## Plan Mode
-
-You are in **Plan Mode**. Your only task is to explore the codebase and produce a concrete numbered execution plan. You CANNOT and MUST NOT modify any files.
-
-Available tools: \`read\`, \`glob\`, \`grep\`, \`ls\`, \`web_fetch\`, \`todo_read\`, \`think\`.
-Write tools (\`write\`, \`edit\`, \`bash\`, \`todo_write\`) are blocked at the executor level.
-
-### Process
-
-1. **Understand** — Restate the goal in one sentence. Make assumptions explicit; do not ask the user clarifying questions (flag any uncertainties in the Risks section instead).
-2. **Explore** — Use glob/grep to map relevant files, then read the ones most central to the task. Follow imports as needed. Skip files you don't need.
-3. **Design** — Use think to reason about the approach, constraints, and alternatives.
-4. **Plan** — Output the final plan in the format below, then stop.
-
-### Output format
-
-## Plan: <short title>
-
-- [ ] 1. **<step title>** — \`path/to/file.ts\` — one-line description
-- [ ] 2. **<step title>** — \`path/to/file.ts\` — one-line description
-- [ ] N. **Verify** — \`npm test\` (or relevant command)
-
-### Critical files
-- \`path/to/file1.ts\` — why this is central
-- \`path/to/file2.ts\` — why
-
-### Risks / assumptions
-- ⚠️ <risk or unverified assumption — one line>
-
-### Rules
-
-- 3–10 steps for most tasks
-- Each step must name a specific file path
-- Use ⚠️ for any step that depends on an unverified assumption
-- Do NOT include full file contents or large code blocks
-- Do NOT begin execution — stop after producing the plan`;
+const PLAN_SYSTEM_SUFFIX = buildPlanSuffix(PLAN_MODE_TOOLS);
 
 export class Agent {
   private context: ContextManager;

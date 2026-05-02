@@ -12,6 +12,7 @@
 
 import { readFile } from "node:fs/promises";
 import { execSync } from "node:child_process";
+import type { ToolDefinition } from "../model/types.js";
 
 export function getGitContext(): string {
   try {
@@ -88,6 +89,73 @@ export function buildReminder(
   const triggered = AGENT_REMINDERS.filter((r) => r.shouldFire(calls)).map((r) => r.text);
   if (triggered.length === 0) return "";
   return `\n\n[reminder: ${triggered.join("; ")}]`;
+}
+
+// ── System instruction rendering ─────────────────────────────────────────────
+
+export interface SystemInstructionContext {
+  cwd: string;
+  tmpDir: string;
+  tools: ToolDefinition[];
+  gitContext: string;
+}
+
+export function renderSystemInstruction(template: string, ctx: SystemInstructionContext): string {
+  const toolCatalog =
+    ctx.tools.length > 0
+      ? `## Available Tools\n${ctx.tools.map((t) => `- ${t.name}: ${t.description ?? ""}`).join("\n")}`
+      : "";
+  return template
+    .replaceAll("{CWD}", ctx.cwd)
+    .replaceAll("{SESSION_TMP}", ctx.tmpDir)
+    .replaceAll("{TOOL_CATALOG}", toolCatalog)
+    .replaceAll("{GIT_CONTEXT}", ctx.gitContext ? ctx.gitContext + "\n\n" : "");
+}
+
+export function buildPlanSuffix(allowedTools: ReadonlySet<string>): string {
+  const toolList = [...allowedTools]
+    .filter((t) => t !== "activate_skill")
+    .map((t) => `\`${t}\``)
+    .join(", ");
+
+  return `
+
+## Plan Mode
+
+You are in **Plan Mode**. Your only task is to explore the codebase and produce a concrete numbered execution plan. You CANNOT and MUST NOT modify any files.
+
+Available tools: ${toolList}.
+Write tools (\`write\`, \`edit\`, \`bash\`, \`todo_write\`) are blocked at the executor level.
+
+### Process
+
+1. **Understand** — Restate the goal in one sentence. Make assumptions explicit; do not ask the user clarifying questions (flag any uncertainties in the Risks section instead).
+2. **Explore** — Use glob/grep to map relevant files, then read the ones most central to the task. Follow imports as needed. Skip files you don't need.
+3. **Design** — Use think to reason about the approach, constraints, and alternatives.
+4. **Plan** — Output the final plan in the format below, then stop.
+
+### Output format
+
+## Plan: <short title>
+
+- [ ] 1. **<step title>** — \`path/to/file.ts\` — one-line description
+- [ ] 2. **<step title>** — \`path/to/file.ts\` — one-line description
+- [ ] N. **Verify** — \`npm test\` (or relevant command)
+
+### Critical files
+- \`path/to/file1.ts\` — why this is central
+- \`path/to/file2.ts\` — why
+
+### Risks / assumptions
+- ⚠️ <risk or unverified assumption — one line>
+
+### Rules
+
+- 3–10 steps for most tasks
+- Each step must name a specific file path
+- Use ⚠️ for any step that depends on an unverified assumption
+- Do NOT include full file contents or large code blocks
+- Do NOT begin execution — stop after producing the plan`;
 }
 
 // ── System instruction template ───────────────────────────────────────────────

@@ -204,6 +204,47 @@ describe("summariseResult", () => {
     });
   });
 
+  describe("ls", () => {
+    it("counts entries correctly", () => {
+      const result = stripAnsi(summariseResult("ls", "src/\na.ts (10 bytes)\nb.ts (20 bytes)"));
+      expect(result).toContain("3 entries");
+    });
+
+    it("uses singular for one entry", () => {
+      const result = stripAnsi(summariseResult("ls", "a.ts (5 bytes)"));
+      expect(result).toContain("1 entry");
+      expect(result).not.toContain("entries");
+    });
+
+    it("handles empty directory", () => {
+      const result = stripAnsi(summariseResult("ls", "(empty directory)"));
+      expect(result).toContain("0 entries");
+    });
+  });
+
+  describe("todo_write / todo_read", () => {
+    it("summarises task statuses", () => {
+      const output = "[x] 1. Done\n[~] 2. In progress\n[ ] 3. Pending";
+      const result = stripAnsi(summariseResult("todo_write", output));
+      expect(result).toContain("3 tasks");
+      expect(result).toContain("1 done");
+      expect(result).toContain("1 in progress");
+      expect(result).toContain("1 pending");
+    });
+
+    it("works for todo_read too", () => {
+      const output = "[x] 1. Done\n[x] 2. Also done";
+      const result = stripAnsi(summariseResult("todo_read", output));
+      expect(result).toContain("2 tasks");
+      expect(result).toContain("2 done");
+    });
+
+    it("shows empty when no tasks", () => {
+      const result = stripAnsi(summariseResult("todo_write", "(empty list)"));
+      expect(result).toContain("empty");
+    });
+  });
+
   describe("unknown tool", () => {
     it("shows a flattened preview of the result", () => {
       const result = stripAnsi(summariseResult("custom", "line1\nline2"));

@@ -103,6 +103,17 @@ export function printToolCallCompact(name: string, args: Record<string, unknown>
     process.stderr.write(chalk.dim("  ◦ thinking…") + "\n");
     return;
   }
+  if (name === "todo_write") {
+    const items = Array.isArray(args.items) ? args.items : [];
+    process.stderr.write(
+      chalk.dim(`  ○ todo   writing ${items.length} task${items.length === 1 ? "" : "s"}`) + "\n",
+    );
+    return;
+  }
+  if (name === "todo_read") {
+    process.stderr.write(chalk.dim("  ○ todo   reading task list") + "\n");
+    return;
+  }
   const arg = compactArg(args);
   process.stderr.write(chalk.dim(`  ○ ${name.padEnd(6)}${arg}`) + "\n");
 }
@@ -193,6 +204,23 @@ export function summariseResult(name: string, result: string): string {
   }
   if (name === "write") {
     return `${name.padEnd(6)}${chalk.dim("written")}`;
+  }
+  if (name === "ls") {
+    const entries = trimmed && trimmed !== "(empty directory)" ? trimmed.split("\n").length : 0;
+    return `ls    ${chalk.dim(`${entries} entr${entries === 1 ? "y" : "ies"}`)}`;
+  }
+  if (name === "todo_write" || name === "todo_read") {
+    const lines = trimmed ? trimmed.split("\n") : [];
+    const done = lines.filter((l) => l.startsWith("[x]")).length;
+    const inProgress = lines.filter((l) => l.startsWith("[~]")).length;
+    const pending = lines.filter((l) => l.startsWith("[ ]")).length;
+    const total = done + inProgress + pending;
+    if (total === 0) return `todo  ${chalk.dim("(empty)")}`;
+    const parts = [];
+    if (done) parts.push(`${done} done`);
+    if (inProgress) parts.push(`${inProgress} in progress`);
+    if (pending) parts.push(`${pending} pending`);
+    return `todo  ${chalk.dim(`${total} task${total === 1 ? "" : "s"} — ${parts.join(", ")}`)}`;
   }
 
   const preview = trimmed.replace(/\n/g, " ").slice(0, 100);

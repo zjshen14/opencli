@@ -138,9 +138,9 @@ Write tools (\`write\`, \`edit\`, \`bash\`, \`todo_write\`) are blocked at the e
 
 ## Plan: <short title>
 
-- [ ] 1. **<step title>** — \`path/to/file.ts\` — one-line description
-- [ ] 2. **<step title>** — \`path/to/file.ts\` — one-line description
-- [ ] N. **Verify** — \`npm test\` (or relevant command)
+- [1] **<step title>** — \`path/to/file.ts\` — one-line description
+- [2] **<step title>** — \`path/to/file.ts\` — one-line description
+- [N] **Verify** — \`npm test\` (or relevant command)
 
 ### Critical files
 - \`path/to/file1.ts\` — why this is central

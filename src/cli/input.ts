@@ -154,17 +154,20 @@ export function renderSelectOptions(options: SelectOption[], selectedIdx: number
 }
 
 /**
- * Display a menu and return the key of the chosen option.
+ * Display a menu and return the key of the chosen option, or null on Escape/Ctrl+D.
  * - Pressing the option's single-character key selects immediately (no Enter).
  * - Up / Down arrows navigate; Enter confirms the highlighted item.
- * - Ctrl+C exits the process; returns null if the process should continue.
+ * - Escape / Ctrl+D returns null (caller treats as cancel).
+ * - Ctrl+C exits the process.
  */
 export async function selectKey(prompt: string, options: SelectOption[]): Promise<string | null> {
   emitKeypressEvents(stdin);
   stdin.ref();
   if (stdin.isTTY) stdin.setRawMode(true);
 
-  // prompt line + blank line + one line per option
+  // 1 prompt line + 1 blank line + N option lines; strip newlines from prompt
+  // to prevent LINES cursor-math drift on wrapping terminals.
+  const safePrompt = prompt.replace(/\n/g, " ");
   const LINES = 2 + options.length;
 
   return new Promise((resolve) => {
@@ -177,7 +180,7 @@ export async function selectKey(prompt: string, options: SelectOption[]): Promis
         out += A.up(LINES) + A.clearDown;
       }
       rendered = true;
-      out += chalk.cyan("  " + prompt) + "\n";
+      out += chalk.cyan("  " + safePrompt) + "\n";
       out += "\n";
       out += renderSelectOptions(options, selectedIdx);
       stdout.write(out);
@@ -202,6 +205,11 @@ export async function selectKey(prompt: string, options: SelectOption[]): Promis
         if (stdin.isTTY) stdin.setRawMode(false);
         stdin.removeListener("keypress", onKey);
         process.exit(0);
+      }
+
+      if (key.name === "escape" || (key.ctrl && key.name === "d")) {
+        done(null);
+        return;
       }
 
       if (key.name === "return" || key.name === "enter") {

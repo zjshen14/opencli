@@ -3,7 +3,7 @@ import { executeCalls, truncateOutput } from "./executor.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { ContextManager } from "./context.js";
 import type { SkillRegistry } from "../skills/registry.js";
-import type { FunctionCallPart } from "../model/types.js";
+import type { FunctionCallPart } from "../providers/types.js";
 
 function makeToolCall(
   name: string,

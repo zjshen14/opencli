@@ -1,11 +1,12 @@
 import { Command } from "commander";
-import { createClient } from "../model/factory.js";
-import { Agent } from "../agent/core.js";
+import { createClient, detectProvider } from "../providers/factory.js";
+import { Agent } from "../core/agent.js";
 import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
 import { loadConfig, saveConfig } from "../state/config.js";
 import { Session } from "../state/session.js";
-import { loadSystemInstruction } from "../agent/prompt.js";
+import { loadSystemInstruction } from "../core/prompt.js";
+import { resolveApiKey } from "./keys.js";
 import { runRepl, createConfirmFn } from "./repl.js";
 import { printError, printInfo } from "./renderer.js";
 
@@ -165,7 +166,9 @@ async function createAgent(modelOverride?: string, maxTurns?: number) {
   const config = await loadConfig();
   const model = process.env.OPENCLI_MODEL ?? modelOverride ?? config.model;
 
-  const client = createClient(model, config);
+  const provider = detectProvider(model);
+  const apiKey = resolveApiKey(provider, config);
+  const client = createClient(model, apiKey);
   const tools = createDefaultRegistry(model);
   const skills = new SkillRegistry();
   await skills.discover();

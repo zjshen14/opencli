@@ -22,7 +22,7 @@ import { bashTool } from "./exec/bash.js";
 import { thinkTool } from "./think.js";
 import { webFetchTool } from "./web/fetch.js";
 import { todoWriteTool, todoReadTool } from "./task/todo.js";
-import { hasNativeThinking } from "../model/factory.js";
+import { hasNativeThinking } from "../providers/factory.js";
 
 /**
  * Creates a tool registry with all built-in tools.

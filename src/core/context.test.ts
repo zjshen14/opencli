@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ContextManager } from "./context.js";
 import { DEFAULT_SYSTEM_INSTRUCTION } from "./prompt.js";
-import type { Message } from "../model/types.js";
+import type { Message } from "../providers/types.js";
 
 // Minimal template used in most tests — fast and independent of prompt wording changes
 const STUB = "Agent. CWD={CWD} TMP={SESSION_TMP}\n{SKILL_CATALOG}{TOOL_CATALOG}";

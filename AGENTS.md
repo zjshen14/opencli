@@ -28,22 +28,22 @@ API keys are loaded from `.env` (`GEMINI_API_KEY` for Gemini models, `ANTHROPIC_
 
 ```
 src/
-  cli/
+  cli/            # Thin adapter — reads config/env, wires dependencies, runs the REPL
     index.ts        # Entry point — commander CLI (chat / run / sessions / config commands)
     repl.ts         # Interactive REPL, /slash command interception, skill loading, session logging
     renderer.ts     # MarkdownStreamRenderer (paragraph-level streaming), tool call display
     input.ts        # Raw-mode readline, /slash popup with arrow-key navigation
-  agent/
-    core.ts         # Agentic loop: stream → collect function calls → execute → feed back
+  core/           # Pure library — no process.env reads, no CLI/state imports
+    agent.ts        # Agentic loop: stream → collect function calls → execute → feed back
     executor.ts     # Parallel tool execution, skill activation dispatch, HITL confirmation gate
     context.ts      # Conversation history, skill content injection, context pruning
     prompt.ts       # DEFAULT_SYSTEM_INSTRUCTION template + loadSystemInstruction() (OPENCLI_SYSTEM_MD)
-  model/
+  providers/      # LLM clients — no CLI/state imports
     types.ts        # Shared types: Message, StreamEvent, ToolDefinition, ToolResult, thoughtSignature
     client.ts       # LLMClient interface — the provider plug point
     gemini.ts       # GeminiClient implements LLMClient; Gemini-specific schema conversion internal
     anthropic.ts    # AnthropicClient implements LLMClient; translates role/tool formats internally
-    factory.ts      # createClient(model, config) — picks provider by model name prefix
+    factory.ts      # createClient(model, apiKey) — picks provider by model name prefix
     schema.ts       # Generic toolToDefinition() + activateSkillDefinition (plain JSONSchema, no provider deps)
   tools/
     base.ts         # Tool interface + JSONSchema type
@@ -65,7 +65,7 @@ src/
 
 **Data flow**: User input → CLI Layer → Agent Core → LLM provider (streaming) → Tool/Skill execution → feed results back → repeat until final text response.
 
-**Agentic loop** (`src/agent/core.ts`):
+**Agentic loop** (`src/core/agent.ts`):
 1. Add user message to context
 2. Stream from the active `LLMClient` with tool + `activate_skill` definitions (filtered to read-only tools in plan mode)
 3. Collect text chunks (display immediately) and function calls
@@ -77,7 +77,7 @@ src/
 
 **Plan mode** (`Agent.run(input, "plan")`): restricts tools to `read/glob/grep/think`, appends a plan-specific system prompt suffix, and sets `readOnly` on the executor so write tools are blocked at two layers. The REPL's `/plan <task>` command runs a plan pass, then shows `[@clack/prompts select]` Approve / Edit / Cancel before switching to react mode for execution.
 
-**Provider abstraction**: `LLMClient` (in `model/client.ts`) is the single interface the Agent Core depends on. `schema.ts` converts `Tool` objects to generic `ToolDefinition` (plain JSONSchema). Each provider client translates `ToolDefinition[]` and `Message[]` into its own wire format internally — Gemini converts types to uppercase and uses `functionCall`/`functionResponse`; Anthropic maps `role: "model"` → `"assistant"` and uses `tool_use`/`tool_result` blocks. The provider is selected by `createClient()` in `factory.ts` based on model name prefix (`claude-` → Anthropic, otherwise Gemini).
+**Provider abstraction**: `LLMClient` (in `providers/client.ts`) is the single interface the Agent Core depends on. `schema.ts` converts `Tool` objects to generic `ToolDefinition` (plain JSONSchema). Each provider client translates `ToolDefinition[]` and `Message[]` into its own wire format internally — Gemini converts types to uppercase and uses `functionCall`/`functionResponse`; Anthropic maps `role: "model"` → `"assistant"` and uses `tool_use`/`tool_result` blocks. The provider is selected by `createClient(model, apiKey)` in `factory.ts` based on model name prefix (`claude-` → Anthropic, otherwise Gemini). API key resolution (env vars + config file) happens in `cli/index.ts` — the library layer never reads `process.env` or config files.
 
 **Thinking models + `thoughtSignature`**: Gemini thinking models (e.g. `gemini-3.1-*`) require `thoughtSignature` to be captured from each `functionCall` part and echoed back in the corresponding `functionResponse`. This is threaded through `FunctionCallPart` → `FunctionResultPart` → the API request in `gemini.ts`. The Anthropic client ignores this field.
 
@@ -100,8 +100,9 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 
 **Full engineering practices are in [`docs/engineering-practices.md`](docs/engineering-practices.md).** Check it before writing code. Key rules:
 - Colocate tests next to source (`context.ts` → `context.test.ts`)
-- Each layer owns its concern — `model/` never touches filesystem, `tools/` never imports provider SDKs
-- No circular imports: `cli → agent → model/tools/skills/state`
+- Each layer owns its concern — `providers/` never touches filesystem, `tools/` never imports provider SDKs
+- No circular imports: `cli → core/providers/tools/skills/state`
+- `core/` and `providers/` must never import from `cli/` or `state/` — API keys and config are resolved by the CLI layer and passed as constructor arguments
 - Mock at system boundaries only; use real filesystem for file tool tests
 - Document non-obvious decisions in `docs/`
 

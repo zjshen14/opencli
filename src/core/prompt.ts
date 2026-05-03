@@ -12,7 +12,7 @@
 
 import { readFile } from "node:fs/promises";
 import { execSync } from "node:child_process";
-import type { ToolDefinition } from "../model/types.js";
+import type { ToolDefinition } from "../providers/types.js";
 
 export function getGitContext(): string {
   try {

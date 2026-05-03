@@ -1,5 +1,5 @@
 import type { Tool } from "./base.js";
-import type { ToolResult } from "../model/types.js";
+import type { ToolResult } from "../providers/types.js";
 
 export class ToolRegistry {
   private tools = new Map<string, Tool>();

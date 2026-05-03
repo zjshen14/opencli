@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { Agent } from "./core.js";
+import { Agent } from "./agent.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { SkillRegistry } from "../skills/registry.js";
-import type { LLMClient } from "../model/client.js";
-import type { Message, StreamEvent, ToolDefinition } from "../model/types.js";
+import type { LLMClient } from "../providers/client.js";
+import type { Message, StreamEvent, ToolDefinition } from "../providers/types.js";
 
 // A client that always requests the same tool call (never finishes on its own)
 function makeLoopingClient(toolName = "noop", args: Record<string, unknown> = {}): LLMClient {

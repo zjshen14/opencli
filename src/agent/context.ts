@@ -4,6 +4,7 @@ import { DEFAULT_SYSTEM_INSTRUCTION, getGitContext, renderSystemInstruction } fr
 export class ContextManager {
   private history: Message[] = [];
   private skillContent: string[] = []; // activated skill bodies, never pruned
+  private activatedSkills = new Set<string>();
   private maxHistoryMessages: number;
   private sessionTmpDir: string | undefined = undefined;
   private cachedSystemInstruction: string | null = null;
@@ -57,12 +58,13 @@ export class ContextManager {
   }
 
   addSkillContent(name: string, body: string): void {
+    this.activatedSkills.add(name);
     const tagged = `<skill_content name="${name}">\n${body}\n</skill_content>`;
     this.skillContent.push(tagged);
   }
 
   hasSkill(name: string): boolean {
-    return this.skillContent.some((s) => s.includes(`name="${name}"`));
+    return this.activatedSkills.has(name);
   }
 
   getMessages(): Message[] {
@@ -84,6 +86,7 @@ export class ContextManager {
   clear(): void {
     this.history = [];
     this.skillContent = [];
+    this.activatedSkills.clear();
     this.cachedSystemInstruction = null;
     this.cachedToolSignature = null;
   }

@@ -130,7 +130,7 @@ src/cli/
 - On approval: plan injected as a synthetic user message, agent switches to `"react"` mode for execution
 
 **Skill responsibilities in Agent Core:**
-- At session start: call `SkillRegistry.discover()`, inject skill catalog (name + description only, ~50–100 tokens/skill) into the system prompt so the model knows which skills are available
+- At session start: `SkillRegistry.discover()` is called; the catalog (name + description, ~50–100 tokens/skill) is injected into the system prompt via `{SKILL_CATALOG}` so the model can self-activate skills via `activate_skill`
 - On user-explicit activation (`/skill-name`): receive pre-processed skill content from CLI Layer, inject into conversation context as a system event
 - On model-driven activation: handle `activate_skill` function calls from the LLM, load and inject the full `SKILL.md` body as a tool result
 - Protect activated skill content from context pruning (tag with `<skill_content name="...">`)
@@ -316,24 +316,44 @@ Current branch info:
 2. **Model-driven**: Gemini calls `activate_skill("review")` when it matches the catalog description — Agent Core loads and injects
 
 **Built-in skills** (shipped with the CLI):
+
+_Core workflow_
+- `/commit` — Draft and create a git commit (user-only, `disable-agent-invocation: true`)
+- `/gh-issue` — Create, view, list, and comment on GitHub issues via `gh` CLI
+- `/gh-pr` — Open, review, check CI, and merge GitHub PRs via `gh` CLI
+- `/branch` — Create feature branches tied to GitHub issue numbers
+
+_Code quality_
 - `/review` — Code review for correctness, style, security
-- `/commit` — Draft and create a git commit
-- `/explain` — Explain selected code or a concept
 - `/debug` — Diagnose and fix a reported error
+- `/run-tests` — Detect test framework, run suite, surface failures
+- `/typecheck` — Run `tsc`/`mypy` and report type errors grouped by file
+- `/lint` — Run linter with optional auto-fix
+
+_Comprehension_
+- `/explain` — Explain selected code or a concept
 - `/test` — Write tests for a given function or module
 
 **Key Files:**
 ```
 src/skills/
-  ├── registry.ts        # Discover, parse, and catalog SKILL.md files
+  ├── registry.ts        # Discover, parse, and catalog SKILL.md files; catalogSummary() → {SKILL_CATALOG}
   ├── loader.ts          # Load skill body, run !{} preprocessors, substitute $ARGUMENTS
   └── builtin/           # Built-in skill SKILL.md files
-      ├── review/
       ├── commit/
-      ├── explain/
+      ├── gh-issue/
+      ├── gh-pr/
+      ├── branch/
+      ├── review/
       ├── debug/
+      ├── run-tests/
+      ├── typecheck/
+      ├── lint/
+      ├── explain/
       └── test/
 ```
+
+> See [`docs/skills.md`](skills.md) for the full authoring guide (format, preprocessors, custom skills).
 
 ### 6. State Management
 

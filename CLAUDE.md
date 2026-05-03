@@ -56,7 +56,7 @@ src/
   skills/
     registry.ts     # Discover SKILL.md files across 4 scoped directories
     loader.ts       # Parse SKILL.md frontmatter, !{cmd} preprocessing, $ARGUMENTS substitution
-    builtin/        # review, commit, explain, debug, test
+    builtin/        # review, commit, explain, debug, test, gh-issue, gh-pr, branch, run-tests, typecheck, lint
   state/
     config.ts       # ~/.opencli/config.json load/save; exports AGENT_DIR, Config (incl. anthropicApiKey)
     session.ts      # JSONL session logs at ~/.opencli/projects/<cwd>/; create, list, resume
@@ -82,7 +82,9 @@ src/
 
 **Thinking models + `thoughtSignature`**: Gemini thinking models (e.g. `gemini-3.1-*`) require `thoughtSignature` to be captured from each `functionCall` part and echoed back in the corresponding `functionResponse`. This is threaded through `FunctionCallPart` → `FunctionResultPart` → the API request in `gemini.ts`. The Anthropic client ignores this field.
 
-**Skill system**: Skills are `SKILL.md` files (YAML frontmatter + Markdown instructions) injected into the agent context on activation. They follow the [Agent Skills open standard](https://agentskills.io). Discovery priority: project `.opencli/skills/` → project `.agents/skills/` → user `~/.opencli/skills/` → bundled built-ins. Invoke with `/skill-name [args]` or the model calls `activate_skill`.
+**Skill system**: Skills are `SKILL.md` files (YAML frontmatter + Markdown instructions) injected into the agent context on activation. They follow the [Agent Skills open standard](https://agentskills.io). Discovery priority: project `.opencli/skills/` → project `.agents/skills/` → user `~/.opencli/skills/` → bundled built-ins. Invoke with `/skill-name [args]` or the model calls `activate_skill`. See [`docs/skills.md`](docs/skills.md) for the full authoring guide.
+
+**When adding, removing, or renaming a built-in skill**, update all four places: `docs/skills.md` (built-in table), `docs/architecture.md` (skill list + file tree), and the `builtin/` comment in both `CLAUDE.md` and `AGENTS.md`.
 
 ## Key Conventions
 

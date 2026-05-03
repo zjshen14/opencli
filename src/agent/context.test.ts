@@ -141,6 +141,14 @@ describe("ContextManager", () => {
     expect(ctx.hasSkill("debug")).toBe(false);
   });
 
+  it("hasSkill does not false-positive when skill body contains name= substring", () => {
+    const ctx = new ContextManager(STUB);
+    // Body text contains the substring that the old implementation searched for
+    ctx.addSkillContent("xml-guide", 'Use name="foo" to reference skill foo.');
+    expect(ctx.hasSkill("foo")).toBe(false);
+    expect(ctx.hasSkill("xml-guide")).toBe(true);
+  });
+
   it("wraps skill content in skill_content tags", () => {
     const ctx = new ContextManager(STUB);
     ctx.addSkillContent("test", "Test instructions.");

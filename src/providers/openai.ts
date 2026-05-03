@@ -38,11 +38,19 @@ export class OpenAIClient implements LLMClient {
           messages: openaiMessages,
           tools: openaiTools.length > 0 ? openaiTools : undefined,
           stream: true,
+          stream_options: { include_usage: true },
         });
 
         const pendingCalls = new Map<number, { id: string; name: string; args: string }>();
+        let inputTokens = 0;
+        let outputTokens = 0;
 
         for await (const chunk of apiStream) {
+          if (chunk.usage) {
+            inputTokens = chunk.usage.prompt_tokens;
+            outputTokens = chunk.usage.completion_tokens;
+          }
+
           const choice = chunk.choices[0];
           if (!choice) continue;
 
@@ -80,6 +88,9 @@ export class OpenAIClient implements LLMClient {
           }
         }
 
+        if (inputTokens > 0 || outputTokens > 0) {
+          yield { type: "usage", inputTokens, outputTokens };
+        }
         yield { type: "done" };
         return;
       } catch (err) {

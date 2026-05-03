@@ -35,26 +35,36 @@ export class GeminiClient implements LLMClient {
           },
         });
 
+        let usageInputTokens = 0;
+        let usageOutputTokens = 0;
+
         for await (const chunk of response) {
           const candidate = chunk.candidates?.[0];
-          if (!candidate?.content?.parts) continue;
-
-          for (const part of candidate.content.parts) {
-            if (part.text) {
-              yield { type: "text", text: part.text };
-            } else if (part.functionCall) {
-              yield {
-                type: "function_call",
-                id: part.functionCall.id ?? crypto.randomUUID(),
-                name: part.functionCall.name ?? "",
-                args: (part.functionCall.args ?? {}) as Record<string, unknown>,
-                thoughtSignature: (part as unknown as { thoughtSignature?: string })
-                  .thoughtSignature,
-              };
+          if (candidate?.content?.parts) {
+            for (const part of candidate.content.parts) {
+              if (part.text) {
+                yield { type: "text", text: part.text };
+              } else if (part.functionCall) {
+                yield {
+                  type: "function_call",
+                  id: part.functionCall.id ?? crypto.randomUUID(),
+                  name: part.functionCall.name ?? "",
+                  args: (part.functionCall.args ?? {}) as Record<string, unknown>,
+                  thoughtSignature: (part as unknown as { thoughtSignature?: string })
+                    .thoughtSignature,
+                };
+              }
             }
+          }
+          if (chunk.usageMetadata) {
+            usageInputTokens = chunk.usageMetadata.promptTokenCount ?? 0;
+            usageOutputTokens = chunk.usageMetadata.candidatesTokenCount ?? 0;
           }
         }
 
+        if (usageInputTokens > 0 || usageOutputTokens > 0) {
+          yield { type: "usage", inputTokens: usageInputTokens, outputTokens: usageOutputTokens };
+        }
         yield { type: "done" };
         return;
       } catch (err) {

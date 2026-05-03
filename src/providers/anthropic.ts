@@ -37,9 +37,18 @@ export class AnthropicClient implements LLMClient {
         let currentToolId = "";
         let currentToolName = "";
         let currentToolInput = "";
+        let inputTokens = 0;
+        let outputTokens = 0;
 
         for await (const event of apiStream) {
-          if (event.type === "content_block_start" && event.content_block.type === "tool_use") {
+          if (event.type === "message_start") {
+            inputTokens = event.message.usage.input_tokens;
+          } else if (event.type === "message_delta") {
+            outputTokens = event.usage.output_tokens;
+          } else if (
+            event.type === "content_block_start" &&
+            event.content_block.type === "tool_use"
+          ) {
             currentToolId = event.content_block.id;
             currentToolName = event.content_block.name;
             currentToolInput = "";
@@ -60,6 +69,9 @@ export class AnthropicClient implements LLMClient {
           }
         }
 
+        if (inputTokens > 0 || outputTokens > 0) {
+          yield { type: "usage", inputTokens, outputTokens };
+        }
         yield { type: "done" };
         return;
       } catch (err) {

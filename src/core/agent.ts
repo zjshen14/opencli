@@ -7,6 +7,7 @@ import { executeCalls } from "./executor.js";
 import type { ConfirmFn } from "./executor.js";
 import { buildReminder, buildPlanSuffix } from "./prompt.js";
 import type { FunctionCallPart, Message } from "../providers/types.js";
+import type { ObservabilityHandler } from "./observability.js";
 
 export type AgentEvent =
   | { type: "text"; text: string }
@@ -40,6 +41,8 @@ const PLAN_SYSTEM_SUFFIX = buildPlanSuffix(PLAN_MODE_TOOLS);
 export class Agent {
   private context: ContextManager;
   private confirmFn?: ConfirmFn;
+  private model: string;
+  private obs?: ObservabilityHandler;
 
   constructor(
     private client: LLMClient,
@@ -48,9 +51,12 @@ export class Agent {
     systemInstruction?: string,
     maxHistoryMessages?: number,
     private maxTurns: number = DEFAULT_MAX_TURNS,
+    options?: { model?: string; onObservability?: ObservabilityHandler },
   ) {
     this.context = new ContextManager(systemInstruction, maxHistoryMessages);
     this.context.setSkillCatalog(skills.catalogSummary());
+    this.model = options?.model ?? "";
+    this.obs = options?.onObservability;
   }
 
   setConfirmFn(fn: ConfirmFn): void {
@@ -93,11 +99,15 @@ export class Agent {
       const pendingCalls: FunctionCallPart[] = [];
       let responseText = "";
 
-      for await (const event of this.client.stream(
-        this.context.getMessages(),
-        systemInstruction,
-        toolDefinitions,
-      )) {
+      const messages = this.context.getMessages();
+      const estimatedTokens = Math.round(JSON.stringify(messages).length / 4);
+      this.obs?.({ type: "context_snapshot", messageCount: messages.length, estimatedTokens });
+      this.obs?.({ type: "llm_call_start", model: this.model, inputMessages: messages.length });
+      const callStart = Date.now();
+      let usageInputTokens = 0;
+      let usageOutputTokens = 0;
+
+      for await (const event of this.client.stream(messages, systemInstruction, toolDefinitions)) {
         if (event.type === "text") {
           responseText += event.text;
           yield { type: "text", text: event.text };
@@ -115,8 +125,19 @@ export class Agent {
             args: event.args,
             thoughtSignature: event.thoughtSignature,
           };
+        } else if (event.type === "usage") {
+          usageInputTokens = event.inputTokens;
+          usageOutputTokens = event.outputTokens;
         }
       }
+
+      this.obs?.({
+        type: "llm_call_end",
+        model: this.model,
+        inputTokens: usageInputTokens,
+        outputTokens: usageOutputTokens,
+        latencyMs: Date.now() - callStart,
+      });
 
       const assistantParts: Message["parts"] = [];
       if (responseText) assistantParts.push({ type: "text", text: responseText });
@@ -133,6 +154,11 @@ export class Agent {
       // Max turns guard
       turns++;
       if (turns > this.maxTurns) {
+        this.obs?.({
+          type: "guard_triggered",
+          guard: "max_turns",
+          reason: `Reached ${this.maxTurns} turns`,
+        });
         yield {
           type: "error",
           message: `Reached maximum iterations (${this.maxTurns}). Try breaking the task into smaller steps.`,
@@ -145,6 +171,11 @@ export class Agent {
       if (sig === lastCallSig) {
         stuckCount++;
         if (stuckCount >= STUCK_THRESHOLD) {
+          this.obs?.({
+            type: "guard_triggered",
+            guard: "stuck_loop",
+            reason: `${STUCK_THRESHOLD} identical consecutive call signatures`,
+          });
           yield {
             type: "error",
             message: `Detected ${STUCK_THRESHOLD} identical tool calls in a row — stopping to avoid a loop.`,
@@ -163,6 +194,7 @@ export class Agent {
         tmpDir: this.context.getSessionTmpDir(),
         readOnly: mode === "plan",
         confirmFn: this.confirmFn,
+        obs: this.obs,
       });
 
       // Append an event-driven reminder to the last tool result based on what

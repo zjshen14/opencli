@@ -4,6 +4,7 @@ import type { FunctionCallPart, FunctionResultPart } from "../providers/types.js
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import type { ContextManager } from "./context.js";
+import type { ObservabilityHandler } from "./observability.js";
 
 // Tools whose output is truncated when it exceeds the limit.
 // read is excluded — it supports offset/limit pagination and agents rely on
@@ -28,6 +29,7 @@ export interface ExecutorDeps {
   tmpDir?: string;
   readOnly?: boolean;
   confirmFn?: ConfirmFn;
+  obs?: ObservabilityHandler;
 }
 
 export function truncateOutput(output: string, callId: string, tmpDir?: string): string {
@@ -66,6 +68,7 @@ async function executeOneCall(
   deps: ExecutorDeps,
 ): Promise<FunctionResultPart> {
   if (deps.readOnly && WRITE_TOOLS.has(call.name)) {
+    deps.obs?.({ type: "tool_denied", name: call.name, reason: "plan_mode" });
     return {
       type: "function_result",
       id: call.id,
@@ -81,6 +84,11 @@ async function executeOneCall(
       ? await deps.confirmFn(call.name, call.args as Record<string, unknown>)
       : "deny";
     if (decision === "deny") {
+      deps.obs?.({
+        type: "tool_denied",
+        name: call.name,
+        reason: deps.confirmFn ? "user_denied" : "non_interactive",
+      });
       return {
         type: "function_result",
         id: call.id,
@@ -93,9 +101,22 @@ async function executeOneCall(
     }
   }
 
+  deps.obs?.({
+    type: "tool_exec_start",
+    name: call.name,
+    args: call.args as Record<string, unknown>,
+  });
+  const execStart = Date.now();
   const result = await deps.tools.execute(call.name, call.args as Record<string, unknown>);
   const raw = result.error ? `Error: ${result.error}` : result.output || "(no output)";
   const output = TRUNCATE_TOOLS.has(call.name) ? truncateOutput(raw, call.id, deps.tmpDir) : raw;
+  deps.obs?.({
+    type: "tool_exec_end",
+    name: call.name,
+    latencyMs: Date.now() - execStart,
+    success: result.success,
+    outputBytes: output.length,
+  });
   return {
     type: "function_result",
     id: call.id,

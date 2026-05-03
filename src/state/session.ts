@@ -5,13 +5,13 @@
  *   ~/.opencli/projects/<encoded-cwd>/<session-id>.jsonl
  *
  * Sessions are never written to the project directory itself, keeping the
- * workspace clean. The project path is encoded by replacing "/" with "-".
+ * workspace clean. The project path is encoded using base64url to prevent collisions.
  *
- * Session ID: YYYY-MM-DDTHH-mm-ss — human-readable, lexicographically sortable,
- * no collision risk (users can't start two sessions in the same second).
+ * Session ID: YYYY-MM-DDTHH-mm-ss-SSS — human-readable, lexicographically sortable,
+ * millisecond precision to prevent collisions.
  */
 
-import { mkdir, appendFile, readdir, readFile } from "node:fs/promises";
+import { mkdir, appendFile, readdir, readFile, stat, rename } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
@@ -19,15 +19,55 @@ import { AGENT_DIR } from "./config.js";
 import type { FunctionCallPart, FunctionResultPart, Message } from "../providers/types.js";
 
 function encodeProjectPath(cwd: string): string {
-  return cwd.replace(/\//g, "-");
+  return Buffer.from(cwd).toString("base64url");
 }
 
 function makeSessionId(): string {
-  return new Date().toISOString().slice(0, 19).replace(/:/g, "-");
+  return new Date().toISOString().slice(0, 23).replace(/[:.]/g, "-");
 }
 
-function sessionProjectDir(cwd: string): string {
-  return join(AGENT_DIR, "projects", encodeProjectPath(cwd));
+async function sessionProjectDir(cwd: string): Promise<string> {
+  const newDir = join(AGENT_DIR, "projects", encodeProjectPath(cwd));
+  const oldDir = join(AGENT_DIR, "projects", cwd.replace(/\//g, "-"));
+
+  if (newDir !== oldDir) {
+    try {
+      const oldStats = await stat(oldDir);
+      if (oldStats.isDirectory()) {
+        let newExists = false;
+        try {
+          await stat(newDir);
+          newExists = true;
+        } catch {
+          // newDir doesn't exist
+        }
+
+        if (!newExists) {
+          // Rename old to new if new doesn't exist
+          await rename(oldDir, newDir);
+        } else {
+          // Merge: move each old session file into the new dir
+          try {
+            const files = await readdir(oldDir);
+            await Promise.all(
+              files
+                .filter((f) => f.endsWith(".jsonl"))
+                .map((f) =>
+                  rename(join(oldDir, f), join(newDir, f)).catch(() => {
+                    /* ignore rename errors */
+                  }),
+                ),
+            );
+          } catch {
+            /* ignore read errors */
+          }
+        }
+      }
+    } catch {
+      // Old directory doesn't exist, no migration needed
+    }
+  }
+  return newDir;
 }
 
 /** List JSONL session files for a project dir, newest first. Returns [] on ENOENT. */
@@ -175,7 +215,7 @@ export class Session {
 
   static async create(cwd: string = process.cwd()): Promise<Session> {
     const id = makeSessionId();
-    const dir = sessionProjectDir(cwd);
+    const dir = await sessionProjectDir(cwd);
     await mkdir(dir, { recursive: true });
     const logPath = join(dir, `${id}.jsonl`);
     const session = new Session(id, cwd, logPath);
@@ -188,7 +228,7 @@ export class Session {
    * Returns up to `limit` entries with the first user message as a preview.
    */
   static async list(cwd: string = process.cwd(), limit = 20): Promise<SessionSummary[]> {
-    const dir = sessionProjectDir(cwd);
+    const dir = await sessionProjectDir(cwd);
     const files = (await listSessionFiles(dir)).slice(0, limit);
     return Promise.all(
       files.map(async (file) => ({
@@ -206,7 +246,7 @@ export class Session {
     id: string,
     cwd: string = process.cwd(),
   ): Promise<{ session: Session; messages: Message[] }> {
-    const dir = sessionProjectDir(cwd);
+    const dir = await sessionProjectDir(cwd);
 
     let sessionId = id;
     if (id === "latest") {

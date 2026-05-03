@@ -21,7 +21,7 @@ const CWD = "/test/project";
 describe("Session.create", () => {
   it("returns a session with a timestamp-format id", async () => {
     const session = await Session.create(CWD);
-    expect(session.id).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/);
+    expect(session.id).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}$/);
   });
 
   it("sets cwd correctly", async () => {
@@ -311,7 +311,7 @@ describe("Session.loadMessages — malformed JSONL resilience", () => {
     const { AGENT_DIR } = await import("./config.js");
     const { join } = await import("node:path");
 
-    const projectDir = join(AGENT_DIR, "projects", CWD.replace(/\//g, "-"));
+    const projectDir = join(AGENT_DIR, "projects", Buffer.from(CWD).toString("base64url"));
     await mkdir(projectDir, { recursive: true });
     const id = "2025-01-01T00-00-00";
     const logPath = join(projectDir, `${id}.jsonl`);
@@ -341,7 +341,7 @@ describe("Session.loadMessages — malformed JSONL resilience", () => {
     const { AGENT_DIR } = await import("./config.js");
     const { join } = await import("node:path");
 
-    const projectDir = join(AGENT_DIR, "projects", CWD.replace(/\//g, "-"));
+    const projectDir = join(AGENT_DIR, "projects", Buffer.from(CWD).toString("base64url"));
     await mkdir(projectDir, { recursive: true });
     const id = "2025-01-01T00-00-01";
     const logPath = join(projectDir, `${id}.jsonl`);
@@ -350,5 +350,56 @@ describe("Session.loadMessages — malformed JSONL resilience", () => {
 
     const { messages } = await Session.loadMessages(id, CWD);
     expect(messages).toHaveLength(0);
+  });
+});
+
+describe("Session migration", () => {
+  it("renames old directory to new directory if new does not exist", async () => {
+    const { mkdir, writeFile, stat } = await import("node:fs/promises");
+    const { AGENT_DIR } = await import("./config.js");
+    const { join } = await import("node:path");
+
+    const oldDir = join(AGENT_DIR, "projects", CWD.replace(/\//g, "-"));
+    const newDir = join(AGENT_DIR, "projects", Buffer.from(CWD).toString("base64url"));
+
+    await mkdir(oldDir, { recursive: true });
+    await writeFile(join(oldDir, "old-session.jsonl"), "{}", "utf8");
+
+    // Creating a session triggers the migration
+    await Session.create(CWD);
+
+    // Old dir should be gone
+    await expect(stat(oldDir)).rejects.toThrow();
+
+    // New dir should exist
+    const stats = await stat(newDir);
+    expect(stats.isDirectory()).toBe(true);
+  });
+
+  it("merges old directory into new directory if both exist", async () => {
+    const { mkdir, writeFile, stat, readdir } = await import("node:fs/promises");
+    const { AGENT_DIR } = await import("./config.js");
+    const { join } = await import("node:path");
+
+    const oldDir = join(AGENT_DIR, "projects", CWD.replace(/\//g, "-"));
+    const newDir = join(AGENT_DIR, "projects", Buffer.from(CWD).toString("base64url"));
+
+    await mkdir(oldDir, { recursive: true });
+    await writeFile(join(oldDir, "old-session.jsonl"), "{}", "utf8");
+
+    await mkdir(newDir, { recursive: true });
+    await writeFile(join(newDir, "new-session.jsonl"), "{}", "utf8");
+
+    // Creating a session triggers the migration
+    await Session.create(CWD);
+
+    // Old dir should still exist (we only move files, not the dir itself)
+    const oldStats = await stat(oldDir);
+    expect(oldStats.isDirectory()).toBe(true);
+
+    // New dir should contain both
+    const files = await readdir(newDir);
+    expect(files).toContain("old-session.jsonl");
+    expect(files).toContain("new-session.jsonl");
   });
 });

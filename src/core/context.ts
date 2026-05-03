@@ -1,4 +1,4 @@
-import type { Message, ToolDefinition } from "../model/types.js";
+import type { Message, ToolDefinition } from "../providers/types.js";
 import { DEFAULT_SYSTEM_INSTRUCTION, getGitContext, renderSystemInstruction } from "./prompt.js";
 
 export class ContextManager {

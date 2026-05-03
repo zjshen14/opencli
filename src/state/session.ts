@@ -16,7 +16,7 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { AGENT_DIR } from "./config.js";
-import type { FunctionCallPart, FunctionResultPart, Message } from "../model/types.js";
+import type { FunctionCallPart, FunctionResultPart, Message } from "../providers/types.js";
 
 function encodeProjectPath(cwd: string): string {
   return cwd.replace(/\//g, "-");

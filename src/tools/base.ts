@@ -1,4 +1,4 @@
-import type { ToolResult } from "../model/types.js";
+import type { ToolResult } from "../providers/types.js";
 
 export interface JSONSchema {
   type: string;

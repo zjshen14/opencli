@@ -1,6 +1,6 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { FunctionCallPart, FunctionResultPart } from "../model/types.js";
+import type { FunctionCallPart, FunctionResultPart } from "../providers/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import type { ContextManager } from "./context.js";

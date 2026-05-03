@@ -1,12 +1,12 @@
-import type { LLMClient } from "../model/client.js";
+import type { LLMClient } from "../providers/client.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import type { SkillRegistry } from "../skills/registry.js";
-import { toolToDefinition, activateSkillDefinition } from "../model/schema.js";
+import { toolToDefinition, activateSkillDefinition } from "../providers/schema.js";
 import { ContextManager } from "./context.js";
 import { executeCalls } from "./executor.js";
 import type { ConfirmFn } from "./executor.js";
 import { buildReminder, buildPlanSuffix } from "./prompt.js";
-import type { FunctionCallPart, Message } from "../model/types.js";
+import type { FunctionCallPart, Message } from "../providers/types.js";
 
 export type AgentEvent =
   | { type: "text"; text: string }

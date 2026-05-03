@@ -5,9 +5,8 @@ import { ToolRegistry } from "../tools/registry.js";
 import { SkillRegistry } from "../skills/registry.js";
 import { ContextManager } from "./context.js";
 import type { LLMClient } from "../providers/client.js";
-import type { Message, StreamEvent, ToolDefinition } from "../providers/types.js";
+import type { FunctionCallPart, Message, StreamEvent, ToolDefinition } from "../providers/types.js";
 import type { ObservabilityEvent } from "./observability.js";
-import type { FunctionCallPart } from "../providers/types.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

@@ -178,7 +178,7 @@ async function createAgent(modelOverride?: string, maxTurns?: number, debug?: bo
 
   const provider = detectProvider(model);
   const apiKey = resolveApiKey(provider, config);
-  const client = createClient(model, apiKey);
+  const client = createClient(model, apiKey, { includeUsage: !!debug });
   const tools = createDefaultRegistry(model);
   const skills = new SkillRegistry();
   await skills.discover();

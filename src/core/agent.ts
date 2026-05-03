@@ -100,7 +100,9 @@ export class Agent {
       let responseText = "";
 
       const messages = this.context.getMessages();
-      const estimatedTokens = Math.round(JSON.stringify(messages).length / 4);
+      const estimatedTokens = Math.round(
+        (JSON.stringify(messages).length + systemInstruction.length) / 4,
+      );
       this.obs?.({ type: "context_snapshot", messageCount: messages.length, estimatedTokens });
       this.obs?.({ type: "llm_call_start", model: this.model, inputMessages: messages.length });
       const callStart = Date.now();

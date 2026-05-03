@@ -14,10 +14,12 @@ function isReasoningModel(model: string): boolean {
 export class OpenAIClient implements LLMClient {
   private client: OpenAI;
   private model: string;
+  private includeUsage: boolean;
 
-  constructor(apiKey: string, model: string) {
+  constructor(apiKey: string, model: string, options?: { includeUsage?: boolean }) {
     this.client = new OpenAI({ apiKey });
     this.model = model;
+    this.includeUsage = options?.includeUsage ?? false;
   }
 
   async *stream(
@@ -38,7 +40,7 @@ export class OpenAIClient implements LLMClient {
           messages: openaiMessages,
           tools: openaiTools.length > 0 ? openaiTools : undefined,
           stream: true,
-          stream_options: { include_usage: true },
+          stream_options: this.includeUsage ? { include_usage: true } : undefined,
         });
 
         const pendingCalls = new Map<number, { id: string; name: string; args: string }>();

@@ -5,10 +5,10 @@
  *   ~/.opencli/projects/<encoded-cwd>/<session-id>.jsonl
  *
  * Sessions are never written to the project directory itself, keeping the
- * workspace clean. The project path is encoded by replacing "/" with "-".
+ * workspace clean. The project path is encoded using base64url to prevent collisions.
  *
- * Session ID: YYYY-MM-DDTHH-mm-ss — human-readable, lexicographically sortable,
- * no collision risk (users can't start two sessions in the same second).
+ * Session ID: YYYY-MM-DDTHH-mm-ss-SSS — human-readable, lexicographically sortable,
+ * millisecond precision to prevent collisions.
  */
 
 import { mkdir, appendFile, readdir, readFile, stat, rename } from "node:fs/promises";
@@ -19,7 +19,7 @@ import { AGENT_DIR } from "./config.js";
 import type { FunctionCallPart, FunctionResultPart, Message } from "../providers/types.js";
 
 function encodeProjectPath(cwd: string): string {
-  return encodeURIComponent(cwd).replace(/%2F/gi, "~");
+  return Buffer.from(cwd).toString("base64url");
 }
 
 function makeSessionId(): string {
@@ -34,11 +34,33 @@ async function sessionProjectDir(cwd: string): Promise<string> {
     try {
       const oldStats = await stat(oldDir);
       if (oldStats.isDirectory()) {
+        let newExists = false;
         try {
           await stat(newDir);
+          newExists = true;
         } catch {
+          // newDir doesn't exist
+        }
+
+        if (!newExists) {
           // Rename old to new if new doesn't exist
           await rename(oldDir, newDir);
+        } else {
+          // Merge: move each old session file into the new dir
+          try {
+            const files = await readdir(oldDir);
+            await Promise.all(
+              files
+                .filter((f) => f.endsWith(".jsonl"))
+                .map((f) =>
+                  rename(join(oldDir, f), join(newDir, f)).catch(() => {
+                    /* ignore rename errors */
+                  }),
+                ),
+            );
+          } catch {
+            /* ignore read errors */
+          }
         }
       }
     } catch {

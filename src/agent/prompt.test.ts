@@ -96,7 +96,8 @@ describe("buildReminder", () => {
 });
 
 describe("renderSystemInstruction", () => {
-  const template = "cwd={CWD} tmp={SESSION_TMP} git={GIT_CONTEXT}tools={TOOL_CATALOG}";
+  const template =
+    "cwd={CWD} tmp={SESSION_TMP} git={GIT_CONTEXT}skills={SKILL_CATALOG}tools={TOOL_CATALOG}";
 
   it("substitutes all placeholders", () => {
     const result = renderSystemInstruction(template, {
@@ -143,6 +144,29 @@ describe("renderSystemInstruction", () => {
       gitContext: "## Repository\nBranch: main",
     });
     expect(result).toContain("## Repository");
+  });
+
+  it("injects skill catalog when provided", () => {
+    const result = renderSystemInstruction(template, {
+      cwd: "/p",
+      tmpDir: "/t",
+      tools: [],
+      gitContext: "",
+      skillCatalog: "## Available Skills\n- commit: Draft a git commit",
+    });
+    expect(result).toContain("## Available Skills");
+    expect(result).toContain("- commit: Draft a git commit");
+  });
+
+  it("leaves SKILL_CATALOG placeholder empty when skillCatalog is absent", () => {
+    const result = renderSystemInstruction(template, {
+      cwd: "/p",
+      tmpDir: "/t",
+      tools: [],
+      gitContext: "",
+    });
+    expect(result).not.toContain("{SKILL_CATALOG}");
+    expect(result).toContain("skills=");
   });
 });
 

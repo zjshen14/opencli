@@ -4,7 +4,7 @@ import { DEFAULT_SYSTEM_INSTRUCTION } from "./prompt.js";
 import type { Message } from "../model/types.js";
 
 // Minimal template used in most tests — fast and independent of prompt wording changes
-const STUB = "Agent. CWD={CWD} TMP={SESSION_TMP}\n{TOOL_CATALOG}";
+const STUB = "Agent. CWD={CWD} TMP={SESSION_TMP}\n{SKILL_CATALOG}{TOOL_CATALOG}";
 
 function userMsg(text: string): Message {
   return { role: "user", parts: [{ type: "text", text }] };
@@ -176,6 +176,22 @@ describe("ContextManager", () => {
     const after = ctx.getSystemInstruction();
     expect(before).not.toBe(after);
     expect(after).toContain("/tmp/new-session");
+  });
+
+  it("setSkillCatalog injects catalog text into system instruction", () => {
+    const ctx = new ContextManager(STUB);
+    ctx.setSkillCatalog("## Available Skills\n- commit: Draft a git commit");
+    expect(ctx.getSystemInstruction()).toContain("## Available Skills");
+    expect(ctx.getSystemInstruction()).toContain("- commit: Draft a git commit");
+  });
+
+  it("setSkillCatalog invalidates the system instruction cache", () => {
+    const ctx = new ContextManager(STUB);
+    const before = ctx.getSystemInstruction();
+    ctx.setSkillCatalog("## Available Skills\n- debug: Debug an error");
+    const after = ctx.getSystemInstruction();
+    expect(before).not.toBe(after);
+    expect(after).toContain("- debug: Debug an error");
   });
 
   it("restoreMessages replaces history with provided messages", () => {

@@ -50,6 +50,7 @@ export class Agent {
     private maxTurns: number = DEFAULT_MAX_TURNS,
   ) {
     this.context = new ContextManager(systemInstruction, maxHistoryMessages);
+    this.context.setSkillCatalog(skills.catalogSummary());
   }
 
   setConfirmFn(fn: ConfirmFn): void {

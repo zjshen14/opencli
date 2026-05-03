@@ -98,6 +98,7 @@ export interface SystemInstructionContext {
   tmpDir: string;
   tools: ToolDefinition[];
   gitContext: string;
+  skillCatalog?: string;
 }
 
 export function renderSystemInstruction(template: string, ctx: SystemInstructionContext): string {
@@ -109,7 +110,8 @@ export function renderSystemInstruction(template: string, ctx: SystemInstruction
     .replaceAll("{CWD}", ctx.cwd)
     .replaceAll("{SESSION_TMP}", ctx.tmpDir)
     .replaceAll("{TOOL_CATALOG}", toolCatalog)
-    .replaceAll("{GIT_CONTEXT}", ctx.gitContext ? ctx.gitContext + "\n\n" : "");
+    .replaceAll("{GIT_CONTEXT}", ctx.gitContext ? ctx.gitContext + "\n\n" : "")
+    .replaceAll("{SKILL_CATALOG}", ctx.skillCatalog ? ctx.skillCatalog + "\n\n" : "");
 }
 
 export function buildPlanSuffix(allowedTools: ReadonlySet<string>): string {
@@ -213,7 +215,7 @@ For simple tasks, act directly without narrating the plan.
 - If the user asks to *create* or *write* a file, write it to the project directory
 - For scratch files you need temporarily, write to {SESSION_TMP}/ and clean up when done
 
-{TOOL_CATALOG}`;
+{SKILL_CATALOG}{TOOL_CATALOG}`;
 
 /**
  * Resolves the system instruction to use.

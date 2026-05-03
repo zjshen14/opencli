@@ -8,6 +8,7 @@ export class ContextManager {
   private sessionTmpDir: string | undefined = undefined;
   private cachedSystemInstruction: string | null = null;
   private cachedToolSignature: string | null = null;
+  private skillCatalog = "";
 
   constructor(
     private readonly systemInstructionTemplate = DEFAULT_SYSTEM_INSTRUCTION,
@@ -18,6 +19,12 @@ export class ContextManager {
 
   setSessionTmpDir(dir: string): void {
     this.sessionTmpDir = dir;
+    this.cachedSystemInstruction = null;
+    this.cachedToolSignature = null;
+  }
+
+  setSkillCatalog(catalog: string): void {
+    this.skillCatalog = catalog;
     this.cachedSystemInstruction = null;
     this.cachedToolSignature = null;
   }
@@ -37,6 +44,7 @@ export class ContextManager {
       tmpDir: this.sessionTmpDir ?? `${process.cwd()}/.opencli/tmp`,
       tools,
       gitContext: getGitContext(),
+      skillCatalog: this.skillCatalog,
     });
     this.cachedSystemInstruction = rendered;
     this.cachedToolSignature = signature;

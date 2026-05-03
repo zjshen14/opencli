@@ -21,7 +21,7 @@ const CWD = "/test/project";
 describe("Session.create", () => {
   it("returns a session with a timestamp-format id", async () => {
     const session = await Session.create(CWD);
-    expect(session.id).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$/);
+    expect(session.id).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}$/);
   });
 
   it("sets cwd correctly", async () => {
@@ -311,7 +311,7 @@ describe("Session.loadMessages — malformed JSONL resilience", () => {
     const { AGENT_DIR } = await import("./config.js");
     const { join } = await import("node:path");
 
-    const projectDir = join(AGENT_DIR, "projects", CWD.replace(/\//g, "-"));
+    const projectDir = join(AGENT_DIR, "projects", encodeURIComponent(CWD).replace(/%2F/gi, "~"));
     await mkdir(projectDir, { recursive: true });
     const id = "2025-01-01T00-00-00";
     const logPath = join(projectDir, `${id}.jsonl`);
@@ -341,7 +341,7 @@ describe("Session.loadMessages — malformed JSONL resilience", () => {
     const { AGENT_DIR } = await import("./config.js");
     const { join } = await import("node:path");
 
-    const projectDir = join(AGENT_DIR, "projects", CWD.replace(/\//g, "-"));
+    const projectDir = join(AGENT_DIR, "projects", encodeURIComponent(CWD).replace(/%2F/gi, "~"));
     await mkdir(projectDir, { recursive: true });
     const id = "2025-01-01T00-00-01";
     const logPath = join(projectDir, `${id}.jsonl`);

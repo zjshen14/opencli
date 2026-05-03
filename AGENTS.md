@@ -55,7 +55,7 @@ src/
   skills/
     registry.ts     # Discover SKILL.md files across 4 scoped directories
     loader.ts       # Parse SKILL.md frontmatter, !{cmd} preprocessing, $ARGUMENTS substitution
-    builtin/        # review, commit, explain, debug, test, gh-issue, gh-pr, branch, run-tests, typecheck, lint
+    builtin/        # review, commit, explain, debug, test, gh-issue, gh-pr, branch, run-tests, typecheck, lint, new-skill
   state/
     config.ts       # ~/.opencli/config.json load/save; exports AGENT_DIR, Config (incl. anthropicApiKey)
     session.ts      # JSONL session logs at ~/.opencli/projects/<cwd>/; create, list, resume

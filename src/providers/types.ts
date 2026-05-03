@@ -42,7 +42,7 @@ export interface ToolResult {
   error?: string;
 }
 
-// Normalized stream event types emitted by the Gemini client
+// Normalized stream event types emitted by all provider clients
 export type StreamEvent =
   | { type: "text"; text: string }
   | {
@@ -52,4 +52,5 @@ export type StreamEvent =
       args: Record<string, unknown>;
       thoughtSignature?: string;
     }
+  | { type: "usage"; inputTokens: number; outputTokens: number }
   | { type: "done" };

@@ -9,6 +9,7 @@ import { loadSystemInstruction } from "../core/prompt.js";
 import { resolveApiKey } from "./keys.js";
 import { runRepl, createConfirmFn } from "./repl.js";
 import { printError, printInfo } from "./renderer.js";
+import type { ObservabilityEvent } from "../core/observability.js";
 
 const program = new Command();
 
@@ -27,9 +28,10 @@ program
   .option("-r, --resume", "Resume the most recent session")
   .option("-s, --session <id>", "Resume a specific session by ID")
   .option("--max-turns <n>", "Maximum agent iterations per prompt (default: 50)", parseInt)
+  .option("--debug", "Emit structured observability events to stderr as JSON")
   .action(async (opts) => {
     const sessionId = opts.session ?? (opts.resume ? "latest" : undefined);
-    await startChat(opts.model, sessionId, opts.maxTurns);
+    await startChat(opts.model, sessionId, opts.maxTurns, opts.debug as boolean | undefined);
   });
 
 program
@@ -55,6 +57,7 @@ program
   .option("--max-turns <n>", "Maximum agent iterations (default: 50)", parseInt)
   .option("--plan", "Run a read-only planning pass first, then auto-execute the plan")
   .option("--yes", "Auto-approve all tool confirmations (skip interactive prompts)")
+  .option("--debug", "Emit structured observability events to stderr as JSON")
   .action(async (prompt: string, opts) => {
     await runSingle(
       prompt,
@@ -62,6 +65,7 @@ program
       opts.maxTurns,
       opts.plan as boolean | undefined,
       opts.yes as boolean | undefined,
+      opts.debug as boolean | undefined,
     );
   });
 
@@ -115,8 +119,9 @@ async function startChat(
   modelOverride?: string,
   resumeSessionId?: string,
   maxTurns?: number,
+  debug?: boolean,
 ): Promise<void> {
-  const { agent, skills } = await createAgent(modelOverride, maxTurns);
+  const { agent, skills } = await createAgent(modelOverride, maxTurns, debug);
   await runRepl(agent, skills, resumeSessionId);
 }
 
@@ -126,8 +131,9 @@ async function runSingle(
   maxTurns?: number,
   planMode?: boolean,
   autoApprove?: boolean,
+  debug?: boolean,
 ): Promise<void> {
-  const { agent } = await createAgent(modelOverride, maxTurns);
+  const { agent } = await createAgent(modelOverride, maxTurns, debug);
   if (autoApprove) {
     agent.setConfirmFn(async () => "allow");
   } else if (process.stdin.isTTY) {
@@ -162,18 +168,25 @@ async function runSingle(
   }
 }
 
-async function createAgent(modelOverride?: string, maxTurns?: number) {
+function makeDebugHandler(): (event: ObservabilityEvent) => void {
+  return (event) => process.stderr.write(JSON.stringify(event) + "\n");
+}
+
+async function createAgent(modelOverride?: string, maxTurns?: number, debug?: boolean) {
   const config = await loadConfig();
   const model = process.env.OPENCLI_MODEL ?? modelOverride ?? config.model;
 
   const provider = detectProvider(model);
   const apiKey = resolveApiKey(provider, config);
-  const client = createClient(model, apiKey);
+  const client = createClient(model, apiKey, { includeUsage: !!debug });
   const tools = createDefaultRegistry(model);
   const skills = new SkillRegistry();
   await skills.discover();
 
   const systemInstruction = await loadSystemInstruction();
-  const agent = new Agent(client, tools, skills, systemInstruction, config.historySize, maxTurns);
+  const agent = new Agent(client, tools, skills, systemInstruction, config.historySize, maxTurns, {
+    model,
+    onObservability: debug ? makeDebugHandler() : undefined,
+  });
   return { agent, skills };
 }

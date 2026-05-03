@@ -334,6 +334,9 @@ _Comprehension_
 - `/explain` — Explain selected code or a concept
 - `/test` — Write tests for a given function or module
 
+_Skill authoring_
+- `/new-skill` — Scaffold a new custom SKILL.md interactively (user-only)
+
 **Key Files:**
 ```
 src/skills/
@@ -350,7 +353,8 @@ src/skills/
       ├── typecheck/
       ├── lint/
       ├── explain/
-      └── test/
+      ├── test/
+      └── new-skill/
 ```
 
 > See [`docs/skills.md`](skills.md) for the full authoring guide (format, preprocessors, custom skills).

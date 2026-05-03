@@ -96,6 +96,7 @@ At session start, `SkillRegistry.discover()` is called and the catalog (name + d
 | `/lint` | Run linter, auto-fix what's fixable, report the rest | No |
 | `/explain` | Explain code or a concept | No |
 | `/test` | Write tests for a function or module | No |
+| `/new-skill` | Scaffold a new custom SKILL.md file interactively | Yes |
 
 ---
 

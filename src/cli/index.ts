@@ -1,13 +1,12 @@
 import { Command } from "commander";
 import { createClient, detectProvider } from "../providers/factory.js";
-import type { Provider } from "../providers/factory.js";
 import { Agent } from "../core/agent.js";
 import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
 import { loadConfig, saveConfig } from "../state/config.js";
-import type { Config } from "../state/config.js";
 import { Session } from "../state/session.js";
 import { loadSystemInstruction } from "../core/prompt.js";
+import { resolveApiKey } from "./keys.js";
 import { runRepl, createConfirmFn } from "./repl.js";
 import { printError, printInfo } from "./renderer.js";
 
@@ -161,31 +160,6 @@ async function runSingle(
   } else {
     await stream(prompt, "react");
   }
-}
-
-function resolveApiKey(provider: Provider, config: Config): string {
-  if (provider === "anthropic") {
-    const key = process.env.ANTHROPIC_API_KEY ?? config.anthropicApiKey;
-    if (!key)
-      throw new Error(
-        "No Anthropic API key found. Set ANTHROPIC_API_KEY or run: opencli config --anthropic-api-key <key>",
-      );
-    return key;
-  }
-  if (provider === "openai") {
-    const key = process.env.OPENAI_API_KEY ?? config.openaiApiKey;
-    if (!key)
-      throw new Error(
-        "No OpenAI API key found. Set OPENAI_API_KEY or run: opencli config --openai-api-key <key>",
-      );
-    return key;
-  }
-  const key = process.env.GEMINI_API_KEY ?? config.geminiApiKey;
-  if (!key)
-    throw new Error(
-      "No Gemini API key found. Set GEMINI_API_KEY or run: opencli config --gemini-api-key <key>",
-    );
-  return key;
 }
 
 async function createAgent(modelOverride?: string, maxTurns?: number) {

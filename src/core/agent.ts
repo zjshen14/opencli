@@ -94,6 +94,7 @@ export class Agent {
     let turns = 0;
     let lastCallSig = "";
     let stuckCount = 0;
+    const firedReminders = new Set<string>();
 
     while (true) {
       const pendingCalls: FunctionCallPart[] = [];
@@ -201,7 +202,10 @@ export class Agent {
 
       // Append an event-driven reminder to the last tool result based on what
       // tools just ran — fires only when relevant (e.g. edit → "run tests").
-      const reminder = buildReminder(pendingCalls.map((c) => ({ name: c.name, args: c.args })));
+      const reminder = buildReminder(
+        pendingCalls.map((c) => ({ name: c.name, args: c.args })),
+        firedReminders,
+      );
       if (reminder && results.length > 0) {
         results[results.length - 1] = {
           ...results[results.length - 1],

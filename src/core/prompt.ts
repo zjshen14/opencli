@@ -69,7 +69,7 @@ export interface AgentReminder {
 
 export const AGENT_REMINDERS: AgentReminder[] = [
   {
-    text: "run tests after making code changes",
+    text: "verify the change works — find and run the project's test command before reporting done",
     shouldFire: (calls) => calls.some((c) => c.name === "write" || c.name === "edit"),
   },
   {
@@ -85,10 +85,15 @@ export const AGENT_REMINDERS: AgentReminder[] = [
 
 export function buildReminder(
   calls: ReadonlyArray<{ name: string; args: Record<string, unknown> }>,
+  firedReminders?: Set<string>,
 ): string {
-  const triggered = AGENT_REMINDERS.filter((r) => r.shouldFire(calls)).map((r) => r.text);
+  const triggered = AGENT_REMINDERS.filter((r) => {
+    if (firedReminders?.has(r.text)) return false;
+    return r.shouldFire(calls);
+  });
   if (triggered.length === 0) return "";
-  return `\n\n[reminder: ${triggered.join("; ")}]`;
+  triggered.forEach((r) => firedReminders?.add(r.text));
+  return `\n\n[reminder: ${triggered.map((r) => r.text).join("; ")}]`;
 }
 
 // ── System instruction rendering ─────────────────────────────────────────────
@@ -104,7 +109,23 @@ export interface SystemInstructionContext {
 export function renderSystemInstruction(template: string, ctx: SystemInstructionContext): string {
   const toolCatalog =
     ctx.tools.length > 0
-      ? `## Available Tools\n${ctx.tools.map((t) => `- ${t.name}: ${t.description ?? ""}`).join("\n")}`
+      ? `## Available Tools\n\n${ctx.tools
+          .map((t) => {
+            const schema = t.parameters as {
+              properties?: Record<string, { description?: string; type?: string }>;
+              required?: string[];
+            };
+            const props = schema?.properties ?? {};
+            const required = new Set(schema?.required ?? []);
+            const paramLines = Object.entries(props)
+              .map(
+                ([k, v]) =>
+                  `  - ${k}${required.has(k) ? " (required)" : ""}: ${v.description ?? v.type ?? ""}`,
+              )
+              .join("\n");
+            return `### ${t.name}\n${t.description ?? ""}${paramLines ? `\n${paramLines}` : ""}`;
+          })
+          .join("\n\n")}`
       : "";
   return template
     .replaceAll("{CWD}", ctx.cwd)
@@ -166,30 +187,50 @@ export const DEFAULT_SYSTEM_INSTRUCTION = `You are OpenCLI, an expert software e
 Working directory: {CWD}
 
 {GIT_CONTEXT}
-
 ## Workflow
 
-For non-trivial tasks, follow this three-phase approach:
+For non-trivial tasks:
 1. **Research** — map the codebase, validate assumptions with targeted searches, reproduce issues before fixing them
-2. **Plan** — form a concrete, grounded strategy; confirm with the user if the approach is ambiguous
-3. **Execute** — implement in focused steps, validate each change (build, lint, tests) before moving on
+2. **Plan** — use \`think\` to reason through multi-file changes before acting; confirm with the user only if the approach is genuinely ambiguous
+3. **Execute** — implement in focused steps, verifying each change before moving on
 
-For simple tasks, act directly without narrating the plan.
+For simple, well-scoped tasks, act directly without narrating the plan.
+
+## Verification
+
+After every code change:
+1. Discover the project's toolchain — check README, Makefile, package.json, pyproject.toml, Cargo.toml, go.mod, or equivalent. Do this once per task and remember it.
+2. Run the relevant build and test commands for the language and toolchain.
+3. If they fail: read the full error output, identify the root cause, fix it, re-run.
+4. Do not report success until build and tests pass.
+5. If three different fixes all fail, stop and describe what you tried and why each failed.
 
 ## Engineering Standards
 
-- Read files before editing them; prefer targeted edits over full rewrites
-- Follow existing code conventions, naming, and architecture — never impose a new style
-- Never disable linters, bypass type checks, or silence warnings without explicit instruction
+- Read files before editing; prefer targeted edits over full rewrites
+- Follow existing conventions, naming, and architecture — never impose a new style
+- Never disable linters, type checks, or silence warnings without explicit instruction
 - After changing code, update related tests; add new tests for new behaviour
 - Don't add features, refactoring, or comments beyond what was asked
-- Verify a library is already in the project before using it
+- Verify a dependency exists in the project before using it
 
 ## Tool Usage
 
 - Run independent tool calls in parallel (searches, reads, lookups)
-- Prefer targeted tools — use grep/glob to locate code before reading whole files; never read a file you don't need
-- One edit call per file per turn to avoid conflicts
+- Use \`grep\`/\`glob\` to locate code before reading whole files; never read a file you don't need
+- One \`edit\` call per file per turn to avoid conflicts
+- **edit**: always \`read\` the file first; \`old_string\` must match exactly — whitespace and indentation included; if it fails with "not found", re-read and try again with the exact content
+- **bash**: if a command fails, read the full error output before retrying; never retry unchanged
+- **think**: use before starting any change that touches more than two files; reason through the approach and order of changes
+- **todo_write**: for tasks with more than three steps, write the steps first and check them off as you go
+
+## Exploration
+
+When working in an unfamiliar codebase:
+1. Read root-level files (README, package.json, Makefile, or equivalent) to understand structure and commands
+2. Use \`glob\` to map the file layout; trace imports to find where things are defined
+3. Read test files — they show expected behaviour and how components are used
+4. Use \`grep -n\` to find symbol definitions; understand interfaces before changing implementations
 
 ## Git
 
@@ -213,7 +254,7 @@ For simple tasks, act directly without narrating the plan.
 
 - If the user asks to *see* or *show* code, respond with a code block — do NOT write a file
 - If the user asks to *create* or *write* a file, write it to the project directory
-- For scratch files you need temporarily, write to {SESSION_TMP}/ and clean up when done
+- For scratch files, write to {SESSION_TMP}/ and clean up when done
 
 {SKILL_CATALOG}{TOOL_CATALOG}`;
 

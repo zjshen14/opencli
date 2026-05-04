@@ -67,12 +67,12 @@ describe("buildReminder", () => {
   it("fires test reminder after edit call", () => {
     const calls = [{ name: "edit", args: { file_path: "foo.ts" } }];
     const reminder = buildReminder(calls);
-    expect(reminder).toContain("run tests after making code changes");
+    expect(reminder).toContain("verify the change works");
   });
 
   it("fires test reminder after write call", () => {
     const calls = [{ name: "write", args: { file_path: "foo.ts" } }];
-    expect(buildReminder(calls)).toContain("run tests after making code changes");
+    expect(buildReminder(calls)).toContain("verify the change works");
   });
 
   it("fires git reminder only when bash command includes git", () => {
@@ -88,10 +88,25 @@ describe("buildReminder", () => {
       { name: "bash", args: { command: "git diff" } },
     ];
     const reminder = buildReminder(calls);
-    expect(reminder).toContain("run tests after making code changes");
+    expect(reminder).toContain("verify the change works");
     expect(reminder).toContain("never commit or push");
     // Single [reminder: ...] block
     expect(reminder.split("[reminder:").length).toBe(2);
+  });
+
+  it("does not repeat a reminder that has already fired in the same run", () => {
+    const calls = [{ name: "edit", args: {} }];
+    const firedReminders = new Set<string>();
+    const first = buildReminder(calls, firedReminders);
+    const second = buildReminder(calls, firedReminders);
+    expect(first).toContain("verify the change works");
+    expect(second).toBe("");
+  });
+
+  it("without firedReminders set, reminders fire on every call (backward-compatible)", () => {
+    const calls = [{ name: "edit", args: {} }];
+    expect(buildReminder(calls)).toContain("verify the change works");
+    expect(buildReminder(calls)).toContain("verify the change works");
   });
 });
 
@@ -116,13 +131,26 @@ describe("renderSystemInstruction", () => {
       tmpDir: "/t",
       tools: [
         { name: "read", description: "Read a file", parameters: {} },
-        { name: "write", description: "Write a file", parameters: {} },
+        {
+          name: "edit",
+          description: "Edit a file",
+          parameters: {
+            properties: {
+              file_path: { type: "string", description: "Path to file" },
+              old_string: { type: "string", description: "String to replace" },
+            },
+            required: ["file_path", "old_string"],
+          },
+        },
       ],
       gitContext: "",
     });
     expect(result).toContain("## Available Tools");
-    expect(result).toContain("- read: Read a file");
-    expect(result).toContain("- write: Write a file");
+    expect(result).toContain("### read");
+    expect(result).toContain("Read a file");
+    expect(result).toContain("### edit");
+    expect(result).toContain("file_path (required): Path to file");
+    expect(result).toContain("old_string (required): String to replace");
   });
 
   it("omits tool catalog section when no tools provided", () => {

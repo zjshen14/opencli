@@ -187,6 +187,29 @@ describe("executeCalls", () => {
     expect(results[0].result).toContain("Error: disk full");
   });
 
+  it("includes both output and error when a tool fails with non-empty output", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "bash",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({
+        success: false,
+        output: "FAIL  tests/trade.test.ts\n  ● POST /trade › should return 400",
+        error: "Exited with code 1",
+      }),
+    });
+
+    const { results } = await executeCalls([makeToolCall("bash")], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+    });
+
+    expect(results[0].result).toContain("FAIL  tests/trade.test.ts");
+    expect(results[0].result).toContain("Error: Exited with code 1");
+  });
+
   it("activates a skill and injects into context (no tool result)", async () => {
     const context = new ContextManager();
     const skillRegistry = makeSkillRegistry({ review: "Review instructions." });

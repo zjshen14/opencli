@@ -109,7 +109,11 @@ async function executeOneCall(
   });
   const execStart = Date.now();
   const result = await deps.tools.execute(call.name, call.args as Record<string, unknown>);
-  const raw = result.error ? `Error: ${result.error}` : result.output || "(no output)";
+  // Include both output and error so failed commands (e.g. bash exit ≠ 0) return their
+  // stdout/stderr alongside the exit-code message — without this, the model is blind to
+  // the actual failure reason.
+  const parts = [result.output, result.error && `Error: ${result.error}`].filter(Boolean);
+  const raw = parts.join("\n") || "(no output)";
   const output = TRUNCATE_TOOLS.has(call.name) ? truncateOutput(raw, call.id, deps.tmpDir) : raw;
   deps.obs?.({
     type: "tool_exec_end",

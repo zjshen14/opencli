@@ -11,6 +11,8 @@ import type { ObservabilityHandler } from "./observability.js";
 // exact line spans for follow-up edit calls.
 const TRUNCATE_TOOLS = new Set(["bash", "grep", "glob"]);
 const DEFAULT_MAX_OUTPUT = 20_000;
+const MAX_TOOL_OUTPUT =
+  parseInt(process.env.OPENCLI_MAX_TOOL_OUTPUT ?? "", 10) || DEFAULT_MAX_OUTPUT;
 
 // Tools blocked when `readOnly` is set on ExecutorDeps (used by plan mode).
 // Defence-in-depth: even if the filtered tool list leaks, the executor refuses.
@@ -33,11 +35,10 @@ export interface ExecutorDeps {
 }
 
 export function truncateOutput(output: string, callId: string, tmpDir?: string): string {
-  const max = parseInt(process.env.OPENCLI_MAX_TOOL_OUTPUT ?? String(DEFAULT_MAX_OUTPUT));
-  if (output.length <= max) return output;
+  if (output.length <= MAX_TOOL_OUTPUT) return output;
 
-  const head = Math.floor(max * 0.3);
-  const tail = max - head;
+  const head = Math.floor(MAX_TOOL_OUTPUT * 0.3);
+  const tail = MAX_TOOL_OUTPUT - head;
 
   let savedNote = "";
   if (tmpDir) {
@@ -53,7 +54,7 @@ export function truncateOutput(output: string, callId: string, tmpDir?: string):
 
   return (
     output.slice(0, head) +
-    `\n\n[... ${output.length - max} chars truncated.${savedNote} ...]\n\n` +
+    `\n\n[... ${output.length - MAX_TOOL_OUTPUT} chars truncated.${savedNote} ...]\n\n` +
     output.slice(-tail)
   );
 }

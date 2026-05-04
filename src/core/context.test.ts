@@ -273,6 +273,20 @@ describe("ContextManager", () => {
     expect(msgs[0].parts.every((p) => p.type !== "function_result")).toBe(true);
   });
 
+  it("prune never empties history when the entire window is orphaned model/tool-result turns", () => {
+    // Regression: if every message in the sliced window is a model message or a
+    // user-with-results message (no clean user text message), startIdx walked off
+    // the end and sliced.slice(startIdx) returned [], which caused Gemini to reject
+    // the next call with "contents are required".
+    // maxHistoryMessages=2: the window will be [model, user_results] — all orphaned.
+    const ctx = new ContextManager(STUB, 2);
+    ctx.addMessage(userMsg("do the task"));
+    ctx.addMessage(modelWithCalls([{ id: "c1", name: "bash" }]));
+    ctx.addMessage(userWithResults([{ id: "c1", name: "bash" }])); // 3rd → prune
+    // History must not be empty — provider would reject an empty contents array.
+    expect(ctx.getMessages().length).toBeGreaterThan(0);
+  });
+
   it("prune retains the function_call/result pair when the boundary falls cleanly", () => {
     // maxHistoryMessages=4: slice starts exactly at a user text message — no skipping needed.
     const ctx = new ContextManager(STUB, 4);

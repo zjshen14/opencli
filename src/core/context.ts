@@ -108,6 +108,10 @@ export class ContextManager {
       startIdx++;
     }
 
-    this.history = sliced.slice(startIdx);
+    // Guard: if no clean start was found (entire window is model/tool-result
+    // turns with no user input), fall back to the unmodified slice rather than
+    // leaving history empty — an empty contents array causes providers to reject
+    // the next API call outright.
+    this.history = startIdx < sliced.length ? sliced.slice(startIdx) : sliced;
   }
 }

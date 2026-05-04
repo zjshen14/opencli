@@ -236,7 +236,7 @@ describe("executeCalls", () => {
   });
 
   it("truncates bash output exceeding the limit (middle-truncation)", async () => {
-    const big = "A".repeat(5000) + "MIDDLE" + "B".repeat(5000);
+    const big = "A".repeat(12_000) + "MIDDLE" + "B".repeat(12_000);
     const registry = new ToolRegistry();
     registry.register({
       name: "bash",
@@ -245,14 +245,11 @@ describe("executeCalls", () => {
       execute: async () => ({ success: true, output: big }),
     });
 
-    const prev = process.env.OPENCLI_MAX_TOOL_OUTPUT;
-    process.env.OPENCLI_MAX_TOOL_OUTPUT = "100";
     const { results } = await executeCalls([makeToolCall("bash")], {
       tools: registry,
       skills: makeSkillRegistry({}),
       context: new ContextManager(),
     });
-    process.env.OPENCLI_MAX_TOOL_OUTPUT = prev;
 
     expect(results[0].result).toContain("[... ");
     expect(results[0].result).toContain("truncated");
@@ -269,14 +266,11 @@ describe("executeCalls", () => {
       execute: async () => ({ success: true, output: big }),
     });
 
-    const prev = process.env.OPENCLI_MAX_TOOL_OUTPUT;
-    process.env.OPENCLI_MAX_TOOL_OUTPUT = "100";
     const { results } = await executeCalls([makeToolCall("read")], {
       tools: registry,
       skills: makeSkillRegistry({}),
       context: new ContextManager(),
     });
-    process.env.OPENCLI_MAX_TOOL_OUTPUT = prev;
 
     expect(results[0].result).toBe(big);
   });
@@ -471,26 +465,20 @@ describe("executeCalls — confirmation", () => {
 
 describe("truncateOutput", () => {
   it("returns output unchanged when within limit", () => {
-    const prev = process.env.OPENCLI_MAX_TOOL_OUTPUT;
-    process.env.OPENCLI_MAX_TOOL_OUTPUT = "100";
+    // "short".length = 5 which is well within the 20 000-char default
     expect(truncateOutput("short", "id1")).toBe("short");
-    process.env.OPENCLI_MAX_TOOL_OUTPUT = prev;
   });
 
   it("middle-truncates output exceeding the limit", () => {
-    const prev = process.env.OPENCLI_MAX_TOOL_OUTPUT;
-    process.env.OPENCLI_MAX_TOOL_OUTPUT = "100";
-    // head = 30, tail = 70; input = 50 A's + 500 M's + 50 B's (600 total)
-    const input = "A".repeat(50) + "M".repeat(500) + "B".repeat(50);
+    // head = floor(20000 * 0.3) = 6000, tail = 14000
+    // input: 5000 A's + 20000 M's + 5000 B's = 30000 total (exceeds 20000)
+    const input = "A".repeat(5_000) + "M".repeat(20_000) + "B".repeat(5_000);
     const result = truncateOutput(input, "id1");
-    // Head (first 30 chars) preserved
-    expect(result.startsWith("A".repeat(30))).toBe(true);
-    // Tail (last 50 B's fit within 70-char tail) preserved
-    expect(result.endsWith("B".repeat(50))).toBe(true);
-    // Truncation marker present
+    // First 6000 chars = all 5000 A's + 1000 M's
+    expect(result.startsWith("A".repeat(5_000))).toBe(true);
+    // Last 14000 chars include all 5000 B's at the end
+    expect(result.endsWith("B".repeat(5_000))).toBe(true);
     expect(result).toContain("truncated");
-    // Result is shorter than input
     expect(result.length).toBeLessThan(input.length);
-    process.env.OPENCLI_MAX_TOOL_OUTPUT = prev;
   });
 });

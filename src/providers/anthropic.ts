@@ -9,10 +9,12 @@ const RETRY_BASE_MS = 1000;
 export class AnthropicClient implements LLMClient {
   private client: Anthropic;
   private model: string;
+  private maxTokens: number;
 
-  constructor(apiKey: string, model: string) {
+  constructor(apiKey: string, model: string, maxTokens = DEFAULT_MAX_TOKENS) {
     this.client = new Anthropic({ apiKey });
     this.model = model;
+    this.maxTokens = maxTokens;
   }
 
   async *stream(
@@ -28,7 +30,7 @@ export class AnthropicClient implements LLMClient {
       try {
         const apiStream = this.client.messages.stream({
           model: this.model,
-          max_tokens: DEFAULT_MAX_TOKENS,
+          max_tokens: this.maxTokens,
           system: systemInstruction,
           messages: anthropicMessages,
           tools: anthropicTools.length > 0 ? anthropicTools : undefined,

@@ -15,11 +15,17 @@ export class OpenAIClient implements LLMClient {
   private client: OpenAI;
   private model: string;
   private includeUsage: boolean;
+  private maxTokens: number;
 
-  constructor(apiKey: string, model: string, options?: { includeUsage?: boolean }) {
+  constructor(
+    apiKey: string,
+    model: string,
+    options?: { includeUsage?: boolean; maxTokens?: number },
+  ) {
     this.client = new OpenAI({ apiKey });
     this.model = model;
     this.includeUsage = options?.includeUsage ?? false;
+    this.maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
   }
 
   async *stream(
@@ -36,7 +42,7 @@ export class OpenAIClient implements LLMClient {
       try {
         const apiStream = await this.client.chat.completions.create({
           model: this.model,
-          max_tokens: DEFAULT_MAX_TOKENS,
+          max_tokens: this.maxTokens,
           messages: openaiMessages,
           tools: openaiTools.length > 0 ? openaiTools : undefined,
           stream: true,

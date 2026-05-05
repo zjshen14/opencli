@@ -9,10 +9,12 @@ const RETRY_BASE_MS = 1000;
 export class GeminiClient implements LLMClient {
   private client: GoogleGenAI;
   private model: string;
+  private maxOutputTokens: number | undefined;
 
-  constructor(apiKey: string, model = DEFAULT_MODEL) {
+  constructor(apiKey: string, model = DEFAULT_MODEL, maxOutputTokens?: number) {
     this.client = new GoogleGenAI({ apiKey });
     this.model = model;
+    this.maxOutputTokens = maxOutputTokens;
   }
 
   async *stream(
@@ -32,6 +34,7 @@ export class GeminiClient implements LLMClient {
           config: {
             systemInstruction,
             tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
+            maxOutputTokens: this.maxOutputTokens,
           },
         });
 

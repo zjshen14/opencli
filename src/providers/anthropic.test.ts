@@ -125,4 +125,27 @@ describe("AnthropicClient error handling", () => {
     expect((err as Error).message).toContain("400");
     expect(mockStream).toHaveBeenCalledTimes(1);
   });
+
+  it("passes default maxTokens to the API call", async () => {
+    mockStream.mockImplementation(() => {
+      throw new Error("400 bad request");
+    });
+    await client
+      .stream([], "sys", [])
+      .next()
+      .catch(() => {});
+    expect(mockStream.mock.calls[0][0]).toMatchObject({ max_tokens: 8096 });
+  });
+
+  it("passes custom maxTokens to the API call", async () => {
+    const customClient = new AnthropicClient("fake-key", "claude-sonnet-4-6", 16384);
+    mockStream.mockImplementation(() => {
+      throw new Error("400 bad request");
+    });
+    await customClient
+      .stream([], "sys", [])
+      .next()
+      .catch(() => {});
+    expect(mockStream.mock.calls[0][0]).toMatchObject({ max_tokens: 16384 });
+  });
 });

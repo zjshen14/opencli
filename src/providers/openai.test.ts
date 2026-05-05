@@ -121,6 +121,29 @@ describe("OpenAIClient message format", () => {
     client = new OpenAIClient("fake-key", "gpt-4o");
   });
 
+  it("passes default maxTokens to the API call", async () => {
+    mockCreate.mockResolvedValue(
+      makeStream([{ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] }]),
+    );
+    for await (const e of client.stream([], "sys", [])) {
+      void e;
+    }
+    const [callArgs] = mockCreate.mock.calls;
+    expect(callArgs[0].max_tokens).toBe(8096);
+  });
+
+  it("passes custom maxTokens to the API call", async () => {
+    const customClient = new OpenAIClient("fake-key", "gpt-4o", { maxTokens: 16384 });
+    mockCreate.mockResolvedValue(
+      makeStream([{ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] }]),
+    );
+    for await (const e of customClient.stream([], "sys", [])) {
+      void e;
+    }
+    const [callArgs] = mockCreate.mock.calls;
+    expect(callArgs[0].max_tokens).toBe(16384);
+  });
+
   it("injects system instruction as first message", async () => {
     mockCreate.mockResolvedValue(
       makeStream([{ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] }]),

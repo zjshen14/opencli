@@ -110,4 +110,29 @@ describe("GeminiClient error handling", () => {
     expect((err as Error).message).toContain("400");
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(1);
   });
+
+  it("passes undefined maxOutputTokens when not specified", async () => {
+    mockGenerateContentStream.mockImplementation(() => {
+      throw new Error("400 bad request");
+    });
+    await client
+      .stream([], "sys", [])
+      .next()
+      .catch(() => {});
+    expect(mockGenerateContentStream.mock.calls[0][0].config.maxOutputTokens).toBeUndefined();
+  });
+
+  it("passes custom maxOutputTokens to the API call", async () => {
+    const customClient = new GeminiClient("fake-key", undefined, 16384);
+    mockGenerateContentStream.mockImplementation(() => {
+      throw new Error("400 bad request");
+    });
+    await customClient
+      .stream([], "sys", [])
+      .next()
+      .catch(() => {});
+    expect(mockGenerateContentStream.mock.calls[0][0].config).toMatchObject({
+      maxOutputTokens: 16384,
+    });
+  });
 });

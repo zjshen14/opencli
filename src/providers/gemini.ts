@@ -1,4 +1,10 @@
-import { GoogleGenAI, type Content, type FunctionDeclaration, type Schema } from "@google/genai";
+import {
+  GoogleGenAI,
+  ApiError,
+  type Content,
+  type FunctionDeclaration,
+  type Schema,
+} from "@google/genai";
 import type { LLMClient } from "./client.js";
 import type { Message, StreamEvent, ToolDefinition } from "./types.js";
 
@@ -72,13 +78,7 @@ export class GeminiClient implements LLMClient {
         return;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
-        const msg = lastError.message;
-        const isRetryable =
-          msg.includes("429") ||
-          msg.includes("500") ||
-          msg.includes("502") ||
-          msg.includes("503") ||
-          msg.includes("RESOURCE_EXHAUSTED");
+        const isRetryable = err instanceof ApiError && [429, 500, 502, 503].includes(err.status);
 
         if (!isRetryable || attempt === MAX_RETRIES - 1) throw lastError;
 

@@ -1,10 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@anthropic-ai/sdk", () => ({
-  default: vi.fn(),
-}));
+vi.mock("@anthropic-ai/sdk", () => {
+  class APIError extends Error {
+    readonly status: number | undefined;
+    constructor(status: number | undefined, _error: unknown, message?: string, _headers?: unknown) {
+      super(message ?? "");
+      this.status = status;
+    }
+  }
+  return {
+    default: vi.fn(),
+    APIError,
+  };
+});
 
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { APIError } from "@anthropic-ai/sdk";
 import { AnthropicClient } from "./anthropic.js";
 
 describe("AnthropicClient error handling", () => {
@@ -53,9 +63,9 @@ describe("AnthropicClient error handling", () => {
     expect(mockStream).toHaveBeenCalledTimes(1);
   });
 
-  it("retries on 500 and throws after max retries", async () => {
+  it("retries on APIError 500 and throws after max retries", async () => {
     mockStream.mockImplementation(() => {
-      throw new Error("internal server error 500");
+      throw new APIError(500, undefined, "internal server error", undefined);
     });
     const errPromise = client
       .stream([], "sys", [])
@@ -63,14 +73,14 @@ describe("AnthropicClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("500");
+    expect(err).toBeInstanceOf(APIError);
+    expect((err as APIError).status).toBe(500);
     expect(mockStream).toHaveBeenCalledTimes(3);
   });
 
-  it("retries on 502 and throws after max retries", async () => {
+  it("retries on APIError 502 and throws after max retries", async () => {
     mockStream.mockImplementation(() => {
-      throw new Error("bad gateway 502");
+      throw new APIError(502, undefined, "bad gateway", undefined);
     });
     const errPromise = client
       .stream([], "sys", [])
@@ -78,14 +88,14 @@ describe("AnthropicClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("502");
+    expect(err).toBeInstanceOf(APIError);
+    expect((err as APIError).status).toBe(502);
     expect(mockStream).toHaveBeenCalledTimes(3);
   });
 
-  it("retries on 429 and throws after max retries", async () => {
+  it("retries on APIError 429 and throws after max retries", async () => {
     mockStream.mockImplementation(() => {
-      throw new Error("rate limited 429");
+      throw new APIError(429, undefined, "rate limited", undefined);
     });
     const errPromise = client
       .stream([], "sys", [])
@@ -93,14 +103,14 @@ describe("AnthropicClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("429");
+    expect(err).toBeInstanceOf(APIError);
+    expect((err as APIError).status).toBe(429);
     expect(mockStream).toHaveBeenCalledTimes(3);
   });
 
-  it("retries on overloaded and throws after max retries", async () => {
+  it("retries on APIError 529 (overloaded) and throws after max retries", async () => {
     mockStream.mockImplementation(() => {
-      throw new Error("service overloaded");
+      throw new APIError(529, undefined, "service overloaded", undefined);
     });
     const errPromise = client
       .stream([], "sys", [])
@@ -108,21 +118,33 @@ describe("AnthropicClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("overloaded");
+    expect(err).toBeInstanceOf(APIError);
+    expect((err as APIError).status).toBe(529);
     expect(mockStream).toHaveBeenCalledTimes(3);
   });
 
-  it("does not retry on non-retryable errors", async () => {
+  it("does not retry on non-retryable APIError 400", async () => {
     mockStream.mockImplementation(() => {
-      throw new Error("400 bad request");
+      throw new APIError(400, undefined, "bad request", undefined);
+    });
+    const err = await client
+      .stream([], "sys", [])
+      .next()
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(APIError);
+    expect((err as APIError).status).toBe(400);
+    expect(mockStream).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry on plain Error (not an APIError)", async () => {
+    mockStream.mockImplementation(() => {
+      throw new Error("unexpected failure");
     });
     const err = await client
       .stream([], "sys", [])
       .next()
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("400");
     expect(mockStream).toHaveBeenCalledTimes(1);
   });
 

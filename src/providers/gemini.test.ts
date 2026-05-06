@@ -1,10 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@google/genai", () => ({
-  GoogleGenAI: vi.fn(),
-}));
+vi.mock("@google/genai", () => {
+  class ApiError extends Error {
+    status: number;
+    constructor(options: { message: string; status: number }) {
+      super(options.message);
+      this.status = options.status;
+    }
+  }
+  return { GoogleGenAI: vi.fn(), ApiError };
+});
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ApiError } from "@google/genai";
 import { GeminiClient } from "./gemini.js";
 
 describe("GeminiClient error handling", () => {
@@ -53,9 +60,9 @@ describe("GeminiClient error handling", () => {
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(1);
   });
 
-  it("retries on 500 and throws after max retries", async () => {
+  it("retries on ApiError 500 and throws after max retries", async () => {
     mockGenerateContentStream.mockImplementation(() => {
-      throw new Error("internal server error 500");
+      throw new ApiError({ message: "internal server error", status: 500 });
     });
     const errPromise = client
       .stream([], "sys", [])
@@ -63,14 +70,14 @@ describe("GeminiClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("500");
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(500);
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(3);
   });
 
-  it("retries on 502 and throws after max retries", async () => {
+  it("retries on ApiError 502 and throws after max retries", async () => {
     mockGenerateContentStream.mockImplementation(() => {
-      throw new Error("bad gateway 502");
+      throw new ApiError({ message: "bad gateway", status: 502 });
     });
     const errPromise = client
       .stream([], "sys", [])
@@ -78,14 +85,14 @@ describe("GeminiClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("502");
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(502);
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(3);
   });
 
-  it("retries on 429 and throws after max retries", async () => {
+  it("retries on ApiError 429 and throws after max retries", async () => {
     mockGenerateContentStream.mockImplementation(() => {
-      throw new Error("rate limited 429");
+      throw new ApiError({ message: "rate limited", status: 429 });
     });
     const errPromise = client
       .stream([], "sys", [])
@@ -93,21 +100,48 @@ describe("GeminiClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("429");
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(429);
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(3);
   });
 
-  it("does not retry on non-retryable errors", async () => {
+  it("retries on ApiError 503 and throws after max retries", async () => {
     mockGenerateContentStream.mockImplementation(() => {
-      throw new Error("400 bad request");
+      throw new ApiError({ message: "service unavailable", status: 503 });
+    });
+    const errPromise = client
+      .stream([], "sys", [])
+      .next()
+      .catch((e: unknown) => e);
+    await vi.runAllTimersAsync();
+    const err = await errPromise;
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(503);
+    expect(mockGenerateContentStream).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not retry on non-retryable ApiError 400", async () => {
+    mockGenerateContentStream.mockImplementation(() => {
+      throw new ApiError({ message: "bad request", status: 400 });
+    });
+    const err = await client
+      .stream([], "sys", [])
+      .next()
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(400);
+    expect(mockGenerateContentStream).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry on plain Error (not an ApiError)", async () => {
+    mockGenerateContentStream.mockImplementation(() => {
+      throw new Error("unexpected failure");
     });
     const err = await client
       .stream([], "sys", [])
       .next()
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toContain("400");
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(1);
   });
 

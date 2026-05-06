@@ -1,4 +1,4 @@
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { APIError } from "@anthropic-ai/sdk";
 import type { LLMClient } from "./client.js";
 import type { Message, StreamEvent, ToolDefinition } from "./types.js";
 
@@ -78,13 +78,10 @@ export class AnthropicClient implements LLMClient {
         return;
       } catch (err) {
         lastError = err instanceof Error ? err : new Error(String(err));
-        const msg = lastError.message;
         const isRetryable =
-          msg.includes("429") ||
-          msg.includes("500") ||
-          msg.includes("502") ||
-          msg.includes("529") ||
-          msg.includes("overloaded");
+          err instanceof APIError &&
+          err.status !== undefined &&
+          [429, 500, 502, 529].includes(err.status);
 
         if (!isRetryable || attempt === MAX_RETRIES - 1) throw lastError;
 

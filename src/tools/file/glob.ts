@@ -4,6 +4,7 @@ import type { Tool } from "../base.js";
 
 export const globTool: Tool = {
   name: "glob",
+  readonly: true,
   description:
     "Find files matching a glob pattern. Returns matching file paths sorted by modification time.",
   parameters: {

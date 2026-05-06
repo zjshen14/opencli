@@ -13,7 +13,8 @@ export interface Tool {
   name: string;
   description: string;
   parameters: JSONSchema;
+  /** true = safe in plan mode (read-only); false/undefined = write tool (blocked in plan mode) */
+  readonly?: boolean;
   execute: (params: Record<string, unknown>) => Promise<ToolResult>;
-  /** Return true if this call requires interactive user confirmation before execution. */
   requiresConfirmation?: (args: Record<string, unknown>) => boolean;
 }

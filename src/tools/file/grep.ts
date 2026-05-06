@@ -4,6 +4,7 @@ import type { Tool } from "../base.js";
 
 export const grepTool: Tool = {
   name: "grep",
+  readonly: true,
   description:
     "Search for a regex pattern in file contents. Returns matching lines with file path and line number.",
   parameters: {

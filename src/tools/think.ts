@@ -12,6 +12,7 @@ import type { Tool } from "./base.js";
  */
 export const thinkTool: Tool = {
   name: "think",
+  readonly: true,
   description:
     "Use this to reason privately before acting. The output is not shown to the user — " +
     "it is a scratchpad for working through a complex problem before committing to a tool call.",

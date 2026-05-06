@@ -148,7 +148,7 @@ export function buildPlanSuffix(allowedTools: ReadonlySet<string>): string {
 You are in **Plan Mode**. Your only task is to explore the codebase and produce a concrete numbered execution plan. You CANNOT and MUST NOT modify any files.
 
 Available tools: ${toolList}.
-Write tools (\`write\`, \`edit\`, \`bash\`, \`todo_write\`) are blocked at the executor level.
+All other tools are blocked at the executor level.
 
 ### Process
 

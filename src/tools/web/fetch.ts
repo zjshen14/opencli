@@ -4,6 +4,7 @@ const MAX_OUTPUT = Number(process.env.OPENCLI_MAX_TOOL_OUTPUT ?? 20_000);
 
 export const webFetchTool: Tool = {
   name: "web_fetch",
+  readonly: true,
   description:
     "Fetch a URL and return its content as plain text. HTML is converted to readable text; JSON is returned as-is. Use for reading documentation, GitHub issues, API references, or any URL the user shares.",
   parameters: {

@@ -57,6 +57,7 @@ describe("executeCalls", () => {
       name: "slow",
       description: "",
       parameters: { type: "object", properties: {} },
+      readonly: true,
       execute: async () => {
         await new Promise((r) => setTimeout(r, 20));
         order.push("slow");
@@ -67,6 +68,7 @@ describe("executeCalls", () => {
       name: "fast",
       description: "",
       parameters: { type: "object", properties: {} },
+      readonly: true,
       execute: async () => {
         order.push("fast");
         return { success: true, output: "fast result" };
@@ -350,7 +352,14 @@ describe("executeCalls", () => {
   });
 
   it("allows read/glob/grep when readOnly is set", async () => {
-    const registry = makeToolRegistry("read", "file contents");
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "read",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      readonly: true,
+      execute: async () => ({ success: true, output: "file contents" }),
+    });
     const { results } = await executeCalls([makeToolCall("read")], {
       tools: registry,
       skills: makeSkillRegistry({}),

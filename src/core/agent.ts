@@ -22,22 +22,6 @@ const STUCK_THRESHOLD = 3;
 
 export type AgentRunMode = "react" | "plan";
 
-// Tools exposed in plan mode — exploration only, no writes.
-// Bash is excluded: read/glob/grep cover 95% of exploration, and reliably
-// validating bash as read-only is hard (subshells, redirects, find -exec).
-const PLAN_MODE_TOOLS = new Set([
-  "read",
-  "glob",
-  "grep",
-  "ls",
-  "web_fetch",
-  "todo_read",
-  "think",
-  "activate_skill",
-]);
-
-const PLAN_SYSTEM_SUFFIX = buildPlanSuffix(PLAN_MODE_TOOLS);
-
 export class Agent {
   private context: ContextManager;
   private confirmFn?: ConfirmFn;
@@ -84,12 +68,18 @@ export class Agent {
     });
 
     const allToolDefs = [...this.tools.all().map(toolToDefinition), activateSkillDefinition];
-    const toolDefinitions =
-      mode === "plan" ? allToolDefs.filter((t) => PLAN_MODE_TOOLS.has(t.name)) : allToolDefs;
 
-    const baseInstruction = this.context.getSystemInstruction(toolDefinitions);
-    const systemInstruction =
-      mode === "plan" ? baseInstruction + PLAN_SYSTEM_SUFFIX : baseInstruction;
+    let toolDefinitions = allToolDefs;
+    let systemInstruction: string;
+
+    if (mode === "plan") {
+      const readonlyTools = this.tools.all().filter((t) => t.readonly);
+      toolDefinitions = [...readonlyTools.map(toolToDefinition), activateSkillDefinition];
+      const planSuffix = buildPlanSuffix(new Set(readonlyTools.map((t) => t.name)));
+      systemInstruction = this.context.getSystemInstruction(toolDefinitions) + planSuffix;
+    } else {
+      systemInstruction = this.context.getSystemInstruction(allToolDefs);
+    }
 
     let turns = 0;
     let lastCallSig = "";

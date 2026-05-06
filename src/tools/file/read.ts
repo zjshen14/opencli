@@ -4,6 +4,7 @@ import type { Tool } from "../base.js";
 
 export const readTool: Tool = {
   name: "read",
+  readonly: true,
   description:
     "Read the contents of a file. Optionally specify offset (line to start from, 1-based) and limit (number of lines to read).",
   parameters: {

@@ -14,10 +14,6 @@ const DEFAULT_MAX_OUTPUT = 20_000;
 const MAX_TOOL_OUTPUT =
   parseInt(process.env.OPENCLI_MAX_TOOL_OUTPUT ?? "", 10) || DEFAULT_MAX_OUTPUT;
 
-// Tools blocked when `readOnly` is set on ExecutorDeps (used by plan mode).
-// Defence-in-depth: even if the filtered tool list leaks, the executor refuses.
-const WRITE_TOOLS = new Set(["write", "edit", "bash", "todo_write"]);
-
 /** Called when a tool signals it requires confirmation. Returns "allow" or "deny". */
 export type ConfirmFn = (
   toolName: string,
@@ -68,7 +64,9 @@ async function executeOneCall(
   call: FunctionCallPart,
   deps: ExecutorDeps,
 ): Promise<FunctionResultPart> {
-  if (deps.readOnly && WRITE_TOOLS.has(call.name)) {
+  const tool = deps.tools.get(call.name);
+
+  if (deps.readOnly && !tool?.readonly) {
     deps.obs?.({ type: "tool_denied", name: call.name, reason: "plan_mode" });
     return {
       type: "function_result",
@@ -78,8 +76,6 @@ async function executeOneCall(
       thoughtSignature: call.thoughtSignature,
     };
   }
-
-  const tool = deps.tools.get(call.name);
   if (tool?.requiresConfirmation?.(call.args as Record<string, unknown>)) {
     const decision = deps.confirmFn
       ? await deps.confirmFn(call.name, call.args as Record<string, unknown>)
@@ -155,7 +151,7 @@ export async function executeCalls(
   // followed by a read that depends on it). Pure read batches still run in
   // parallel for speed.
   let results: FunctionResultPart[];
-  if (toolCalls.some((c) => WRITE_TOOLS.has(c.name))) {
+  if (toolCalls.some((c) => !deps.tools.get(c.name)?.readonly)) {
     results = [];
     for (const call of toolCalls) {
       results.push(await executeOneCall(call, deps));

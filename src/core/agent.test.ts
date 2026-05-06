@@ -78,11 +78,13 @@ describe("Agent plan mode", () => {
     };
 
     const registry = new ToolRegistry();
+    const readonlyNames = new Set(["read", "glob", "grep", "think"]);
     for (const name of ["read", "glob", "grep", "write", "edit", "bash", "think"]) {
       registry.register({
         name,
         description: "",
         parameters: { type: "object", properties: {} },
+        readonly: readonlyNames.has(name) ? true : undefined,
         execute: async () => ({ success: true, output: "" }),
       });
     }

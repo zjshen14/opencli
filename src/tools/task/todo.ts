@@ -56,6 +56,7 @@ export const todoWriteTool: Tool = {
 
 export const todoReadTool: Tool = {
   name: "todo_read",
+  readonly: true,
   description:
     "Read the current session task list written by todo_write. Use to check progress before continuing a multi-step task.",
   parameters: {

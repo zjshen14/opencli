@@ -4,6 +4,7 @@ import type { Tool } from "../base.js";
 
 export const lsTool: Tool = {
   name: "ls",
+  readonly: true,
   description:
     "List directory contents with file type and size. Use for directory exploration; use glob when you need pattern matching.",
   parameters: {

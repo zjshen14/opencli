@@ -301,7 +301,9 @@ describe("Session.loadMessages", () => {
 describe("Session.log", () => {
   it("is non-fatal and resolves without error", async () => {
     const session = await Session.create(CWD);
-    await expect(session.log({ type: "custom_event", data: 42 })).resolves.toBeUndefined();
+    // Verifies log() is non-fatal for unrecognised entry types (e.g. from older versions).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect(session.log({ type: "custom_event", data: 42 } as any)).resolves.toBeUndefined();
   });
 });
 

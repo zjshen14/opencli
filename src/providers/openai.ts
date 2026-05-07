@@ -1,10 +1,9 @@
 import OpenAI from "openai";
 import type { LLMClient } from "./client.js";
 import type { Message, StreamEvent, ToolDefinition } from "./types.js";
+import { withRetry } from "./retry.js";
 
 const DEFAULT_MAX_TOKENS = 8096;
-const MAX_RETRIES = 3;
-const RETRY_BASE_MS = 1000;
 
 // o1/o3/o4 reasoning models use "developer" role instead of "system"
 function isReasoningModel(model: string): boolean {
@@ -37,88 +36,85 @@ export class OpenAIClient implements LLMClient {
     const openaiMessages = messagesToOpenAIParams(messages, systemInstruction, reasoning);
     const openaiTools: OpenAI.ChatCompletionFunctionTool[] = tools.map(definitionToOpenAITool);
 
-    let lastError: Error | undefined;
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      try {
-        const apiStream = await this.client.chat.completions.create({
-          model: this.model,
-          max_tokens: this.maxTokens,
-          messages: openaiMessages,
-          tools: openaiTools.length > 0 ? openaiTools : undefined,
-          stream: true,
-          stream_options: this.includeUsage ? { include_usage: true } : undefined,
-        });
-
-        const pendingCalls = new Map<number, { id: string; name: string; args: string }>();
-        let inputTokens = 0;
-        let outputTokens = 0;
-
-        for await (const chunk of apiStream) {
-          if (chunk.usage) {
-            inputTokens = chunk.usage.prompt_tokens;
-            outputTokens = chunk.usage.completion_tokens;
-          }
-
-          const choice = chunk.choices[0];
-          if (!choice) continue;
-
-          const { delta, finish_reason } = choice;
-
-          if (delta.content) {
-            yield { type: "text", text: delta.content };
-          }
-
-          if (delta.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const acc = pendingCalls.get(tc.index);
-              if (acc) {
-                acc.args += tc.function?.arguments ?? "";
-              } else {
-                pendingCalls.set(tc.index, {
-                  id: tc.id ?? "",
-                  name: tc.function?.name ?? "",
-                  args: tc.function?.arguments ?? "",
-                });
-              }
-            }
-          }
-
-          if (finish_reason === "tool_calls") {
-            for (const [, tc] of [...pendingCalls.entries()].sort(([a], [b]) => a - b)) {
-              yield {
-                type: "function_call",
-                id: tc.id,
-                name: tc.name,
-                args: JSON.parse(tc.args || "{}") as Record<string, unknown>,
-              };
-            }
-            pendingCalls.clear();
-          }
-        }
-
-        if (inputTokens > 0 || outputTokens > 0) {
-          yield { type: "usage", inputTokens, outputTokens };
-        }
-        yield { type: "done" };
-        return;
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-        const msg = lastError.message;
-        const isRetryable =
+    yield* withRetry(
+      () => this._streamOnce(openaiMessages, openaiTools),
+      (err) => {
+        const msg = err.message;
+        return (
           msg.includes("429") ||
           msg.includes("500") ||
           msg.includes("502") ||
           msg.includes("503") ||
-          msg.includes("rate_limit");
+          msg.includes("rate_limit")
+        );
+      },
+    );
+  }
 
-        if (!isRetryable || attempt === MAX_RETRIES - 1) throw lastError;
+  private async *_streamOnce(
+    openaiMessages: OpenAI.ChatCompletionMessageParam[],
+    openaiTools: OpenAI.ChatCompletionFunctionTool[],
+  ): AsyncGenerator<StreamEvent> {
+    const apiStream = await this.client.chat.completions.create({
+      model: this.model,
+      max_tokens: this.maxTokens,
+      messages: openaiMessages,
+      tools: openaiTools.length > 0 ? openaiTools : undefined,
+      stream: true,
+      stream_options: this.includeUsage ? { include_usage: true } : undefined,
+    });
 
-        const delay = RETRY_BASE_MS * 2 ** attempt;
-        await sleep(delay);
+    const pendingCalls = new Map<number, { id: string; name: string; args: string }>();
+    let inputTokens = 0;
+    let outputTokens = 0;
+
+    for await (const chunk of apiStream) {
+      if (chunk.usage) {
+        inputTokens = chunk.usage.prompt_tokens;
+        outputTokens = chunk.usage.completion_tokens;
+      }
+
+      const choice = chunk.choices[0];
+      if (!choice) continue;
+
+      const { delta, finish_reason } = choice;
+
+      if (delta.content) {
+        yield { type: "text", text: delta.content };
+      }
+
+      if (delta.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const acc = pendingCalls.get(tc.index);
+          if (acc) {
+            acc.args += tc.function?.arguments ?? "";
+          } else {
+            pendingCalls.set(tc.index, {
+              id: tc.id ?? "",
+              name: tc.function?.name ?? "",
+              args: tc.function?.arguments ?? "",
+            });
+          }
+        }
+      }
+
+      if (finish_reason === "tool_calls") {
+        for (const [, tc] of [...pendingCalls.entries()].sort(([a], [b]) => a - b)) {
+          yield {
+            type: "function_call",
+            id: tc.id,
+            name: tc.name,
+            args: JSON.parse(tc.args || "{}") as Record<string, unknown>,
+          };
+        }
+        pendingCalls.clear();
       }
     }
 
-    throw lastError;
+    if (inputTokens > 0 || outputTokens > 0) {
+      yield { type: "usage", inputTokens, outputTokens };
+    }
+    yield { type: "done" };
   }
 }
 
@@ -185,8 +181,4 @@ function definitionToOpenAITool(def: ToolDefinition): OpenAI.ChatCompletionFunct
       parameters: def.parameters as OpenAI.FunctionParameters,
     },
   };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -7,10 +7,9 @@ import {
 } from "@google/genai";
 import type { LLMClient } from "./client.js";
 import type { Message, StreamEvent, ToolDefinition } from "./types.js";
+import { withRetry } from "./retry.js";
 
 const DEFAULT_MODEL = "gemini-3-flash-preview";
-const MAX_RETRIES = 3;
-const RETRY_BASE_MS = 1000;
 
 export class GeminiClient implements LLMClient {
   private client: GoogleGenAI;
@@ -31,63 +30,57 @@ export class GeminiClient implements LLMClient {
     const contents = messagesToContents(messages);
     const functionDeclarations = tools.map(definitionToFunctionDeclaration);
 
-    let lastError: Error | undefined;
-    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-      try {
-        const response = await this.client.models.generateContentStream({
-          model: this.model,
-          contents,
-          config: {
-            systemInstruction,
-            tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
-            maxOutputTokens: this.maxOutputTokens,
-          },
-        });
+    yield* withRetry(
+      () => this._streamOnce(contents, systemInstruction, functionDeclarations),
+      (err) => err instanceof ApiError && [429, 500, 502, 503].includes(err.status),
+    );
+  }
 
-        let usageInputTokens = 0;
-        let usageOutputTokens = 0;
+  private async *_streamOnce(
+    contents: Content[],
+    systemInstruction: string,
+    functionDeclarations: FunctionDeclaration[],
+  ): AsyncGenerator<StreamEvent> {
+    const response = await this.client.models.generateContentStream({
+      model: this.model,
+      contents,
+      config: {
+        systemInstruction,
+        tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
+        maxOutputTokens: this.maxOutputTokens,
+      },
+    });
 
-        for await (const chunk of response) {
-          const candidate = chunk.candidates?.[0];
-          if (candidate?.content?.parts) {
-            for (const part of candidate.content.parts) {
-              if (part.text) {
-                yield { type: "text", text: part.text };
-              } else if (part.functionCall) {
-                yield {
-                  type: "function_call",
-                  id: part.functionCall.id ?? crypto.randomUUID(),
-                  name: part.functionCall.name ?? "",
-                  args: (part.functionCall.args ?? {}) as Record<string, unknown>,
-                  thoughtSignature: (part as unknown as { thoughtSignature?: string })
-                    .thoughtSignature,
-                };
-              }
-            }
-          }
-          if (chunk.usageMetadata) {
-            usageInputTokens = chunk.usageMetadata.promptTokenCount ?? 0;
-            usageOutputTokens = chunk.usageMetadata.candidatesTokenCount ?? 0;
+    let usageInputTokens = 0;
+    let usageOutputTokens = 0;
+
+    for await (const chunk of response) {
+      const candidate = chunk.candidates?.[0];
+      if (candidate?.content?.parts) {
+        for (const part of candidate.content.parts) {
+          if (part.text) {
+            yield { type: "text", text: part.text };
+          } else if (part.functionCall) {
+            yield {
+              type: "function_call",
+              id: part.functionCall.id ?? crypto.randomUUID(),
+              name: part.functionCall.name ?? "",
+              args: (part.functionCall.args ?? {}) as Record<string, unknown>,
+              thoughtSignature: (part as unknown as { thoughtSignature?: string }).thoughtSignature,
+            };
           }
         }
-
-        if (usageInputTokens > 0 || usageOutputTokens > 0) {
-          yield { type: "usage", inputTokens: usageInputTokens, outputTokens: usageOutputTokens };
-        }
-        yield { type: "done" };
-        return;
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-        const isRetryable = err instanceof ApiError && [429, 500, 502, 503].includes(err.status);
-
-        if (!isRetryable || attempt === MAX_RETRIES - 1) throw lastError;
-
-        const delay = RETRY_BASE_MS * 2 ** attempt;
-        await sleep(delay);
+      }
+      if (chunk.usageMetadata) {
+        usageInputTokens = chunk.usageMetadata.promptTokenCount ?? 0;
+        usageOutputTokens = chunk.usageMetadata.candidatesTokenCount ?? 0;
       }
     }
 
-    throw lastError;
+    if (usageInputTokens > 0 || usageOutputTokens > 0) {
+      yield { type: "usage", inputTokens: usageInputTokens, outputTokens: usageOutputTokens };
+    }
+    yield { type: "done" };
   }
 }
 
@@ -147,8 +140,4 @@ function convertSchema(schema: Record<string, unknown>): Schema {
   if (schema.required) result.required = schema.required as string[];
 
   return result;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -140,7 +140,7 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
   }
 
   for (const entry of entries) {
-    if (entry.type === "user" && typeof entry.content === "string") {
+    if (entry.type === "user") {
       // A new user turn — flush any dangling tool state first
       flushCalls();
       flushResults();
@@ -149,16 +149,14 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
       // New tool_call batch: if there were results from a previous round, flush them first
       flushResults();
       const id = `resume-call-${++idCounter}`;
-      const thoughtSignature =
-        typeof entry.thoughtSignature === "string" ? entry.thoughtSignature : undefined;
       pendingCallIds.push(id);
-      pendingCallSignatures.push(thoughtSignature);
+      pendingCallSignatures.push(entry.thoughtSignature);
       pendingCalls.push({
         type: "function_call",
         id,
-        name: String(entry.name ?? ""),
-        args: (entry.args as Record<string, unknown>) ?? {},
-        thoughtSignature,
+        name: entry.name,
+        args: entry.args,
+        thoughtSignature: entry.thoughtSignature,
       });
     } else if (entry.type === "tool_result") {
       // Results follow their calls — flush the pending call batch into a model message
@@ -168,15 +166,16 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
       pendingResults.push({
         type: "function_result",
         id,
-        name: String(entry.name ?? ""),
-        result: String(entry.result ?? ""),
+        name: entry.name,
+        result: entry.result,
         thoughtSignature: resultSignature,
       });
-    } else if (entry.type === "assistant" && typeof entry.content === "string" && entry.content) {
+    } else if (entry.type === "assistant" && entry.content) {
       flushCalls();
       flushResults();
       messages.push({ role: "model", parts: [{ type: "text", text: entry.content }] });
     }
+    // session_start and unrecognised types are silently ignored
   }
 
   // Flush anything left over (e.g. session ended mid-turn)
@@ -186,11 +185,20 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
   return messages;
 }
 
-export interface SessionEntry {
-  type: string;
-  timestamp: string;
-  [key: string]: unknown;
-}
+export type SessionEntry =
+  | { type: "session_start"; timestamp: string; cwd: string }
+  | { type: "user"; timestamp: string; content: string }
+  | { type: "assistant"; timestamp: string; content: string }
+  | {
+      type: "tool_call";
+      timestamp: string;
+      name: string;
+      args: Record<string, unknown>;
+      thoughtSignature?: string;
+    }
+  | { type: "tool_result"; timestamp: string; name: string; result: string };
+
+type WithoutTimestamp<T> = T extends unknown ? Omit<T, "timestamp"> : never;
 
 export interface SessionSummary {
   id: string;
@@ -284,7 +292,7 @@ export class Session {
     };
   }
 
-  async log(entry: Omit<SessionEntry, "timestamp">): Promise<void> {
+  async log(entry: WithoutTimestamp<SessionEntry>): Promise<void> {
     try {
       const line = JSON.stringify({ ...entry, timestamp: new Date().toISOString() }) + "\n";
       await appendFile(this.logPath, line, "utf8");

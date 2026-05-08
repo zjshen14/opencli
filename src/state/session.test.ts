@@ -220,72 +220,23 @@ describe("Session.loadMessages", () => {
     expect(calls[0].id).not.toBe(calls[1].id);
   });
 
-  it("preserves thoughtSignature from tool_call through function_call and function_result parts", async () => {
+  it("reconstructed function_call parts have no thoughtSignature (handled by GeminiClient internally)", async () => {
     const session = await Session.create(CWD);
-    await session.log({ type: "user", content: "Use a thinking model tool" });
-    await session.log({
-      type: "tool_call",
-      name: "bash",
-      args: { command: "ls" },
-      thoughtSignature: "sig-abc123",
-    });
+    await session.log({ type: "user", content: "Tool call" });
+    await session.log({ type: "tool_call", name: "bash", args: { command: "ls" } });
     await session.log({ type: "tool_result", name: "bash", result: "file.txt" });
     await session.log({ type: "assistant", content: "Done." });
 
     const { messages } = await Session.loadMessages(session.id, CWD);
     expect(messages).toHaveLength(4);
 
-    const callPart = messages[1].parts[0] as { type: string; thoughtSignature?: string };
+    const callPart = messages[1].parts[0] as unknown as Record<string, unknown>;
     expect(callPart.type).toBe("function_call");
-    expect(callPart.thoughtSignature).toBe("sig-abc123");
+    expect(Object.prototype.hasOwnProperty.call(callPart, "thoughtSignature")).toBe(false);
 
-    const resultPart = messages[2].parts[0] as { type: string; thoughtSignature?: string };
+    const resultPart = messages[2].parts[0] as unknown as Record<string, unknown>;
     expect(resultPart.type).toBe("function_result");
-    expect(resultPart.thoughtSignature).toBe("sig-abc123");
-  });
-
-  it("handles missing thoughtSignature gracefully (non-thinking models)", async () => {
-    const session = await Session.create(CWD);
-    await session.log({ type: "user", content: "Normal tool call" });
-    await session.log({ type: "tool_call", name: "bash", args: { command: "echo hi" } });
-    await session.log({ type: "tool_result", name: "bash", result: "hi" });
-    await session.log({ type: "assistant", content: "Done." });
-
-    const { messages } = await Session.loadMessages(session.id, CWD);
-    const callPart = messages[1].parts[0] as { type: string; thoughtSignature?: string };
-    expect(callPart.thoughtSignature).toBeUndefined();
-    const resultPart = messages[2].parts[0] as { type: string; thoughtSignature?: string };
-    expect(resultPart.thoughtSignature).toBeUndefined();
-  });
-
-  it("preserves thoughtSignature across parallel multi-call rounds", async () => {
-    const session = await Session.create(CWD);
-    await session.log({ type: "user", content: "Parallel calls" });
-    await session.log({
-      type: "tool_call",
-      name: "glob",
-      args: { pattern: "*.ts" },
-      thoughtSignature: "sig-1",
-    });
-    await session.log({
-      type: "tool_call",
-      name: "grep",
-      args: { pattern: "foo" },
-      thoughtSignature: "sig-2",
-    });
-    await session.log({ type: "tool_result", name: "glob", result: "a.ts" });
-    await session.log({ type: "tool_result", name: "grep", result: "a.ts:1" });
-    await session.log({ type: "assistant", content: "Done." });
-
-    const { messages } = await Session.loadMessages(session.id, CWD);
-    // messages[1] = model(2 calls), messages[2] = user(2 results)
-    const calls = messages[1].parts as Array<{ type: string; thoughtSignature?: string }>;
-    const results = messages[2].parts as Array<{ type: string; thoughtSignature?: string }>;
-
-    expect(calls[0].thoughtSignature).toBe("sig-1");
-    expect(calls[1].thoughtSignature).toBe("sig-2");
-    expect(results[0].thoughtSignature).toBe("sig-1");
-    expect(results[1].thoughtSignature).toBe("sig-2");
+    expect(Object.prototype.hasOwnProperty.call(resultPart, "thoughtSignature")).toBe(false);
   });
 
   it("ignores session_start and unknown entries", async () => {

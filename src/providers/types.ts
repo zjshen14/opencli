@@ -18,7 +18,6 @@ export interface FunctionCallPart {
   id: string;
   name: string;
   args: Record<string, unknown>;
-  thoughtSignature?: string; // required by Gemini thinking models
 }
 
 export interface FunctionResultPart {
@@ -26,7 +25,6 @@ export interface FunctionResultPart {
   id: string;
   name: string;
   result: string;
-  thoughtSignature?: string; // echoed back from the original function call
 }
 
 export type MessagePart = TextPart | FunctionCallPart | FunctionResultPart;
@@ -45,12 +43,6 @@ export interface ToolResult {
 // Normalized stream event types emitted by all provider clients
 export type StreamEvent =
   | { type: "text"; text: string }
-  | {
-      type: "function_call";
-      id: string;
-      name: string;
-      args: Record<string, unknown>;
-      thoughtSignature?: string;
-    }
+  | { type: "function_call"; id: string; name: string; args: Record<string, unknown> }
   | { type: "usage"; inputTokens: number; outputTokens: number }
   | { type: "done" };

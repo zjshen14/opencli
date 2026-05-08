@@ -17,4 +17,6 @@ export interface Tool {
   readonly?: boolean;
   execute: (params: Record<string, unknown>) => Promise<ToolResult>;
   requiresConfirmation?: (args: Record<string, unknown>) => boolean;
+  /** Return an error message string if params are invalid, or null if valid. */
+  validate?: (params: Record<string, unknown>) => string | null;
 }

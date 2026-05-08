@@ -56,4 +56,68 @@ describe("ToolRegistry", () => {
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/something went wrong/);
   });
+
+  it("rejects missing required parameters with a descriptive error", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "needs-cmd",
+      description: "Requires command",
+      parameters: {
+        type: "object",
+        properties: { command: { type: "string" } },
+        required: ["command"],
+      },
+      execute: async () => ({ success: true, output: "ok" }),
+    });
+    const result = await registry.execute("needs-cmd", {});
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/Missing required parameter: command/);
+  });
+
+  it("passes through when all required parameters are present", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "needs-cmd",
+      description: "Requires command",
+      parameters: {
+        type: "object",
+        properties: { command: { type: "string" } },
+        required: ["command"],
+      },
+      execute: async ({ command }) => ({ success: true, output: command as string }),
+    });
+    const result = await registry.execute("needs-cmd", { command: "echo hi" });
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("echo hi");
+  });
+
+  it("calls validate() and returns its error message when validation fails", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "validated",
+      description: "Has custom validation",
+      parameters: { type: "object", properties: { value: { type: "number" } } },
+      validate: ({ value }) =>
+        typeof value === "number" && value > 0 ? null : "value must be a positive number",
+      execute: async () => ({ success: true, output: "ok" }),
+    });
+    const result = await registry.execute("validated", { value: -1 });
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("value must be a positive number");
+  });
+
+  it("calls validate() and proceeds to execute when validation passes", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "validated",
+      description: "Has custom validation",
+      parameters: { type: "object", properties: { value: { type: "number" } } },
+      validate: ({ value }) =>
+        typeof value === "number" && value > 0 ? null : "value must be a positive number",
+      execute: async ({ value }) => ({ success: true, output: String(value) }),
+    });
+    const result = await registry.execute("validated", { value: 42 });
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("42");
+  });
 });

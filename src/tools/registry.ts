@@ -25,6 +25,18 @@ export class ToolRegistry {
     if (!tool) {
       return { success: false, output: "", error: `Unknown tool: ${name}` };
     }
+
+    for (const field of tool.parameters.required ?? []) {
+      if (params[field] === undefined || params[field] === null) {
+        return { success: false, output: "", error: `Missing required parameter: ${field}` };
+      }
+    }
+
+    const validationError = tool.validate?.(params) ?? null;
+    if (validationError !== null) {
+      return { success: false, output: "", error: validationError };
+    }
+
     try {
       return await tool.execute(params);
     } catch (err) {

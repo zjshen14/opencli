@@ -15,6 +15,9 @@ export class GeminiClient implements LLMClient {
   private client: GoogleGenAI;
   private model: string;
   private maxOutputTokens: number | undefined;
+  // Stores thoughtSignature keyed by function call ID; populated when a thinking-model
+  // functionCall is received, echoed back in the corresponding functionResponse.
+  private thoughtSignatures = new Map<string, string>();
 
   constructor(apiKey: string, model = DEFAULT_MODEL, maxOutputTokens?: number) {
     this.client = new GoogleGenAI({ apiKey });
@@ -27,7 +30,7 @@ export class GeminiClient implements LLMClient {
     systemInstruction: string,
     tools: ToolDefinition[],
   ): AsyncGenerator<StreamEvent> {
-    const contents = messagesToContents(messages);
+    const contents = this.messagesToContents(messages);
     const functionDeclarations = tools.map(definitionToFunctionDeclaration);
 
     yield* withRetry(
@@ -61,12 +64,14 @@ export class GeminiClient implements LLMClient {
           if (part.text) {
             yield { type: "text", text: part.text };
           } else if (part.functionCall) {
+            const id = part.functionCall.id ?? crypto.randomUUID();
+            const sig = (part as unknown as { thoughtSignature?: string }).thoughtSignature;
+            if (sig) this.thoughtSignatures.set(id, sig);
             yield {
               type: "function_call",
-              id: part.functionCall.id ?? crypto.randomUUID(),
+              id,
               name: part.functionCall.name ?? "",
               args: (part.functionCall.args ?? {}) as Record<string, unknown>,
-              thoughtSignature: (part as unknown as { thoughtSignature?: string }).thoughtSignature,
             };
           }
         }
@@ -82,32 +87,33 @@ export class GeminiClient implements LLMClient {
     }
     yield { type: "done" };
   }
-}
-
-function messagesToContents(messages: Message[]): Content[] {
-  return messages.map((msg) => ({
-    role: msg.role,
-    parts: msg.parts.map((part) => {
-      if (part.type === "text") {
-        return { text: part.text };
-      }
-      if (part.type === "function_call") {
+  private messagesToContents(messages: Message[]): Content[] {
+    return messages.map((msg) => ({
+      role: msg.role,
+      parts: msg.parts.map((part) => {
+        if (part.type === "text") {
+          return { text: part.text };
+        }
+        if (part.type === "function_call") {
+          const sig = this.thoughtSignatures.get(part.id);
+          return {
+            functionCall: { id: part.id, name: part.name, args: part.args },
+            ...(sig ? { thoughtSignature: sig } : {}),
+          };
+        }
+        // function_result — echo thoughtSignature back as required by Gemini thinking models
+        const sig = this.thoughtSignatures.get(part.id);
         return {
-          functionCall: { id: part.id, name: part.name, args: part.args },
-          ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
+          functionResponse: {
+            id: part.id,
+            name: part.name,
+            response: { output: part.result },
+          },
+          ...(sig ? { thoughtSignature: sig } : {}),
         };
-      }
-      // function_result — echo thoughtSignature back as required by Gemini thinking models
-      return {
-        functionResponse: {
-          id: part.id,
-          name: part.name,
-          response: { output: part.result },
-        },
-        ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}),
-      };
-    }),
-  }));
+      }),
+    }));
+  }
 }
 
 function definitionToFunctionDeclaration(def: ToolDefinition): FunctionDeclaration {

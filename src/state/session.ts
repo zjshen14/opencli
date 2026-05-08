@@ -118,11 +118,9 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
   // Pending batches accumulate until we know where they belong
   let pendingCalls: FunctionCallPart[] = [];
   let pendingResults: FunctionResultPart[] = [];
-  // Queue of call IDs (and their thoughtSignatures) waiting for their matching results;
-  // ensures each function_result references the same ID as its function_call (required by
-  // the Anthropic API) and echoes back thoughtSignature (required by Gemini thinking models).
+  // Queue of call IDs waiting for their matching results; ensures each
+  // function_result references the same ID as its function_call (required by the Anthropic API).
   let pendingCallIds: string[] = [];
-  let pendingCallSignatures: (string | undefined)[] = [];
 
   function flushCalls(): void {
     if (pendingCalls.length === 0) return;
@@ -136,7 +134,6 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
     messages.push({ role: "user", parts: pendingResults });
     pendingResults = [];
     pendingCallIds = [];
-    pendingCallSignatures = [];
   }
 
   for (const entry of entries) {
@@ -150,25 +147,21 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
       flushResults();
       const id = `resume-call-${++idCounter}`;
       pendingCallIds.push(id);
-      pendingCallSignatures.push(entry.thoughtSignature);
       pendingCalls.push({
         type: "function_call",
         id,
         name: entry.name,
         args: entry.args,
-        thoughtSignature: entry.thoughtSignature,
       });
     } else if (entry.type === "tool_result") {
       // Results follow their calls — flush the pending call batch into a model message
       flushCalls();
       const id = pendingCallIds.shift() ?? `resume-call-${++idCounter}`;
-      const resultSignature = pendingCallSignatures.shift();
       pendingResults.push({
         type: "function_result",
         id,
         name: entry.name,
         result: entry.result,
-        thoughtSignature: resultSignature,
       });
     } else if (entry.type === "assistant" && entry.content) {
       flushCalls();
@@ -189,13 +182,7 @@ export type SessionEntry =
   | { type: "session_start"; timestamp: string; cwd: string }
   | { type: "user"; timestamp: string; content: string }
   | { type: "assistant"; timestamp: string; content: string }
-  | {
-      type: "tool_call";
-      timestamp: string;
-      name: string;
-      args: Record<string, unknown>;
-      thoughtSignature?: string;
-    }
+  | { type: "tool_call"; timestamp: string; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; timestamp: string; name: string; result: string };
 
 type WithoutTimestamp<T> = T extends unknown ? Omit<T, "timestamp"> : never;

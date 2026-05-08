@@ -73,7 +73,6 @@ async function executeOneCall(
       id: call.id,
       name: call.name,
       result: `Error: '${call.name}' is blocked in plan mode. Use read, glob, or grep to explore the codebase.`,
-      thoughtSignature: call.thoughtSignature,
     };
   }
   if (tool?.requiresConfirmation?.(call.args as Record<string, unknown>)) {
@@ -93,7 +92,6 @@ async function executeOneCall(
         result: deps.confirmFn
           ? `Blocked: user denied '${call.name}' tool call.`
           : `Blocked: '${call.name}' requires confirmation but is running non-interactively. Pass --yes to auto-approve.`,
-        thoughtSignature: call.thoughtSignature,
       };
     }
   }
@@ -123,7 +121,6 @@ async function executeOneCall(
     id: call.id,
     name: call.name,
     result: output,
-    thoughtSignature: call.thoughtSignature,
   };
 }
 

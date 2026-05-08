@@ -241,25 +241,6 @@ describe("executeCalls", () => {
     expect(skillRegistry.load).not.toHaveBeenCalled();
   });
 
-  it("propagates thoughtSignature from call to result", async () => {
-    const registry = makeToolRegistry("read", "content");
-    const call: FunctionCallPart = {
-      type: "function_call",
-      id: "c1",
-      name: "read",
-      args: {},
-      thoughtSignature: "sig-abc",
-    };
-
-    const { results } = await executeCalls([call], {
-      tools: registry,
-      skills: makeSkillRegistry({}),
-      context: new ContextManager(),
-    });
-
-    expect(results[0].thoughtSignature).toBe("sig-abc");
-  });
-
   it("truncates bash output exceeding the limit (middle-truncation)", async () => {
     const big = "A".repeat(12_000) + "MIDDLE" + "B".repeat(12_000);
     const registry = new ToolRegistry();

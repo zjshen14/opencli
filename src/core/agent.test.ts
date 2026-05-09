@@ -186,6 +186,42 @@ describe("Agent stuck-loop detection", () => {
     expect((error as { type: "error"; message: string }).message).toMatch(/identical tool calls/i);
   });
 
+  it("catches a model retrying a failing tool call with the same args (#4)", async () => {
+    // Scenario from issue #4: model tries to read a missing file, gets an
+    // error, and stubbornly retries the exact same call. The stuck-loop guard
+    // must abort after STUCK_THRESHOLD (3) identical consecutive calls.
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "read",
+      description: "read a file",
+      parameters: { type: "object", properties: { file_path: { type: "string" } } },
+      readonly: true,
+      execute: async () => ({
+        success: false,
+        output: "",
+        error: "ENOENT: no such file or directory, open '/missing.txt'",
+      }),
+    });
+
+    const agent = new Agent(
+      makeLoopingClient("read", { file_path: "/missing.txt" }),
+      registry,
+      new SkillRegistry(),
+      undefined,
+      undefined,
+      100, // high maxTurns so only stuck detection fires
+    );
+
+    const events = await collectEvents(agent, "read /missing.txt");
+    const error = events.find((e) => e.type === "error");
+    expect(error).toBeDefined();
+    expect((error as { type: "error"; message: string }).message).toMatch(/identical tool calls/i);
+
+    // Verify we stopped after exactly STUCK_THRESHOLD (3) tool call rounds
+    const toolCalls = events.filter((e) => e.type === "tool_call");
+    expect(toolCalls).toHaveLength(3);
+  });
+
   it("resets stuck counter when args change", async () => {
     let callCount = 0;
     // Alternate args every call so stuck detection never fires

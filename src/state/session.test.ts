@@ -258,6 +258,73 @@ describe("Session.log", () => {
   });
 });
 
+describe("Session.loadMessages — orphaned tool_result resilience", () => {
+  it("skips a tool_result that has no preceding tool_call", async () => {
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const { AGENT_DIR } = await import("./config.js");
+    const { join } = await import("node:path");
+
+    const projectDir = join(AGENT_DIR, "projects", Buffer.from(CWD).toString("base64url"));
+    await mkdir(projectDir, { recursive: true });
+    const id = "2025-01-01T00-00-02";
+    const logPath = join(projectDir, `${id}.jsonl`);
+
+    const entry = (obj: object) => JSON.stringify({ ...obj, timestamp: "t" });
+    const lines = [
+      entry({ type: "session_start", cwd: CWD }),
+      entry({ type: "user", content: "Hello" }),
+      entry({ type: "tool_result", name: "bash", result: "orphaned" }), // no matching call
+      entry({ type: "assistant", content: "Hi there" }),
+    ].join("\n");
+
+    await writeFile(logPath, lines, "utf8");
+
+    const { messages } = await Session.loadMessages(id, CWD);
+    expect(messages).toHaveLength(2);
+    expect(messages[0]).toMatchObject({ role: "user", parts: [{ type: "text", text: "Hello" }] });
+    expect(messages[1]).toMatchObject({
+      role: "model",
+      parts: [{ type: "text", text: "Hi there" }],
+    });
+  });
+
+  it("skips extra tool_result entries when there are more results than calls", async () => {
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const { AGENT_DIR } = await import("./config.js");
+    const { join } = await import("node:path");
+
+    const projectDir = join(AGENT_DIR, "projects", Buffer.from(CWD).toString("base64url"));
+    await mkdir(projectDir, { recursive: true });
+    const id = "2025-01-01T00-00-03";
+    const logPath = join(projectDir, `${id}.jsonl`);
+
+    const entry = (obj: object) => JSON.stringify({ ...obj, timestamp: "t" });
+    const lines = [
+      entry({ type: "session_start", cwd: CWD }),
+      entry({ type: "user", content: "Run" }),
+      entry({ type: "tool_call", name: "bash", args: { command: "ls" } }),
+      entry({ type: "tool_result", name: "bash", result: "file.txt" }), // matches the call
+      entry({ type: "tool_result", name: "bash", result: "extra" }), // orphaned — no second call
+      entry({ type: "assistant", content: "Done." }),
+    ].join("\n");
+
+    await writeFile(logPath, lines, "utf8");
+
+    const { messages } = await Session.loadMessages(id, CWD);
+    // user → model(1 call) → user(1 result) → model text  — extra result dropped
+    expect(messages).toHaveLength(4);
+    expect(messages[1].parts).toHaveLength(1); // one function_call
+    expect(messages[1].parts[0]).toMatchObject({ type: "function_call", name: "bash" });
+    expect(messages[2].parts).toHaveLength(1); // one function_result (not two)
+    expect(messages[2].parts[0]).toMatchObject({
+      type: "function_result",
+      name: "bash",
+      result: "file.txt",
+    });
+    expect(messages[3]).toMatchObject({ role: "model", parts: [{ type: "text", text: "Done." }] });
+  });
+});
+
 describe("Session.loadMessages — malformed JSONL resilience", () => {
   it("skips malformed lines and still returns valid messages", async () => {
     const { writeFile, mkdir } = await import("node:fs/promises");

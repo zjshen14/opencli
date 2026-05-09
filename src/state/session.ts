@@ -156,7 +156,13 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
     } else if (entry.type === "tool_result") {
       // Results follow their calls — flush the pending call batch into a model message
       flushCalls();
-      const id = pendingCallIds.shift() ?? `resume-call-${++idCounter}`;
+      if (pendingCallIds.length === 0) {
+        process.stderr.write(
+          `[opencli] warn: orphaned tool_result for "${entry.name}" (no matching tool_call) — skipping\n`,
+        );
+        continue;
+      }
+      const id = pendingCallIds.shift()!;
       pendingResults.push({
         type: "function_result",
         id,

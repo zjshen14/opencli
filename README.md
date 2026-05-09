@@ -2,7 +2,7 @@
 
 A lightweight, open-source AI agent CLI that supports Google Gemini and Anthropic Claude models. Interact via natural-language prompts to perform developer tasks (code review, explanations, debugging, testing, and file operations) with explicit, auditable tool execution and safety checks.
 
-> **Status**: Early prototype. Architecture spec in [`docs/architecture.md`](docs/architecture.md).
+> **Status**: Early prototype. Architecture spec in [`docs/architecture.md`](docs/architecture.md). Strategic direction in [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Installation
 

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { bashTool } from "./bash.js";
+import { createBashTool } from "./bash.js";
+import { PassthroughRunner } from "./sandbox/passthrough.js";
+
+const bashTool = createBashTool(new PassthroughRunner("off"));
 
 describe("bashTool.execute", () => {
   it("executes a simple command and returns stdout", async () => {
@@ -19,10 +22,10 @@ describe("bashTool.execute", () => {
     expect(result.error).toMatch(/Exited with code 1/);
   });
 
-  it("respects cwd option", async () => {
-    const result = await bashTool.execute({ command: "pwd", cwd: "/tmp" });
+  it("respects cwd option inside project root", async () => {
+    const result = await bashTool.execute({ command: "pwd", cwd: process.cwd() });
     expect(result.success).toBe(true);
-    expect(result.output).toContain("/tmp");
+    expect(result.output).toContain(process.cwd());
   });
 
   it("runs multi-statement commands", async () => {
@@ -30,6 +33,12 @@ describe("bashTool.execute", () => {
     expect(result.success).toBe(true);
     expect(result.output).toContain("foo");
     expect(result.output).toContain("bar");
+  });
+
+  it("rejects cwd outside project root", async () => {
+    const result = await bashTool.execute({ command: "echo hi", cwd: "/etc" });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/outside the project root/);
   });
 });
 

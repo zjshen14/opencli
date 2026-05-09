@@ -10,6 +10,9 @@ import { resolveApiKey } from "./keys.js";
 import { runRepl, createConfirmFn } from "./repl.js";
 import { printError, printInfo } from "./renderer.js";
 import type { ObservabilityEvent } from "../core/observability.js";
+import { createSandboxRunner } from "../tools/exec/sandbox/index.js";
+import type { SandboxMode } from "../tools/exec/sandbox/types.js";
+import type { Config } from "../state/config.js";
 
 const program = new Command();
 
@@ -29,9 +32,16 @@ program
   .option("-s, --session <id>", "Resume a specific session by ID")
   .option("--max-turns <n>", "Maximum agent iterations per prompt (default: 50)", parseInt)
   .option("--debug", "Emit structured observability events to stderr as JSON")
+  .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
   .action(async (opts) => {
     const sessionId = opts.session ?? (opts.resume ? "latest" : undefined);
-    await startChat(opts.model, sessionId, opts.maxTurns, opts.debug as boolean | undefined);
+    await startChat(
+      opts.model,
+      sessionId,
+      opts.maxTurns,
+      opts.debug as boolean | undefined,
+      opts.sandbox as string | undefined,
+    );
   });
 
 program
@@ -58,6 +68,7 @@ program
   .option("--plan", "Run a read-only planning pass first, then auto-execute the plan")
   .option("--yes", "Auto-approve all tool confirmations (skip interactive prompts)")
   .option("--debug", "Emit structured observability events to stderr as JSON")
+  .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
   .action(async (prompt: string, opts) => {
     await runSingle(
       prompt,
@@ -66,6 +77,7 @@ program
       opts.plan as boolean | undefined,
       opts.yes as boolean | undefined,
       opts.debug as boolean | undefined,
+      opts.sandbox as string | undefined,
     );
   });
 
@@ -120,8 +132,9 @@ async function startChat(
   resumeSessionId?: string,
   maxTurns?: number,
   debug?: boolean,
+  sandboxFlag?: string,
 ): Promise<void> {
-  const { agent, skills } = await createAgent(modelOverride, maxTurns, debug);
+  const { agent, skills } = await createAgent(modelOverride, maxTurns, debug, sandboxFlag);
   await runRepl(agent, skills, resumeSessionId);
 }
 
@@ -132,8 +145,9 @@ async function runSingle(
   planMode?: boolean,
   autoApprove?: boolean,
   debug?: boolean,
+  sandboxFlag?: string,
 ): Promise<void> {
-  const { agent } = await createAgent(modelOverride, maxTurns, debug);
+  const { agent } = await createAgent(modelOverride, maxTurns, debug, sandboxFlag);
   if (autoApprove) {
     agent.setConfirmFn(async () => "allow");
   } else if (process.stdin.isTTY) {
@@ -172,9 +186,26 @@ function makeDebugHandler(): (event: ObservabilityEvent) => void {
   return (event) => process.stderr.write(JSON.stringify(event) + "\n");
 }
 
-async function createAgent(modelOverride?: string, maxTurns?: number, debug?: boolean) {
+function resolveSandboxMode(flagValue: string | undefined, config: Config): SandboxMode {
+  const raw = flagValue ?? process.env.OPENCLI_SANDBOX ?? config.sandbox ?? "auto";
+  if (raw === "auto" || raw === "strict" || raw === "off") return raw;
+  throw new Error(`Invalid --sandbox value '${raw}'. Valid values: auto, strict, off`);
+}
+
+async function createAgent(
+  modelOverride?: string,
+  maxTurns?: number,
+  debug?: boolean,
+  sandboxFlag?: string,
+) {
   const config = await loadConfig();
   const model = process.env.OPENCLI_MODEL ?? modelOverride ?? config.model;
+
+  const sandboxMode = resolveSandboxMode(sandboxFlag, config);
+  const runner = createSandboxRunner(sandboxMode, process.cwd());
+  if (runner.warning) {
+    process.stderr.write(`[opencli] warn: ${runner.warning}\n`);
+  }
 
   const provider = detectProvider(model);
   const apiKey = resolveApiKey(provider, config);
@@ -182,7 +213,7 @@ async function createAgent(modelOverride?: string, maxTurns?: number, debug?: bo
     includeUsage: !!debug,
     maxTokens: config.maxTokens,
   });
-  const tools = createDefaultRegistry(model);
+  const tools = createDefaultRegistry(model, runner);
   const skills = new SkillRegistry();
   await skills.discover();
 

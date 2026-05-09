@@ -4,7 +4,7 @@ export { editTool } from "./file/edit.js";
 export { globTool } from "./file/glob.js";
 export { grepTool } from "./file/grep.js";
 export { lsTool } from "./file/ls.js";
-export { bashTool } from "./exec/bash.js";
+export { createBashTool } from "./exec/bash.js";
 export { thinkTool } from "./think.js";
 export { webFetchTool } from "./web/fetch.js";
 export { todoWriteTool, todoReadTool } from "./task/todo.js";
@@ -18,11 +18,13 @@ import { editTool } from "./file/edit.js";
 import { globTool } from "./file/glob.js";
 import { grepTool } from "./file/grep.js";
 import { lsTool } from "./file/ls.js";
-import { bashTool } from "./exec/bash.js";
+import { createBashTool } from "./exec/bash.js";
 import { thinkTool } from "./think.js";
 import { webFetchTool } from "./web/fetch.js";
 import { todoWriteTool, todoReadTool } from "./task/todo.js";
 import { hasNativeThinking } from "../providers/factory.js";
+import { PassthroughRunner } from "./exec/sandbox/passthrough.js";
+import type { SandboxRunner } from "./exec/sandbox/types.js";
 
 /**
  * Creates a tool registry with all built-in tools.
@@ -30,8 +32,9 @@ import { hasNativeThinking } from "../providers/factory.js";
  * with native thinking/reasoning (e.g. Gemini 2.5+) since their built-in
  * reasoning is cheaper and faster than a tool-call round-trip.
  */
-export function createDefaultRegistry(model?: string): ToolRegistry {
+export function createDefaultRegistry(model?: string, runner?: SandboxRunner): ToolRegistry {
   const registry = new ToolRegistry();
+  const effectiveRunner = runner ?? new PassthroughRunner("off");
   const tools = [
     readTool,
     writeTool,
@@ -39,7 +42,7 @@ export function createDefaultRegistry(model?: string): ToolRegistry {
     globTool,
     grepTool,
     lsTool,
-    bashTool,
+    createBashTool(effectiveRunner),
     webFetchTool,
     todoWriteTool,
     todoReadTool,

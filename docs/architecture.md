@@ -259,8 +259,8 @@ src/providers/
 src/tools/
   base.ts          Tool interface + JSONSchema type.
   registry.ts      ToolRegistry — register, get, all(), execute().
-  index.ts         createDefaultRegistry(model?) — registers all built-in tools;
-                   omits think for native-thinking models.
+  index.ts         createDefaultRegistry(model?, runner?) — registers all built-in tools;
+                   omits think for native-thinking models; injects SandboxRunner into bash.
   think.ts         think tool — private scratchpad; result suppressed in REPL display.
   file/
     read.ts        Read file contents (offset + limit support).
@@ -270,13 +270,57 @@ src/tools/
     grep.ts        Regex search across file contents.
     ls.ts          List directory contents.
   exec/
-    bash.ts        Execute shell commands. SAFE_COMMANDS allowlist; requiresConfirmation
-                   for anything not on the list.
+    bash.ts        createBashTool(runner) factory — SAFE_COMMANDS allowlist;
+                   requiresConfirmation for anything not on the list;
+                   rejects model-supplied cwd outside project root before calling runner.
+    sandbox/
+      types.ts         SandboxMode, SandboxExecOptions, SandboxExecResult, SandboxRunner.
+      passthrough.ts   PassthroughRunner — wraps spawn("bash"); used for mode "off" and
+                       as a fallback when native sandboxing is unavailable. Also exports
+                       the shared spawnAndCollect() helper.
+      sandbox-exec.ts  SandboxExecRunner — macOS sandbox-exec; writes a per-startup .sb
+                       profile to /tmp; denies network and writes outside CWD + /tmp.
+      bwrap.ts         BwrapRunner — Linux bubblewrap; probes user-namespace availability
+                       at construction; falls back to PassthroughRunner with a warning if
+                       bwrap is missing or namespaces are disabled.
+      index.ts         createSandboxRunner(mode, cwd) — platform dispatch factory;
+                       re-exports all public types and classes.
   task/
     todo.ts        todo_write + todo_read — structured task list for multi-step work.
   web/
     fetch.ts       web_fetch — HTTP GET with content extraction.
 ```
+
+#### Sandbox layer
+
+The sandbox layer wraps every `bash` execution with OS-level isolation. It is layered *after* the HITL confirmation gate — both layers must pass before a command runs.
+
+**`SandboxRunner` interface** is the single abstraction the `bash` tool depends on:
+
+```typescript
+interface SandboxRunner {
+  readonly mode: SandboxMode;   // "auto" | "strict" | "off"
+  readonly warning: string | null;  // non-null when isolation was downgraded
+  exec(command: string, opts: SandboxExecOptions): Promise<SandboxExecResult>;
+}
+```
+
+**Mode resolution** (highest to lowest precedence):
+
+1. `--sandbox <mode>` CLI flag
+2. `OPENCLI_SANDBOX` environment variable
+3. `sandbox` field in `~/.opencli/config.json`
+4. Default: `"auto"`
+
+**Platform dispatch** (`createSandboxRunner`):
+
+| Platform | Mode `"auto"` | Mode `"off"` |
+|----------|--------------|-------------|
+| macOS | `SandboxExecRunner` (sandbox-exec) | `PassthroughRunner` |
+| Linux | `BwrapRunner` (bwrap) | `PassthroughRunner` |
+| Other | `PassthroughRunner` + warning | `PassthroughRunner` |
+
+**Startup warning**: `runner.warning` is emitted exactly once to `stderr` at CLI startup if isolation was downgraded (e.g. bwrap missing, namespaces disabled, unsupported platform).
 
 #### Tool interface
 

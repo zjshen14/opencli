@@ -1,5 +1,6 @@
-import { spawn } from "node:child_process";
+import { relative } from "node:path";
 import type { Tool } from "../base.js";
+import type { SandboxRunner } from "./sandbox/types.js";
 
 const TIMEOUT_MS = 30_000;
 
@@ -39,57 +40,53 @@ const SAFE_COMMANDS = [
   /^npm\s+(--version|-v)$/,
 ];
 
-export const bashTool: Tool = {
-  name: "bash",
-  description:
-    "Execute a shell command and return its output. Avoid destructive operations. Commands timeout after 30 seconds.",
-  parameters: {
-    type: "object",
-    properties: {
-      command: { type: "string", description: "The shell command to execute" },
-      cwd: {
-        type: "string",
-        description: "Working directory for the command (defaults to process cwd)",
+export function createBashTool(runner: SandboxRunner): Tool {
+  return {
+    name: "bash",
+    description:
+      "Execute a shell command and return its output. Avoid destructive operations. Commands timeout after 30 seconds.",
+    parameters: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "The shell command to execute" },
+        cwd: {
+          type: "string",
+          description: "Working directory for the command (defaults to process cwd)",
+        },
       },
+      required: ["command"],
     },
-    required: ["command"],
-  },
-  requiresConfirmation(args): boolean {
-    const cmd = (args.command as string).trim();
-    return !SAFE_COMMANDS.some((p) => p.test(cmd));
-  },
-  async execute({ command, cwd }) {
-    const cmd = command as string;
+    requiresConfirmation(args): boolean {
+      const cmd = (args.command as string).trim();
+      return !SAFE_COMMANDS.some((p) => p.test(cmd));
+    },
+    async execute({ command, cwd: cwdArg }) {
+      const cmd = command as string;
+      const cwd = (cwdArg as string | undefined) ?? process.cwd();
 
-    return new Promise((resolve) => {
-      const proc = spawn("bash", ["-c", cmd], {
-        cwd: (cwd as string | undefined) ?? process.cwd(),
-        env: process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      // Reject model-specified cwd outside project root
+      const rel = relative(process.cwd(), cwd);
+      if (rel.startsWith("..")) {
+        return {
+          success: false,
+          output: "",
+          error: `cwd '${cwd}' is outside the project root — blocked for safety`,
+        };
+      }
 
-      const stdout: Buffer[] = [];
-      const stderr: Buffer[] = [];
+      const result = await runner.exec(cmd, { cwd, timeout: TIMEOUT_MS, env: process.env });
+      const combined = [result.stdout, result.stderr].filter(Boolean).join("\n");
 
-      proc.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
-      proc.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-
-      const timer = setTimeout(() => {
-        proc.kill("SIGTERM");
-        resolve({ success: false, output: "", error: `Command timed out after ${TIMEOUT_MS}ms` });
-      }, TIMEOUT_MS);
-
-      proc.on("close", (code) => {
-        clearTimeout(timer);
-        const out = Buffer.concat(stdout).toString("utf8").trimEnd();
-        const err = Buffer.concat(stderr).toString("utf8").trimEnd();
-        const combined = [out, err].filter(Boolean).join("\n");
-        resolve({
-          success: code === 0,
-          output: combined,
-          error: code !== 0 ? `Exited with code ${code}` : undefined,
-        });
-      });
-    });
-  },
-};
+      return {
+        success: result.exitCode === 0,
+        output: combined || "(no output)",
+        error:
+          result.exitCode === 0
+            ? undefined
+            : result.exitCode === -1
+              ? `Command timed out after ${TIMEOUT_MS}ms`
+              : `Exited with code ${result.exitCode}`,
+      };
+    },
+  };
+}

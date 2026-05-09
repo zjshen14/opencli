@@ -1,7 +1,6 @@
 import { readFile, writeFile, mkdir, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-
 export const AGENT_DIR = join(homedir(), ".opencli");
 const CONFIG_FILE = join(AGENT_DIR, "config.json");
 
@@ -20,6 +19,8 @@ export interface Config {
   theme: "dark" | "light";
   historySize: number;
   permissions?: Permissions;
+  /** Sandbox mode for the bash tool. Absence is treated as "auto" by the CLI layer. */
+  sandbox?: "auto" | "strict" | "off";
 }
 
 const DEFAULTS: Config = {

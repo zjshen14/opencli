@@ -144,6 +144,37 @@ Environment variables take precedence over config file:
 | `GEMINI_API_KEY` | Gemini API key |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `OPENCLI_MODEL` | Model override (beats `--model` and config) |
+| `OPENCLI_SANDBOX` | Sandbox mode override: `auto` \| `strict` \| `off` |
+
+## Sandbox isolation
+
+The `bash` tool runs inside an OS-level sandbox by default (`--sandbox auto`):
+
+- **macOS** — uses `sandbox-exec` (built-in, no install required). Network access is denied; writes outside the project root and `/tmp` are denied. Note: `sandbox-exec` is deprecated by Apple as of macOS 11 but remains functional through macOS 15. Container mode (planned for Phase C4) will be the production-grade alternative.
+- **Linux** — uses `bwrap` (bubblewrap) via user namespaces. Same isolation contract. Falls back to passthrough with a warning if `bwrap` is not installed or user namespaces are disabled.
+- **Windows / other** — no native sandbox; runs without isolation with a warning.
+
+### Sandbox modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `auto` (default) | Network denied; writes allowed only inside CWD and `/tmp` |
+| `strict` | Stub in A1 — falls back to `auto` with a warning. Full read-isolation planned for a future release. |
+| `off` | No sandbox; bit-identical to pre-sandbox behaviour |
+
+### Configuring the sandbox
+
+```bash
+# CLI flag (takes highest precedence)
+opencli chat --sandbox off
+opencli run --sandbox auto "list files"
+
+# Environment variable
+OPENCLI_SANDBOX=off opencli chat
+
+# Config file (~/.opencli/config.json)
+opencli config  # shows current config; edit sandbox field manually
+```
 
 ## Architecture
 

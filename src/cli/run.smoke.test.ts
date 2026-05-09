@@ -65,6 +65,28 @@ describe.skipIf(!CLI_BUILT)("CLI subprocess smoke (requires npm run build)", () 
     expect(output).toContain("--model");
     expect(output).toContain("--max-turns");
     expect(output).toContain("--yes");
+    expect(output).toContain("--sandbox");
+  });
+
+  it("run --sandbox with invalid value exits 1 with a clear error", async () => {
+    await expect(
+      execFileAsync("node", [DIST_ENTRY, "run", "--sandbox", "invalid", "echo hi"], {
+        timeout: 10_000,
+      }),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("Invalid --sandbox value 'invalid'"),
+    });
+  });
+
+  it("OPENCLI_SANDBOX with invalid value exits 1 with a clear error", async () => {
+    await expect(
+      execFileAsync("node", [DIST_ENTRY, "run", "echo hi"], {
+        timeout: 10_000,
+        env: { ...process.env, OPENCLI_SANDBOX: "invalid" },
+      }),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("Invalid --sandbox value 'invalid'"),
+    });
   });
 });
 

@@ -176,6 +176,53 @@ OPENCLI_SANDBOX=off opencli chat
 opencli config  # shows current config; edit sandbox field manually
 ```
 
+## MCP servers
+
+OpenCLI can connect to any [Model Context Protocol](https://modelcontextprotocol.io) server and expose its tools to the agent as `mcp__<server>__<tool>`.
+
+### Managing servers
+
+```bash
+opencli mcp add                            # interactive wizard
+opencli mcp add myserver npx -y @myco/mcp-server  # one-shot (stdio)
+opencli mcp add api --transport http --url http://localhost:3000/mcp  # HTTP
+opencli mcp list                           # list configured servers with live status
+opencli mcp test myserver                  # probe connection and list tools
+opencli mcp remove myserver                # remove a server
+```
+
+### Configuration format (`~/.opencli/mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "callTimeout": 30000
+    },
+    "api": {
+      "transport": "http",
+      "url": "http://localhost:3000/mcp",
+      "headers": { "Authorization": "Bearer ${API_TOKEN}" }
+    }
+  }
+}
+```
+
+- **`${VAR}`** in `command`, `args`, `url`, and `headers` is expanded from environment variables at startup. Unset variables expand to `""` with a warning.
+- **`callTimeout`** (milliseconds, per-server) overrides the global default of 60 000 ms.
+- Tool names are prefixed as `mcp__<server>__<tool>`. Non-alphanumeric characters in server names (except `-`) are replaced with `_`.
+- All MCP tool calls require HITL confirmation. The confirmation dialog offers extra choices: allow this tool with any args (`t`), or allow all tools from this server (`s`).
+
+### In-session management
+
+```
+/mcp              # list configured servers
+/mcp test <name>  # probe a server inline
+```
+
 ## Architecture
 
 Five-layer design — see [`docs/architecture.md`](docs/architecture.md) for the full spec.

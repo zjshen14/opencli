@@ -6,10 +6,9 @@ import type { SkillRegistry } from "../skills/registry.js";
 import type { ContextManager } from "./context.js";
 import type { ObservabilityHandler } from "./observability.js";
 
-// Tools whose output is truncated when it exceeds the limit.
+// Output truncation is controlled by Tool.truncateOutput.
 // read is excluded — it supports offset/limit pagination and agents rely on
 // exact line spans for follow-up edit calls.
-const TRUNCATE_TOOLS = new Set(["bash", "grep", "glob"]);
 const DEFAULT_MAX_OUTPUT = 20_000;
 const MAX_TOOL_OUTPUT =
   parseInt(process.env.OPENCLI_MAX_TOOL_OUTPUT ?? "", 10) || DEFAULT_MAX_OUTPUT;
@@ -108,7 +107,7 @@ async function executeOneCall(
   // the actual failure reason.
   const parts = [result.output, result.error && `Error: ${result.error}`].filter(Boolean);
   const raw = parts.join("\n") || "(no output)";
-  const output = TRUNCATE_TOOLS.has(call.name) ? truncateOutput(raw, call.id, deps.tmpDir) : raw;
+  const output = tool?.truncateOutput ? truncateOutput(raw, call.id, deps.tmpDir) : raw;
   deps.obs?.({
     type: "tool_exec_end",
     name: call.name,

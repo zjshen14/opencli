@@ -3,7 +3,7 @@ import { createClient, detectProvider } from "../providers/factory.js";
 import { Agent } from "../core/agent.js";
 import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
-import { loadConfig, saveConfig } from "../state/config.js";
+import { loadConfig, saveConfig, AGENT_DIR } from "../state/config.js";
 import { Session } from "../state/session.js";
 import { loadSystemInstruction } from "../core/prompt.js";
 import { resolveApiKey } from "./keys.js";
@@ -13,6 +13,9 @@ import type { ObservabilityEvent } from "../core/observability.js";
 import { createSandboxRunner } from "../tools/exec/sandbox/index.js";
 import type { SandboxMode } from "../tools/exec/sandbox/types.js";
 import type { Config } from "../state/config.js";
+import { loadMcpConfig } from "../mcp/config.js";
+import { McpManager } from "../mcp/manager.js";
+import { registerMcpCommand } from "./mcp-cmd.js";
 
 const program = new Command();
 
@@ -147,6 +150,8 @@ program
     }
   });
 
+registerMcpCommand(program);
+
 program.parseAsync(process.argv).catch((err) => {
   printError(err instanceof Error ? err.message : String(err));
   process.exit(1);
@@ -161,7 +166,7 @@ async function startChat(
   providerOverride?: string,
   baseUrlOverride?: string,
 ): Promise<void> {
-  const { agent, skills } = await createAgent(
+  const { agent, skills, mcpManager } = await createAgent(
     modelOverride,
     maxTurns,
     debug,
@@ -169,7 +174,22 @@ async function startChat(
     providerOverride,
     baseUrlOverride,
   );
-  await runRepl(agent, skills, resumeSessionId);
+
+  const cleanup = async () => {
+    await mcpManager.disconnectAll();
+  };
+
+  // Ctrl+C in the REPL calls onExit for graceful MCP subprocess shutdown
+  const onExit = async () => {
+    await cleanup();
+    process.exit(0);
+  };
+
+  // SIGTERM from the OS (e.g. docker stop, systemd) also needs cleanup
+  process.once("SIGTERM", () => void onExit());
+
+  await runRepl(agent, skills, resumeSessionId, onExit);
+  await cleanup(); // normal exit (Ctrl+D or /exit)
 }
 
 async function runSingle(
@@ -183,7 +203,7 @@ async function runSingle(
   providerOverride?: string,
   baseUrlOverride?: string,
 ): Promise<void> {
-  const { agent } = await createAgent(
+  const { agent, mcpManager } = await createAgent(
     modelOverride,
     maxTurns,
     debug,
@@ -211,17 +231,21 @@ async function runSingle(
     return text;
   };
 
-  if (planMode) {
-    const planText = await stream(prompt, "plan");
-    if (planText.trim()) {
-      process.stderr.write("\nExecuting plan…\n");
-      await stream(
-        `I have approved the following plan. Execute it step by step:\n\n${planText}`,
-        "react",
-      );
+  try {
+    if (planMode) {
+      const planText = await stream(prompt, "plan");
+      if (planText.trim()) {
+        process.stderr.write("\nExecuting plan…\n");
+        await stream(
+          `I have approved the following plan. Execute it step by step:\n\n${planText}`,
+          "react",
+        );
+      }
+    } else {
+      await stream(prompt, "react");
     }
-  } else {
-    await stream(prompt, "react");
+  } finally {
+    await mcpManager.disconnectAll();
   }
 }
 
@@ -275,6 +299,15 @@ async function createAgent(
     baseUrl,
   });
   const tools = createDefaultRegistry(model, runner);
+
+  // Load and connect MCP servers, registering their tools into the registry
+  const mcpConfig = await loadMcpConfig(AGENT_DIR);
+  const mcpManager = await McpManager.create(mcpConfig ?? { mcpServers: {} });
+  if (mcpManager.connectedCount > 0) {
+    await mcpManager.registerTools(tools);
+    process.stderr.write(`[mcp] ${mcpManager.connectedCount} server(s) connected\n`);
+  }
+
   const skills = new SkillRegistry();
   await skills.discover();
 
@@ -283,5 +316,5 @@ async function createAgent(
     model,
     onObservability: debug ? makeDebugHandler() : undefined,
   });
-  return { agent, skills };
+  return { agent, skills, mcpManager };
 }

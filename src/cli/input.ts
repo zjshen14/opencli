@@ -247,6 +247,11 @@ export async function selectKey(prompt: string, options: SelectOption[]): Promis
 
 // ── Main readLine ─────────────────────────────────────────────────────────────
 
+export interface ReadLineOpts {
+  /** Called instead of process.exit(0) when Ctrl+C is pressed. Useful for async cleanup. */
+  onExit?: () => Promise<void>;
+}
+
 /**
  * Read a line of input in raw mode.
  * Returns the submitted string, or null on EOF (Ctrl+D on empty line).
@@ -254,6 +259,7 @@ export async function selectKey(prompt: string, options: SelectOption[]): Promis
 export async function readLine(
   history: string[],
   commands: SlashCommand[],
+  opts?: ReadLineOpts,
 ): Promise<string | null> {
   emitKeypressEvents(stdin);
   stdin.ref(); // ensure the event loop stays alive while waiting for input
@@ -311,12 +317,18 @@ export async function readLine(
 
       const matches = input.startsWith("/") ? filterCommands(commands, input) : [];
 
-      // Ctrl+C → exit
+      // Ctrl+C → exit (via onExit callback for graceful async cleanup)
       if (key.ctrl && key.name === "c") {
         stdout.write("\n");
         if (stdin.isTTY) stdin.setRawMode(false);
         stdin.removeListener("keypress", onKey);
-        process.exit(0);
+        stdin.unref();
+        if (opts?.onExit) {
+          void opts.onExit();
+        } else {
+          process.exit(0);
+        }
+        return;
       }
 
       // Ctrl+D on empty input → EOF

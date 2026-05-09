@@ -1,6 +1,6 @@
 # Design: A1 — Sandbox runtime abstraction for `bash`
 
-_Status: Ready for implementation. Tracking issue: [#79](https://github.com/zjshen14/opencli/issues/79). Phase: [Roadmap A1](../roadmap.md)._
+_Status: Implemented — merged in [c09fc57](https://github.com/zjshen14/opencli/commit/c09fc57) (2026-05-09). Tracking issue: [#79](https://github.com/zjshen14/opencli/issues/79). Phase: [Roadmap A1](../roadmap.md)._
 
 ---
 

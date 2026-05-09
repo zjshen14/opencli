@@ -113,6 +113,7 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 - **If you forget to link an issue in the commit message**, use the GitHub CLI to comment on the issue with the commit hash.
 - **After completing each phase of a multi-phase issue**, post a comment on the issue summarising what landed (commit hash, what changed, what remains open). Don't wait until the issue is fully closed — intermediate updates keep the issue as the canonical record of progress.
 - **Before starting a complex or risky task**, explicitly ask the user if they would prefer you to create a feature branch (`git checkout -b feature/issue-123`) instead of committing directly to `main`. Small, well-scoped fixes should be committed directly to `main`.
+- **After merging a milestone covered by a design doc** (`docs/design/<milestone>.md`), update its `_Status:` line from `"Ready for implementation"` to `"Implemented — merged in <short-sha> (<date>)"`. Do this in the same PR that ships the feature, or immediately after merge as a follow-up commit. The status line must never read "Ready for implementation" for code that is already on `main`.
 
 ## Configuration
 

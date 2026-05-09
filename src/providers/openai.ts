@@ -19,9 +19,9 @@ export class OpenAIClient implements LLMClient {
   constructor(
     apiKey: string,
     model: string,
-    options?: { includeUsage?: boolean; maxTokens?: number },
+    options?: { includeUsage?: boolean; maxTokens?: number; baseUrl?: string },
   ) {
-    this.client = new OpenAI({ apiKey });
+    this.client = new OpenAI({ apiKey, ...(options?.baseUrl ? { baseURL: options.baseUrl } : {}) });
     this.model = model;
     this.includeUsage = options?.includeUsage ?? false;
     this.maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;

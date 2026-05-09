@@ -10,8 +10,8 @@ export class AnthropicClient implements LLMClient {
   private model: string;
   private maxTokens: number;
 
-  constructor(apiKey: string, model: string, maxTokens = DEFAULT_MAX_TOKENS) {
-    this.client = new Anthropic({ apiKey });
+  constructor(apiKey: string, model: string, maxTokens = DEFAULT_MAX_TOKENS, baseUrl?: string) {
+    this.client = new Anthropic({ apiKey, ...(baseUrl ? { baseURL: baseUrl } : {}) });
     this.model = model;
     this.maxTokens = maxTokens;
   }

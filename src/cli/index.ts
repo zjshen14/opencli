@@ -33,6 +33,8 @@ program
   .option("--max-turns <n>", "Maximum agent iterations per prompt (default: 50)", parseInt)
   .option("--debug", "Emit structured observability events to stderr as JSON")
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
+  .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
+  .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
   .action(async (opts) => {
     const sessionId = opts.session ?? (opts.resume ? "latest" : undefined);
     await startChat(
@@ -41,6 +43,8 @@ program
       opts.maxTurns,
       opts.debug as boolean | undefined,
       opts.sandbox as string | undefined,
+      opts.provider as string | undefined,
+      opts.baseUrl as string | undefined,
     );
   });
 
@@ -69,6 +73,8 @@ program
   .option("--yes", "Auto-approve all tool confirmations (skip interactive prompts)")
   .option("--debug", "Emit structured observability events to stderr as JSON")
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
+  .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
+  .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
   .action(async (prompt: string, opts) => {
     await runSingle(
       prompt,
@@ -78,6 +84,8 @@ program
       opts.yes as boolean | undefined,
       opts.debug as boolean | undefined,
       opts.sandbox as string | undefined,
+      opts.provider as string | undefined,
+      opts.baseUrl as string | undefined,
     );
   });
 
@@ -88,6 +96,8 @@ program
   .option("--anthropic-api-key <key>", "Set your Anthropic API key")
   .option("--openai-api-key <key>", "Set your OpenAI API key")
   .option("--model <model>", "Set the default model")
+  .option("--provider <provider>", "Set the default provider: gemini | anthropic | openai")
+  .option("--base-url <url>", "Set a custom base URL for proxy or local inference")
   .action(async (opts) => {
     if (opts.geminiApiKey) {
       await saveConfig({ geminiApiKey: opts.geminiApiKey });
@@ -105,7 +115,22 @@ program
       await saveConfig({ model: opts.model });
       printInfo(`Default model set to ${opts.model}.`);
     }
-    if (!opts.geminiApiKey && !opts.anthropicApiKey && !opts.openaiApiKey && !opts.model) {
+    if (opts.provider) {
+      await saveConfig({ provider: opts.provider as Config["provider"] });
+      printInfo(`Default provider set to ${opts.provider}.`);
+    }
+    if (opts.baseUrl) {
+      await saveConfig({ baseUrl: opts.baseUrl });
+      printInfo(`Base URL set to ${opts.baseUrl}.`);
+    }
+    if (
+      !opts.geminiApiKey &&
+      !opts.anthropicApiKey &&
+      !opts.openaiApiKey &&
+      !opts.model &&
+      !opts.provider &&
+      !opts.baseUrl
+    ) {
       const config = await loadConfig();
       console.log(
         JSON.stringify(
@@ -133,8 +158,17 @@ async function startChat(
   maxTurns?: number,
   debug?: boolean,
   sandboxFlag?: string,
+  providerOverride?: string,
+  baseUrlOverride?: string,
 ): Promise<void> {
-  const { agent, skills } = await createAgent(modelOverride, maxTurns, debug, sandboxFlag);
+  const { agent, skills } = await createAgent(
+    modelOverride,
+    maxTurns,
+    debug,
+    sandboxFlag,
+    providerOverride,
+    baseUrlOverride,
+  );
   await runRepl(agent, skills, resumeSessionId);
 }
 
@@ -146,8 +180,17 @@ async function runSingle(
   autoApprove?: boolean,
   debug?: boolean,
   sandboxFlag?: string,
+  providerOverride?: string,
+  baseUrlOverride?: string,
 ): Promise<void> {
-  const { agent } = await createAgent(modelOverride, maxTurns, debug, sandboxFlag);
+  const { agent } = await createAgent(
+    modelOverride,
+    maxTurns,
+    debug,
+    sandboxFlag,
+    providerOverride,
+    baseUrlOverride,
+  );
   if (autoApprove) {
     agent.setConfirmFn(async () => "allow");
   } else if (process.stdin.isTTY) {
@@ -192,11 +235,26 @@ function resolveSandboxMode(flagValue: string | undefined, config: Config): Sand
   throw new Error(`Invalid --sandbox value '${raw}'. Valid values: auto, strict, off`);
 }
 
+function resolveProvider(
+  flag: string | undefined,
+  config: Config,
+  model: string,
+): "gemini" | "anthropic" | "openai" {
+  const raw = flag ?? config.provider;
+  if (raw !== undefined) {
+    if (raw === "gemini" || raw === "anthropic" || raw === "openai") return raw;
+    throw new Error(`Invalid --provider value '${raw}'. Valid values: gemini, anthropic, openai`);
+  }
+  return detectProvider(model);
+}
+
 async function createAgent(
   modelOverride?: string,
   maxTurns?: number,
   debug?: boolean,
   sandboxFlag?: string,
+  providerOverride?: string,
+  baseUrlOverride?: string,
 ) {
   const config = await loadConfig();
   const model = process.env.OPENCLI_MODEL ?? modelOverride ?? config.model;
@@ -207,11 +265,14 @@ async function createAgent(
     process.stderr.write(`[opencli] warn: ${runner.warning}\n`);
   }
 
-  const provider = detectProvider(model);
+  const provider = resolveProvider(providerOverride, config, model);
+  const baseUrl = baseUrlOverride ?? config.baseUrl;
   const apiKey = resolveApiKey(provider, config);
   const client = createClient(model, apiKey, {
     includeUsage: !!debug,
     maxTokens: config.maxTokens,
+    provider,
+    baseUrl,
   });
   const tools = createDefaultRegistry(model, runner);
   const skills = new SkillRegistry();

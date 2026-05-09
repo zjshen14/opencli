@@ -19,8 +19,8 @@ export class GeminiClient implements LLMClient {
   // functionCall is received, echoed back in the corresponding functionResponse.
   private thoughtSignatures = new Map<string, string>();
 
-  constructor(apiKey: string, model = DEFAULT_MODEL, maxOutputTokens?: number) {
-    this.client = new GoogleGenAI({ apiKey });
+  constructor(apiKey: string, model = DEFAULT_MODEL, maxOutputTokens?: number, baseUrl?: string) {
+    this.client = new GoogleGenAI({ apiKey, ...(baseUrl ? { httpOptions: { baseUrl } } : {}) });
     this.model = model;
     this.maxOutputTokens = maxOutputTokens;
   }

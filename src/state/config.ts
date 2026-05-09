@@ -21,6 +21,10 @@ export interface Config {
   permissions?: Permissions;
   /** Sandbox mode for the bash tool. Absence is treated as "auto" by the CLI layer. */
   sandbox?: "auto" | "strict" | "off";
+  /** Explicit provider override — takes precedence over model-name detection. */
+  provider?: "gemini" | "anthropic" | "openai";
+  /** Custom base URL for proxy or local inference setups (e.g. LiteLLM, Ollama). */
+  baseUrl?: string;
 }
 
 const DEFAULTS: Config = {

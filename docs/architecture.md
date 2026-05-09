@@ -1,254 +1,302 @@
-# Architecture Design - OpenCLI
+# Architecture — OpenCLI
 
-## Overview
+_Last updated: 2026-05-09. Keep in sync with the code — update this doc in the same commit as any structural change it describes._
 
-A general-purpose AI agent CLI that supports Google Gemini and Anthropic Claude models, similar to Claude Code and Gemini CLI. The agent can assist with software development tasks through natural language interaction with tool execution capabilities.
+## Design principles
 
-## Design Principles
+1. **Provider-agnostic** — the Agent Core depends only on `LLMClient`; swapping or adding a provider is a single new file + a branch in the factory.
+2. **Library / CLI separation** — `src/core/` and `src/providers/` are pure library code. They never read `process.env`, never import from `src/cli/` or `src/state/`. API keys and config are resolved by the CLI layer and passed as constructor arguments.
+3. **Safety at two layers** — write tools are blocked in plan mode at the _agent_ level (tool definition filtering) AND at the _executor_ level (`readOnly` guard). Neither layer trusts the other alone.
+4. **No circular imports** — enforced by layer ownership: `cli → core / providers / tools / skills / state`. Inner layers never import outer ones.
+5. **Colocate tests** — `foo.ts` → `foo.test.ts` in the same directory.
 
-1. **Developer-First UX**: Fast, intuitive command-line interface with streaming responses
-2. **Safety**: Confirmations for dangerous operations, sandboxed execution where possible
-3. **Extensibility**: Plugin architecture for custom tools and capabilities
-4. **Performance**: Efficient context management, parallel tool execution
-5. **Simplicity**: Start simple, add complexity only when needed
-6. **Stay at the Frontier**: This is an exploratory project — always use the latest GenAI and agent models, preview models are acceptable
+---
 
-## High-Level Architecture
+## High-level structure
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                         CLI Layer                            │
-│  - Command parsing                                           │
-│  - Terminal UI (prompts, markdown rendering)                 │
-│  - User interaction (questions, confirmations)               │
-│  - Skill invocation (/slash commands, preprocessing)         │
+│  src/cli/   — input, rendering, REPL, session wiring        │
 └──────────────────────┬──────────────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────────────┐
 │                     Agent Core                               │
-│  - Main agent loop (request → LLM → tools → response)       │
-│  - Conversation state management                             │
-│  - Context window management                                 │
-│  - Streaming handler                                         │
-│  - Skill catalog injection + activation dispatch             │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-        ┌──────────────┼──────────────┬──────────────┐
-        │              │              │              │
-┌───────▼──────┐ ┌────▼────────┐ ┌──▼──────────┐ ┌▼─────────────┐
-│ Model Layer  │ │ Tool System │ │ State Mgmt  │ │ Skill System │
-│              │ │             │ │             │ │              │
-│ - LLMClient  │ │ - File ops  │ │ - Session   │ │ - Registry   │
-│   interface  │ │ - Bash exec │ │ - History   │ │ - SKILL.md   │
-│ - Gemini     │ │ - Search    │ │ - Config    │ │   loader     │
-│ - Anthropic  │ │             │ │ - Cache     │ │ - Built-ins  │
-│ - Factory    │ │             │ │             │ │              │
-└──────────────┘ └─────────────┘ └─────────────┘ └──────────────┘
+│  src/core/  — agent loop, context, executor, observability  │
+└──────┬───────────────┬──────────────────┬───────────────────┘
+       │               │                  │
+┌──────▼──────┐  ┌─────▼──────┐  ┌───────▼───────┐  ┌───────────────┐
+│  Providers  │  │   Tools    │  │    Skills     │  │     State     │
+│ src/providers│  │ src/tools/ │  │ src/skills/   │  │ src/state/    │
+│             │  │            │  │               │  │               │
+│ LLMClient   │  │ File ops   │  │ Registry      │  │ Session JSONL │
+│ Gemini      │  │ Bash exec  │  │ SKILL.md load │  │ Config JSON   │
+│ Anthropic   │  │ Web fetch  │  │ Built-ins     │  │ Settings JSON │
+│ OpenAI      │  │ Todo       │  │               │  │               │
+│ Factory     │  │ Think      │  │               │  │               │
+└─────────────┘  └────────────┘  └───────────────┘  └───────────────┘
 ```
 
-## Core Components
+---
 
-### 1. CLI Layer
+## Component reference
 
-**Responsibilities:**
-- Parse command-line arguments and flags
-- Initialize and manage terminal UI
-- Handle user input/output
-- Render markdown and code syntax highlighting
-- Display progress indicators
+### 1. CLI Layer — `src/cli/`
 
-**Tech Stack:**
-- `commander` — CLI argument parsing
-- `marked` + `marked-terminal` — Markdown rendering (`MarkdownStreamRenderer` buffers to paragraph boundaries before rendering)
-- Raw Node.js `readline` — per-keystroke input, slash-command popup
+**Responsibilities:** parse CLI arguments, run the interactive REPL, render streamed output, intercept slash commands, wire API keys + config into the library layer.
 
-**Built-in slash commands:**
-- `/plan <task>` — read-only planning pass → `@clack/prompts` approval → react-mode execution
-- `/help`, `/clear`, `/exit` — REPL housekeeping
+This layer is the only place that reads `process.env` for API keys and imports from `src/state/`.
 
-**Skill Invocation (CLI Layer responsibilities):**
-- Intercept input starting with `/` before forwarding to Agent Core
-- Parse `/<skill-name> [args]`, look up skill in registry
-- Run `!{cmd}` shell preprocessors and substitute `$ARGUMENTS`
-- Inject the resulting content into Agent Core as a context event
-- Provide tab-completion for skill names
+**Key files:**
 
-**Key Files:**
 ```
 src/cli/
-  ├── index.ts           # CLI entry point (chat / run / sessions / config commands)
-  ├── repl.ts            # Interactive REPL + session logging
-  ├── renderer.ts        # MarkdownStreamRenderer, tool call display
-  └── input.ts           # Raw-mode input, slash-command popup
+  index.ts      Entry point — commander CLI (chat / run / sessions / config commands).
+                Resolves config, API keys (via keys.ts), creates client, agent, and
+                skill registry; starts REPL or one-shot run.
+  repl.ts       Interactive REPL — readline loop, /slash command dispatch, plan
+                approval workflow, session logging, confirm-fn construction.
+  renderer.ts   MarkdownStreamRenderer (buffers to paragraph boundaries before
+                rendering) + tool call display helpers.
+  input.ts      Raw-mode readline, /slash popup with arrow-key navigation,
+                tab-completion for skill names.
+  keys.ts       resolveApiKey(provider, config) — reads env vars + config fields
+                for all three providers; throws with a clear message if missing.
 ```
 
-### 2. Agent Core
+**Built-in REPL commands:**
+- `/plan <task>` — read-only planning pass → readline approval menu (Approve / Edit / Cancel) → react-mode execution
+- `/help`, `/clear`, `/exit` — housekeeping
 
-**Responsibilities:**
-- Main agent loop: user input → LLM → tool execution → response
-- Manage conversation context and history
-- Handle streaming responses from the active LLM provider
-- Coordinate tool execution (parallel/sequential)
-- Error handling and recovery
+**Slash command (skill) interception:**
+1. Input starting with `/` is intercepted before forwarding to the Agent Core.
+2. `/<skill-name> [args]` is looked up in `SkillRegistry`.
+3. `!{cmd}` shell preprocessors are run; `$ARGUMENTS` is substituted.
+4. Resulting content is injected into the Agent Core via `agent.injectSkill()`.
 
-**Agent Loop Flow:**
+---
+
+### 2. Agent Core — `src/core/`
+
+**Responsibilities:** agentic loop, conversation context, parallel tool execution, plan-mode enforcement, observability events.
+
+**Key files:**
+
 ```
-1. User Input  (+ optional mode: "react" | "plan")
-   ↓
-2. Build Context (history + tool results + system prompt)
-   In plan mode: filter tool list to read/glob/grep/think only
-                 append PLAN_SYSTEM_SUFFIX to system instruction
-   ↓
-3. Call LLM provider (via LLMClient interface)
-   ↓
-4. Stream Response
-   ├─→ Text chunks → Display to user
-   └─→ Function calls → Execute tools
-       ↓
-5. If function calls:
-   ├─→ Execute tools (parallel, Promise.all)
-   │    In plan mode: write/edit/bash blocked at executor level (readOnly guard)
-   │    For each call: check requiresConfirmation → invoke ConfirmFn if needed → deny or proceed
-   ├─→ Append event-driven reminders to last tool result
-   │    e.g. after edit/write → "run tests after making code changes"
-   ├─→ Collect results
-   └─→ Feed back to LLM (goto step 2)
-
-6. Safety guards (checked each turn):
-   ├─→ Max-turns exceeded (default 50) → emit error event, stop
-   └─→ Stuck-loop: 3+ identical call signatures in a row → emit error event, stop
-
-7. If final response (no function calls):
-   └─→ Display to user
+src/core/
+  agent.ts          Agent class — the agentic while-loop; plan-mode tool filtering;
+                    max-turns and stuck-loop safety guards.
+  context.ts        ContextManager — conversation history (sliding window), skill
+                    content (never pruned), system instruction rendering + caching.
+  executor.ts       executeCalls() — HITL confirmation gate, readOnly plan-mode guard,
+                    parallel vs. sequential dispatch, output truncation.
+  prompt.ts         DEFAULT_SYSTEM_INSTRUCTION template; renderSystemInstruction();
+                    getGitContext(); buildPlanSuffix(); AGENT_REMINDERS.
+  observability.ts  ObservabilityEvent union type + ObservabilityHandler alias.
 ```
 
-**Plan mode** (`/plan <task>` in REPL, `--plan` flag on `opencli run`):
-- Runs a read-only exploration pass with `Agent.run(input, "plan")`
-- Tool definitions filtered to `read/glob/grep/think/activate_skill`; executor additionally enforces `readOnly` as defence-in-depth
-- System prompt extended with a structured plan template (4-step process: Understand → Explore → Design → Plan; mandatory checklist output with file paths and ⚠️ risk flagging)
-- REPL shows a `@clack/prompts` select (Approve & execute / Edit in $EDITOR / Cancel) after the plan is generated
-- On approval: plan injected as a synthetic user message, agent switches to `"react"` mode for execution
+#### Agentic loop (`agent.ts`)
 
-**Skill responsibilities in Agent Core:**
-- At session start: `SkillRegistry.discover()` is called; the catalog (name + description, ~50–100 tokens/skill) is injected into the system prompt via `{SKILL_CATALOG}` so the model can self-activate skills via `activate_skill`
-- On user-explicit activation (`/skill-name`): receive pre-processed skill content from CLI Layer, inject into conversation context as a system event
-- On model-driven activation: handle `activate_skill` function calls from the LLM, load and inject the full `SKILL.md` body as a tool result
-- Protect activated skill content from context pruning (tag with `<skill_content name="...">`)
-- Deduplicate: skip re-injection if a skill is already active in the session
-
-**Key Files:**
 ```
-src/agent/
-  ├── core.ts            # Main agent loop; AgentRunMode type; plan-mode tool filtering + prompt suffix
-  ├── context.ts         # Context management, ContextManager class
-  ├── executor.ts        # Tool execution; middle-truncation (bash/grep/glob >20k); readOnly guard; HITL confirmation gate (ConfirmFn)
-  └── prompt.ts          # DEFAULT_SYSTEM_INSTRUCTION; AGENT_REMINDERS (event-driven); getGitContext()
-```
+1. Add user message to context.
 
-### 3. Model Layer (LLM Provider Abstraction)
+2. Build tool definitions:
+   - react mode: all registered tools + activate_skill
+   - plan mode: tools where Tool.readonly === true, plus activate_skill
+   Render system instruction (tool list embedded for prompt-cache stability).
 
-**Responsibilities:**
-- Provider-agnostic `LLMClient` interface consumed by Agent Core
-- Per-provider clients (`GeminiClient`, `AnthropicClient`) that translate internal types to wire formats
-- Generic tool definition schema (`ToolDefinition`) in plain JSONSchema — no provider dependencies
-- Provider selection via `createClient()` factory based on model name
-- Streaming support and exponential-backoff retries, per provider
-- API key resolution per provider
+3. Stream from LLMClient.stream(messages, systemInstruction, toolDefs).
+   - text events → yield to caller immediately
+   - function_call events → accumulate as pendingCalls
+   - usage events → forward to observability handler
 
-**Provider selection:**
+4. Append assistant turn (text + function calls) to context.
 
-`createClient(model, config)` in `factory.ts` detects the provider by model name prefix:
-- `claude-*` → `AnthropicClient` (reads `ANTHROPIC_API_KEY` / `config.anthropicApiKey`)
-- anything else → `GeminiClient` (reads `GEMINI_API_KEY` / `config.geminiApiKey`)
+5. If no function calls → yield { type: "done" }, return.
 
-**Tool definitions vs tool execution:**
+6. Safety guards (checked each turn before tool execution):
+   a. Max-turns (default 50, --max-turns to override):
+      if turns > maxTurns → yield error event, return.
+   b. Stuck-loop (3 identical consecutive call signatures):
+      if stuckCount >= 3 → yield error event, return.
 
-`schema.ts` converts `Tool` objects to `ToolDefinition` (provider-agnostic, plain JSONSchema). Each client translates `ToolDefinition[]` into its own wire format internally:
+7. Execute all pending calls via executeCalls() (see executor below).
 
-```typescript
-// Tool System: implementation (src/tools/file/read.ts)
-const readTool: Tool = {
-  name: "read",
-  description: "Read file contents",
-  parameters: {
-    type: "object",
-    properties: {
-      file_path: { type: "string" },
-      offset:    { type: "number" }
-    },
-    required: ["file_path"]
-  },
-  execute: async ({ file_path }) => { ... }
-};
+8. Append event-driven reminders to last tool result (AGENT_REMINDERS).
+   Each reminder fires at most once per session (firedReminders Set).
 
-// schema.ts → ToolDefinition (passed to LLMClient.stream)
-{ name: "read", description: "Read file contents", parameters: { type: "object", ... } }
-
-// GeminiClient translates internally: type → uppercase, wraps in functionDeclarations
-// AnthropicClient translates internally: used directly as input_schema (JSONSchema compatible)
+9. Append tool results as a user message to context. Go to step 3.
 ```
 
-The `activate_skill` definition is expressed the same way:
+#### Plan mode
 
-```typescript
-// src/model/schema.ts
-export const activateSkillDefinition: ToolDefinition = {
-  name: "activate_skill",
-  description: "Activate a skill to load its instructions into context",
-  parameters: {
-    type: "object",
-    properties: { name: { type: "string", description: "Skill name to activate" } },
-    required: ["name"]
-  }
-};
+Invoked via `Agent.run(input, "plan")`:
+- Tool definitions filtered to `Tool.readonly === true` tools (dynamic — no hardcoded name list).
+- System instruction extended with `buildPlanSuffix()` (structured template: Understand → Explore → Design → Plan; mandatory numbered checklist output).
+- Executor additionally enforces `readOnly: true` as defence-in-depth (double guard).
+- REPL shows a readline text menu after the plan is generated (replaced `@clack/prompts` due to stdin ownership conflict with raw-mode readline).
+- On approval: plan injected as a synthetic user message; agent switches to `"react"` mode.
+
+#### Executor (`executor.ts`)
+
+`executeCalls(calls, deps)`:
+
+1. Split calls into `skillCalls` (name === `"activate_skill"`) and `toolCalls`.
+2. Handle skill activations — load body via `SkillRegistry`, inject into `ContextManager`. No tool result produced.
+3. Dispatch tool calls:
+   - **If any call is a write tool** (`Tool.readonly` is false/undefined): execute all **sequentially** in declared order — prevents race conditions (two edits to the same file, write followed by a dependent read).
+   - **If all calls are readonly**: execute **in parallel** (`Promise.all`) for speed.
+4. For each tool call — `executeOneCall()`:
+   a. Plan-mode guard: if `deps.readOnly && !tool.readonly` → return blocked error result; emit `tool_denied` observability event.
+   b. HITL gate: if `tool.requiresConfirmation?.(args)` → call `deps.confirmFn`. If no confirmFn or user denies → return blocked error result; emit `tool_denied`.
+   c. Execute: call `deps.tools.execute(name, args)`.
+   d. Combine `result.output + result.error` (both sent to model so it can see failure reasons).
+   e. Truncate if tool is in `TRUNCATE_TOOLS` (`bash`, `grep`, `glob`) and output exceeds `MAX_TOOL_OUTPUT`.
+   f. Emit `tool_exec_start` / `tool_exec_end` observability events.
+
+**Output truncation:** middle-truncation — 30% head + 70% tail, elided chars reported. Full output saved to `{SESSION_TMP}/tool-output-<id>.txt` when session tmp dir is set. Configurable via `OPENCLI_MAX_TOOL_OUTPUT` (default 20 000 chars). `read` is excluded from truncation — agents rely on exact line spans for follow-up edits.
+
+#### Observability (`observability.ts`)
+
+`ObservabilityHandler` is `(event: ObservabilityEvent) => void`. Passed as an optional constructor option to `Agent` and threaded into `executeCalls`. Callers attach their own handler (e.g. the CLI emits these to a metrics sink or future OTel exporter).
+
+Event types:
+
+| Event | When |
+|---|---|
+| `llm_call_start` | Before each LLM streaming call |
+| `llm_call_end` | After stream completes (includes token counts + latency) |
+| `context_snapshot` | Before each call (message count + rough token estimate) |
+| `tool_exec_start` | Before `tool.execute()` |
+| `tool_exec_end` | After `tool.execute()` (latency, success, output bytes) |
+| `tool_denied` | When a call is blocked (plan_mode / user_denied / non_interactive) |
+| `guard_triggered` | When max-turns or stuck-loop fires |
+
+#### Context management (`context.ts`)
+
+`ContextManager` is the sole owner of context state for a session.
+
+**System instruction** is rendered from a template (`DEFAULT_SYSTEM_INSTRUCTION` or `OPENCLI_SYSTEM_MD` override) and cached by tool-name signature. Cache invalidates when: tool list changes, `skillCatalog` changes, or `sessionTmpDir` changes.
+
+Template placeholders: `{CWD}`, `{SESSION_TMP}`, `{TOOL_CATALOG}`, `{GIT_CONTEXT}`, `{SKILL_CATALOG}`.
+
+**Git context** (`getGitContext()` in `prompt.ts`) is injected once at the start of each `getSystemInstruction()` render:
+- Current branch + default branch
+- `git status --short` (capped at 2 000 chars)
+- Last 5 commits from `git log --oneline`
+- Labelled as a snapshot: "_will not update during the conversation_"
+- Silently empty if not a git repo or git is unavailable
+
+**Conversation history** is a sliding window of the last `maxHistoryMessages` messages (default 50). Pruning includes an orphan-safety guard: the oldest retained message must be a `user` message that is not a `function_result` — ensures no orphaned tool results or leading model turns reach the API.
+
+**Skill content** is held in a separate `skillContent[]` array, never pruned, tagged as `<skill_content name="...">`. Prepended as a synthetic `## Active Skills` user message when `getMessages()` is called.
+
+**Event-driven reminders** (`AGENT_REMINDERS` in `prompt.ts`): after each tool-execution round, `buildReminder()` appends a short reminder to the last tool result. Currently fires on:
+- `write` or `edit` → "verify the change works — find and run the project's test command"
+- `write` or `edit` → "don't add features or refactoring beyond what was asked"
+- `bash` with `git` in the command → "never commit or push without an explicit user request"
+Each reminder fires at most once per session.
+
+---
+
+### 3. Providers — `src/providers/`
+
+**Responsibilities:** implement `LLMClient`, translate internal types to each provider's wire format, handle retries.
+
+**Key files:**
+
+```
+src/providers/
+  client.ts      LLMClient interface — the sole abstraction the Agent Core depends on.
+  types.ts       Shared types: Message, StreamEvent, ToolDefinition, FunctionCallPart,
+                 FunctionResultPart, thoughtSignature.
+  factory.ts     createClient(model, apiKey, options) — provider detection + client
+                 construction. detectProvider() + hasNativeThinking() helpers.
+  gemini.ts      GeminiClient — Gemini wire format, thoughtSignature threading,
+                 uppercase type conversion.
+  anthropic.ts   AnthropicClient — Anthropic wire format, tool_use/tool_result blocks,
+                 role mapping (model → assistant).
+  openai.ts      OpenAIClient — OpenAI Chat Completions wire format.
+  retry.ts       withRetry<T>() — generic async generator retry with exponential
+                 backoff; shared by all provider clients.
+  schema.ts      toolToDefinition() — converts Tool → plain-JSONSchema ToolDefinition.
+                 activateSkillDefinition — the activate_skill pseudo-tool definition.
 ```
 
-**Provider-specific notes:**
+#### Provider detection (`factory.ts`)
 
-- **Gemini**: types uppercased (`"object"` → `"OBJECT"`); `thoughtSignature` threaded through thinking model calls; uses `functionCall`/`functionResponse` message parts.
-- **Anthropic**: `role: "model"` translated to `"assistant"`; tool calls use `tool_use`/`tool_result` content blocks; `thoughtSignature` ignored.
+`detectProvider(model)` infers the provider from the model name prefix:
 
-The Tool System owns execution and knows nothing about any provider SDK. Swapping or adding a provider requires only adding a new client in `src/model/` and a branch in `factory.ts`.
+| Prefix | Provider | Client |
+|---|---|---|
+| `claude-` | `anthropic` | `AnthropicClient` |
+| `gpt-`, `o1`, `o3`, `o4` | `openai` | `OpenAIClient` |
+| anything else | `gemini` | `GeminiClient` (default) |
 
-**Key Files:**
+`hasNativeThinking(model)` returns true for Gemini thinking / 2.5+ / 3.x models, causing `createDefaultRegistry()` to omit the `think` tool (avoids double-paying for reasoning).
+
+**Known limitation:** prefix detection breaks for proxies, fine-tunes, and custom aliases. Tracked as [#54](https://github.com/zjshen14/opencli/issues/54) — Phase B2 adds explicit `provider` override + `--base-url` to the config.
+
+#### Tool definitions vs. tool execution
+
+`schema.ts` converts `Tool` → `ToolDefinition` (plain JSONSchema, no provider SDK imports). Each provider client translates `ToolDefinition[]` into its own wire format internally:
+
+- **Gemini:** `"object"` → `"OBJECT"` (uppercase types); `functionCall` / `functionResponse` message parts; `thoughtSignature` threaded from `functionCall` back through `functionResponse` on thinking models.
+- **Anthropic:** `role: "model"` → `"assistant"`; `tool_use` / `tool_result` content blocks; `thoughtSignature` ignored.
+- **OpenAI:** standard Chat Completions `tool_calls` / `tool` role message format.
+
+#### Retry (`retry.ts`)
+
+`withRetry(factory, isRetryable, maxRetries=3, baseMs=1000)` wraps any `AsyncGenerator` factory with exponential-backoff retry. Each provider client passes its own `isRetryable` predicate (checks typed SDK error classes — `GoogleGenerativeAIError`, `Anthropic.APIError`, etc.).
+
+---
+
+### 4. Tools — `src/tools/`
+
+**Key files:**
+
 ```
-src/model/
-  ├── client.ts          # LLMClient interface — the provider plug point
-  ├── gemini.ts          # GeminiClient: Gemini wire format, thoughtSignature, backoff
-  ├── anthropic.ts       # AnthropicClient: Anthropic wire format, tool_use blocks, backoff
-  ├── factory.ts         # createClient() — provider detection + key resolution
-  ├── schema.ts          # toolToDefinition() + activateSkillDefinition (generic JSONSchema)
-  └── types.ts           # Shared types: Message, StreamEvent, ToolDefinition, thoughtSignature
+src/tools/
+  base.ts          Tool interface + JSONSchema type.
+  registry.ts      ToolRegistry — register, get, all(), execute().
+  index.ts         createDefaultRegistry(model?) — registers all built-in tools;
+                   omits think for native-thinking models.
+  think.ts         think tool — private scratchpad; result suppressed in REPL display.
+  file/
+    read.ts        Read file contents (offset + limit support).
+    write.ts       Create or overwrite files (requiresConfirmation outside CWD).
+    edit.ts        Exact old_string → new_string replacement (fails if ambiguous).
+    glob.ts        Find files by pattern.
+    grep.ts        Regex search across file contents.
+    ls.ts          List directory contents.
+  exec/
+    bash.ts        Execute shell commands. SAFE_COMMANDS allowlist; requiresConfirmation
+                   for anything not on the list.
+  task/
+    todo.ts        todo_write + todo_read — structured task list for multi-step work.
+  web/
+    fetch.ts       web_fetch — HTTP GET with content extraction.
 ```
 
-### 4. Tool System
+#### Tool interface
 
-**Tool Categories:**
-
-**File Operations:**
-- `read` — Read file contents (with offset/limit support; output never truncated — agents rely on exact line spans for follow-up edits)
-- `write` — Write/create files
-- `edit` — Edit files (exact old_string → new_string; fails if match is ambiguous)
-- `glob` — Find files by pattern
-- `grep` — Search file contents with regex
-
-**Execution:**
-- `bash` — Execute shell commands. Commands not in the `SAFE_COMMANDS` allowlist require user confirmation via the HITL gate before running.
-
-**Reasoning:**
-- `think` — Private scratchpad for multi-step reasoning; output suppressed in the REPL UI. Omitted from the registry when the active model has native thinking (e.g. Gemini 2.5+/3.x) to avoid double-paying for reasoning.
-
-**Output truncation:** `bash`, `grep`, and `glob` results exceeding `OPENCLI_MAX_TOOL_OUTPUT` (default 20 000 chars) are middle-truncated: 30% head + 70% tail, with the full output saved to `{SESSION_TMP}/tool-output-{id}.txt` when a session tmp directory is set.
-
-**Tool Interface:**
 ```typescript
 interface Tool {
   name: string;
   description: string;
   parameters: JSONSchema;
-  execute: (params: unknown) => Promise<ToolResult>;
-  /** Return true to require interactive user confirmation before execution. */
+
+  /** true = read-only; passed in plan mode. false/undefined = write tool, blocked in plan mode. */
+  readonly?: boolean;
+
+  execute: (params: Record<string, unknown>) => Promise<ToolResult>;
+
+  /** Return true to require interactive confirmation before execution. */
   requiresConfirmation?: (args: Record<string, unknown>) => boolean;
+
+  /** Return an error string if params are invalid, null if valid.
+   *  Called by ToolRegistry.execute() before execute() — after required-field check. */
+  validate?: (params: Record<string, unknown>) => string | null;
 }
 
 interface ToolResult {
@@ -258,335 +306,226 @@ interface ToolResult {
 }
 ```
 
-**Key Files:**
-```
-src/tools/
-  ├── registry.ts        # Tool registration and lookup
-  ├── base.ts            # Tool interface + JSONSchema type
-  ├── index.ts           # createDefaultRegistry(model?) — omits think for native-thinking models
-  ├── think.ts           # think tool (private scratchpad)
-  ├── file/              # read, write, edit, glob, grep
-  └── exec/              # bash
-```
+#### Registry execution pipeline (`registry.ts`)
 
-### 5. Skill System
+`ToolRegistry.execute(name, params)` runs three checks before calling `tool.execute()`:
 
-Skills are prompt-level capabilities — packaged `SKILL.md` instructions that get injected into the agent's context. Unlike tools (which execute code), skills deliver Markdown instructions for the model to follow using existing tools.
+1. Tool lookup — returns `Unknown tool` error if not found.
+2. Required-field check — inspects `tool.parameters.required[]`; returns `Missing required parameter` if any are absent.
+3. Custom validation — calls `tool.validate?.(params)`; returns the error string if non-null.
 
-**Standard:** Aligned with the [Agent Skills open standard](https://agentskills.io), which is adopted by Claude Code, the official Gemini CLI, Cursor, GitHub Copilot, and others. This enables skill sharing across the ecosystem.
+Only if all three pass is `tool.execute(params)` called.
 
-**Skill format** (`SKILL.md`):
-```yaml
----
-name: review                        # becomes /review slash command
-description: Review code for correctness, style, and security issues.
-                                    # model uses this to auto-activate
-allowed-tools: Read Grep            # pre-approved, no confirmation needed
-disable-agent-invocation: true      # true = user-only (e.g. deploy, commit)
+#### `requiresConfirmation` policy
+
+| Tool | Triggers confirmation |
+|---|---|
+| `bash` | Any command not in `SAFE_COMMANDS` allowlist |
+| `write` | Path outside `process.cwd()` |
+| `edit` | Path outside `process.cwd()` |
+
 ---
 
-Review the following code: $ARGUMENTS
+### 5. Skills — `src/skills/`
 
-Check for:
-- Correctness and logic errors
-- Security vulnerabilities
-- Code style
+Skills are `SKILL.md` files — YAML frontmatter + Markdown instructions — injected into context on activation. They follow the [Agent Skills open standard](https://agentskills.io).
 
-Current branch info:
-!{git log --oneline -5}             # shell preprocessing — output injected before sending to model
-```
+**Key files:**
 
-**Directory structure (scoped, earlier takes precedence):**
-```
-~/.opencli/skills/<name>/SKILL.md      # user-global
-<project>/.opencli/skills/<name>/SKILL.md  # project-scoped
-<project>/.agents/skills/<name>/SKILL.md    # cross-client convention (agentskills.io)
-```
-
-**Three-tier loading (progressive disclosure):**
-
-| Tier | Content | When loaded | Token cost |
-|------|---------|-------------|------------|
-| 1. Catalog | name + description only | Session start | ~50–100/skill |
-| 2. Instructions | Full `SKILL.md` body | On activation | <5000 recommended |
-| 3. Resources | Scripts, reference files | When referenced | On demand |
-
-**Invocation paths:**
-1. **User-explicit**: `/review src/auth.ts` — CLI Layer intercepts, preprocesses, injects
-2. **Model-driven**: Gemini calls `activate_skill("review")` when it matches the catalog description — Agent Core loads and injects
-
-**Built-in skills** (shipped with the CLI):
-
-_Core workflow_
-- `/commit` — Draft and create a git commit (user-only, `disable-agent-invocation: true`)
-- `/gh-issue` — Create, view, list, and comment on GitHub issues via `gh` CLI
-- `/gh-pr` — Open, review, check CI, and merge GitHub PRs via `gh` CLI
-- `/branch` — Create feature branches tied to GitHub issue numbers
-
-_Code quality_
-- `/review` — Code review for correctness, style, security
-- `/debug` — Diagnose and fix a reported error
-- `/run-tests` — Detect test framework, run suite, surface failures
-- `/typecheck` — Run `tsc`/`mypy` and report type errors grouped by file
-- `/lint` — Run linter with optional auto-fix
-
-_Comprehension_
-- `/explain` — Explain selected code or a concept
-- `/test` — Write tests for a given function or module
-
-_Skill authoring_
-- `/new-skill` — Scaffold a new custom SKILL.md interactively (user-only)
-
-**Key Files:**
 ```
 src/skills/
-  ├── registry.ts        # Discover, parse, and catalog SKILL.md files; catalogSummary() → {SKILL_CATALOG}
-  ├── loader.ts          # Load skill body, run !{} preprocessors, substitute $ARGUMENTS
-  └── builtin/           # Built-in skill SKILL.md files
-      ├── commit/
-      ├── gh-issue/
-      ├── gh-pr/
-      ├── branch/
-      ├── review/
-      ├── debug/
-      ├── run-tests/
-      ├── typecheck/
-      ├── lint/
-      ├── explain/
-      ├── test/
-      └── new-skill/
+  registry.ts    Discover, parse, and catalog SKILL.md files across all scoped
+                 directories. catalogSummary() renders the {SKILL_CATALOG} block.
+  loader.ts      Load skill body, run !{cmd} preprocessors, substitute $ARGUMENTS.
+  builtin/       Built-in skill SKILL.md files (shipped with the binary):
+    commit/      Draft and create a git commit (disable-agent-invocation: true)
+    review/      Code review for correctness, style, security
+    explain/     Explain code or a concept
+    debug/       Diagnose and fix a reported error
+    test/        Write tests for a function or module
+    run-tests/   Detect test framework, run suite, surface failures
+    typecheck/   Run tsc/mypy, report type errors by file
+    lint/        Run linter with optional auto-fix
+    gh-issue/    Create, view, list, comment on GitHub issues
+    gh-pr/       Open, review, check CI, merge GitHub PRs
+    branch/      Create feature branches tied to issue numbers
+    new-skill/   Scaffold a custom SKILL.md interactively (disable-agent-invocation)
 ```
 
-> See [`docs/skills.md`](skills.md) for the full authoring guide (format, preprocessors, custom skills).
+#### Discovery priority (first match wins)
 
-### 6. State Management
-
-**Responsibilities:**
-- Session lifecycle: create, log, list, resume
-- Configuration storage and API key resolution
-
-**Session storage layout** (mirrors Claude Code's pattern — never written inside the project):
 ```
-~/.opencli/
-  config.json                                    # persisted user config
-  projects/
-    -Users-alice-myproject/                      # encoded cwd (/ → -)
-      2025-06-01T14-23-45.jsonl                  # one JSONL file per session
-      2025-06-02T09-10-00.jsonl
+<project>/.opencli/skills/<name>/SKILL.md      # project-scoped
+<project>/.agents/skills/<name>/SKILL.md       # cross-client convention (agentskills.io)
+~/.opencli/skills/<name>/SKILL.md             # user-global
+<binary>/builtin/<name>/SKILL.md               # bundled built-ins
 ```
 
-Each JSONL line is a timestamped entry: `session_start`, `user`, `assistant`, `tool_call`, `tool_result`.
+#### Three-tier loading
 
-**Session resume** — `Session.loadMessages(id | "latest")` reconstructs `Message[]` from the log, skipping tool call entries (text content is sufficient for context). Pass `"latest"` to resume the most recent session that has actual conversation content.
+| Tier | Content | Loaded when | Token cost |
+|---|---|---|---|
+| Catalog | name + description only | Session start (always) | ~50–100 / skill |
+| Body | Full SKILL.md instructions | On activation | < 5 000 recommended |
+| Resources | Scripts, reference files | When referenced in body | On demand |
 
-**Scratch directory** — `session.tmpDir` resolves to `<cwd>/.opencli/tmp/<session-id>/`. Agent-generated temporary files land here, scoped to the session, and never pollute the project root.
+#### Invocation paths
 
-**Key Files:**
+1. **User-explicit** (`/skill-name [args]`): CLI layer intercepts, preprocesses, calls `agent.injectSkill(name, body)`.
+2. **Model-driven**: LLM calls `activate_skill({ name })` → executor loads body + calls `context.addSkillContent()`. No tool result produced.
+
+Activated skill content is tagged `<skill_content name="...">` and prepended (never pruned) as a synthetic user message.
+
+---
+
+### 6. State — `src/state/`
+
+**Key files:**
+
 ```
 src/state/
-  ├── session.ts         # Session: create, list, loadMessages, log, tmpDir
-  └── config.ts          # Config load/save, exports AGENT_DIR and Config interface
+  config.ts      Config load/save — ~/.opencli/config.json. Exports AGENT_DIR,
+                 Config interface, loadConfig(), saveConfig(). Migrates legacy
+                 field names on read (e.g. apiKey → geminiApiKey).
+  session.ts     Session: create, list, loadMessages(), log, tmpDir.
+  settings.ts    Settings load/save — <project>/.opencli/settings.json.
+                 Holds Permissions (HITL allow-list) persisted across sessions.
 ```
 
-## Data Flow
+#### Config (`~/.opencli/config.json`)
 
-### Typical Interaction:
-
-1. **User**: "Read the package.json file and update the version to 2.0.0"
-
-2. **CLI Layer**: Parse input, send to Agent Core
-
-3. **Agent Core**:
-   - Build context with conversation history
-   - Send to LLM provider (via `LLMClient`) with available tool definitions
-
-4. **LLM Response 1** (streaming):
-   ```
-   Text: "I'll read the package.json file first"
-   Function Call: read({ file_path: "package.json" })
-   ```
-
-5. **Tool Execution**:
-   - Execute `read` tool
-   - Return file contents
-
-6. **Agent Core**: Send tool result back to LLM provider
-
-7. **LLM Response 2**:
-   ```
-   Text: "I can see the current version is 1.5.0. I'll update it to 2.0.0"
-   Function Call: edit({
-     file_path: "package.json",
-     old_string: '"version": "1.5.0"',
-     new_string: '"version": "2.0.0"'
-   })
-   ```
-
-8. **Tool Execution**:
-   - Execute `edit` tool
-   - Return success
-
-9. **LLM Response 3**:
-   ```
-   Text: "Updated package.json version to 2.0.0"
-   ```
-
-10. **CLI Layer**: Display final response to user
-
-### Skill Invocation Flow:
-
-1. **User**: "/review src/auth.ts"
-
-2. **CLI Layer**:
-   - Detects `/` prefix, looks up "review" in SkillRegistry
-   - Reads `SKILL.md` body
-   - Runs `!{git log --oneline -5}` preprocessor, substitutes output
-   - Substitutes `$ARGUMENTS` → "src/auth.ts"
-   - Sends processed content to Agent Core as a context event
-
-3. **Agent Core**:
-   - Injects skill content into conversation context tagged as `<skill_content name="review">`
-   - Continues normal agent loop with enriched context
-
-4. **LLM provider**: Receives skill instructions + user message, uses `read` and `grep` tools to execute the review
-
-5. **CLI Layer**: Streams and renders the review response
-
-## Tool Execution Model
-
-### Parallel Execution
-When tools are independent (no data dependencies), execute in parallel:
-
-```typescript
-// Gemini requests: read("file1.ts"), read("file2.ts")
-const results = await Promise.all([
-  tools.execute("read", { file_path: "file1.ts" }),
-  tools.execute("read", { file_path: "file2.ts" })
-]);
-```
-
-### Sequential Execution
-When tools depend on each other, execute sequentially:
-
-```typescript
-// Tool 1: read file
-const content = await tools.execute("read", { file_path: "config.json" });
-
-// Tool 2: edit based on content
-const result = await tools.execute("edit", {
-  file_path: "config.json",
-  old_string: extracted_from_content,
-  new_string: new_value
-});
-```
-
-### Safety Checks
-- **HITL confirmation gate** — before executing a tool call, the executor checks `tool.requiresConfirmation?.(args)`. If true, it invokes the injected `ConfirmFn`:
-  - Interactive REPL: shows a `selectKey` prompt ("Yes once / Yes always this session / No"). The session allow-list is maintained as an in-memory `Set` inside the `ConfirmFn` closure.
-  - Non-interactive `run` mode: auto-denies unless `--yes` is passed (which installs an auto-approve `ConfirmFn`).
-- Validate file paths (prevent path traversal)
-- Rate limit API calls
-
-## Context Management
-
-`ContextManager` (in `src/agent/context.ts`) owns all context state for a session.
-
-**System instruction** is rendered from a template at first call and cached until tools or `sessionTmpDir` change. Placeholders `{CWD}`, `{SESSION_TMP}`, `{TOOL_CATALOG}` are substituted at render time. The tool list is embedded in the static prefix to maximise implicit prompt cache hits across turns.
-
-**Conversation history** is a sliding window of the last 50 messages (pruned from the oldest end). Skill content is held in a separate `skillContent[]` array that is never pruned; it is prepended as a synthetic user message when `getMessages()` is called.
-
-**Constructor injection**: `new ContextManager(template?)` accepts a custom system instruction template, making it easy to swap prompts in tests or for A/B experiments without touching files.
-
-## Configuration
-
-**User Configuration** (`~/.opencli/config.json`):
 ```json
 {
+  "model": "gemini-3.1-flash-lite-preview",
   "geminiApiKey": "...",
   "anthropicApiKey": "...",
-  "model": "gemini-3.1-flash-lite-preview",
+  "openaiApiKey": "...",
   "maxTokens": 8192,
   "temperature": 0.7,
-  "autoExecute": false,
-  "theme": "dark",
   "historySize": 50
 }
 ```
 
-**Environment Variables** (take precedence over config file):
-- `GEMINI_API_KEY` — Gemini API key
-- `ANTHROPIC_API_KEY` — Anthropic API key
-- `OPENCLI_MODEL` — Model override (beats `--model` flag and config)
-- `OPENCLI_SYSTEM_MD` — Path to a Markdown file that replaces the default system instruction
+Environment variables override config file values:
 
-## Security Considerations
+| Variable | Overrides |
+|---|---|
+| `GEMINI_API_KEY` | `config.geminiApiKey` |
+| `ANTHROPIC_API_KEY` | `config.anthropicApiKey` |
+| `OPENAI_API_KEY` | `config.openaiApiKey` |
+| `OPENCLI_MODEL` | `config.model` (beats `--model` flag too) |
+| `OPENCLI_SYSTEM_MD` | Path to a Markdown file replacing the default system instruction |
+| `OPENCLI_MAX_TOOL_OUTPUT` | Per-tool output cap in chars (default 20 000) |
 
-1. **API Key Protection**
-   - Store in config file with proper permissions
-   - Never log API keys
-   - Support environment variables
+#### Settings (`.opencli/settings.json` — project-scoped)
 
-2. **Command Execution**
-   - Warn before destructive operations
-   - Sandbox execution where possible
-   - Validate all inputs
-
-3. **File Access**
-   - Validate file paths
-   - Prevent path traversal attacks
-   - Respect .gitignore patterns
-
-4. **Network Requests**
-   - Validate URLs
-   - Timeout protection
-   - Rate limiting
-
-## Performance Optimizations
-
-1. **Streaming**: Always stream responses for better UX
-2. **Parallel Tools**: Execute independent tools in parallel
-3. **Caching**: Cache API responses when appropriate
-4. **Lazy Loading**: Load tools on-demand
-5. **Smart Context**: Only include relevant context
-
-## Error Handling
-
-**Strategy**:
-- Graceful degradation
-- User-friendly error messages
-- Automatic retry with exponential backoff
-- Detailed logging for debugging
-
-**Error Categories**:
-- API errors (rate limits, timeouts)
-- Tool execution errors
-- User input errors
-- System errors
-
-## Testing Strategy
-
-- **Unit tests** colocated with source (`context.ts` → `context.test.ts`)
-- **Real filesystem** for file tool tests (no `fs` mocking — mocks hide real bugs)
-- **Mock at boundaries**: LLM clients and `SkillRegistry` are mocked; internal collaborators (`ContextManager`, `ToolRegistry`) are used directly
-- **Coverage threshold**: 70% lines/statements/functions/branches via vitest v8; config files, type-only files, and `agent/core.ts` (requires live LLM) are excluded
-
-## Deployment & Distribution
-
-**Build**:
-```bash
-npm run build   # bundles with tsup → dist/
+```json
+{
+  "permissions": {
+    "allow": ["bash:git status", "bash:npm test"],
+    "deny":  []
+  }
+}
 ```
 
-**Run locally**:
-```bash
-npm run dev               # interactive REPL (auto-loads .env)
-npm run dev run "<prompt>" # one-shot
+The HITL confirmation function (`createConfirmFn` in `repl.ts`) persists "Yes always" decisions to this file so they survive across sessions. The project-scoped file is checked first; a global `~/.opencli/settings.json` is the fallback for user-wide rules.
+
+#### Sessions (`~/.opencli/projects/<encoded-cwd>/<session-id>.jsonl`)
+
+Each JSONL line is a discriminated union entry: `session_start | user | assistant | tool_call | tool_result`. Session ID format: `YYYY-MM-DDTHH-mm-ss` (human-readable, lexicographically sortable).
+
+`Session.loadMessages(id | "latest")` reconstructs `Message[]` from the log. `"latest"` selects the most recent session that contains actual conversation content (non-empty `user` + `assistant` pairs).
+
+Scratch directory: `<cwd>/.opencli/tmp/<session-id>/` — agent-generated temp files land here, never in the project root.
+
+---
+
+## Data flow
+
+### Standard interaction
+
 ```
+User: "Update the version in package.json to 2.0.0"
+  │
+  └─▶ CLI Layer (repl.ts)
+        │  resolve input, start agent turn
+        └─▶ Agent Core (agent.ts)
+              │  build context: history + system instruction (with git snapshot, tool catalog)
+              └─▶ LLMClient.stream()
+                    │
+                    ├─▶ text event: "I'll read the file first"
+                    │     → yield to CLI, render to terminal
+                    │
+                    └─▶ function_call: read({ file_path: "package.json" })
+                          │
+                          └─▶ executeCalls()
+                                │  requiresConfirmation? no → execute
+                                └─▶ read.execute() → file contents
+                                      │
+                                      └─▶ feed result back to LLM as user message
+                                            │
+                                            └─▶ function_call: edit({ old: "1.0.0", new: "2.0.0" })
+                                                  │
+                                                  └─▶ executeOneCall()
+                                                        requiresConfirmation? yes (outside CWD?) → no → execute
+                                                        edit.execute() → success
+                                                        append reminder: "verify the change works"
+                                                          │
+                                                          └─▶ LLM final text: "Updated to 2.0.0"
+                                                                │
+                                                                └─▶ CLI Layer renders, logs to session JSONL
+```
+
+### Plan-mode flow
+
+```
+User: /plan refactor auth module
+  │
+  └─▶ CLI Layer intercepts slash command
+        │  run Agent.run(input, "plan")
+        └─▶ Agent Core
+              │  toolDefs = tools where readonly === true
+              │  systemInstruction += buildPlanSuffix(allowedToolNames)
+              │  executes read-only exploration pass
+              └─▶ produces plan (numbered checklist with file paths + risks)
+                    │
+                    └─▶ CLI Layer shows readline menu: [a]pprove / [e]dit / [c]ancel
+                          │
+                          ├─▶ approve → agent.run(plan as context, "react") → execute
+                          ├─▶ edit   → open $EDITOR, user modifies plan, then execute
+                          └─▶ cancel → discard, return to prompt
+```
+
+---
+
+## Layer constraints (enforced by convention, linted manually)
+
+| Layer | May import from | Must never import from |
+|---|---|---|
+| `src/cli/` | all layers | — |
+| `src/core/` | `providers/`, `tools/`, `skills/` | `cli/`, `state/` |
+| `src/providers/` | `providers/` only | `cli/`, `core/`, `tools/`, `skills/`, `state/` |
+| `src/tools/` | `providers/types` | `cli/`, `core/`, `providers/` (non-types), `state/` |
+| `src/skills/` | Node builtins | `cli/`, `core/`, `providers/`, `tools/`, `state/` |
+| `src/state/` | Node builtins, `providers/factory` (for Provider type) | `cli/`, `core/` |
+
+---
+
+## Testing strategy
+
+- **Unit tests colocated** with source (`agent.ts` → `agent.test.ts`).
+- **Real filesystem** for file tool tests — no `fs` mocking (mocks hide path-handling bugs).
+- **Mock at boundaries** — `LLMClient` and `SkillRegistry` are mocked; internal collaborators (`ContextManager`, `ToolRegistry`) are used directly.
+- **E2E tests** (`*.e2e.test.ts`) run the full agent pipeline against a mock `LLMClient` that emits scripted tool calls.
+- **Smoke tests** (`cli/run.smoke.test.ts`) exercise the built binary with real filesystem I/O.
+
+---
 
 ## References
 
-- [Gemini API Documentation](https://ai.google.dev/docs)
-- [Claude Code Architecture](https://github.com/anthropics/claude-code)
-- [Function Calling Guide](https://ai.google.dev/docs/function_calling)
-- [Agent Skills Open Standard](https://agentskills.io/specification)
-- [Agent Skills Client Implementation Guide](https://agentskills.io/client-implementation/adding-skills-support)
+- [Strategic roadmap](roadmap.md) — positioning, phase plan, deferred items
+- [Skills authoring guide](skills.md) — SKILL.md format, preprocessors, custom skills
+- [Tool gaps research](tool-gaps-research.md) — LSP, web search, code navigation comparison
+- [CLI UX research](cli-ux-research.md) — input handling and rendering comparison vs. peers
+- [Engineering practices](engineering-practices.md) — contribution rules, test policy
+- [Agent Skills open standard](https://agentskills.io/specification)

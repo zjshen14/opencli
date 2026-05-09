@@ -43,14 +43,16 @@ We commit to three positioning angles, in this order of weight:
 
 | # | Milestone | Notes |
 |---|---|---|
-| **B1** | **OpenAI client** | Responses API + Chat Completions. Native web search via Responses API. |
-| **B2** | **Provider override + `--base-url`** ([#54](https://github.com/zjshen14/opencli/issues/54)) | Unlocks LiteLLM / Ollama / vLLM / corporate proxies. Pairs with B1. |
+| **B1** | **Provider override + `--base-url`** ([#54](https://github.com/zjshen14/opencli/issues/54)) | _OpenAI client already shipped_ (`src/providers/openai.ts`). B1 now: explicit `provider` config field + `--base-url` for LiteLLM / Ollama / vLLM / corporate proxies. |
+| **B2** | **Mature OpenAI client** | Responses API (native web search); o-series reasoning handling; usage token reporting. Completes parity with Gemini + Anthropic clients. |
 | **B3** | **Structured prompt builder** ([#39](https://github.com/zjshen14/opencli/issues/39)) | Required scaffolding for per-provider prompt variations and the architect/editor split. |
 | **B4** | **`AgentContext` as serializable value type** ([#63](https://github.com/zjshen14/opencli/issues/63)) | Required so context can flow from architect-stage to editor-stage cleanly. Replaces `reconstructMessages()`. |
 | **B5** | **Architect / editor model routing** | **Marquee Angle-1 feature.** Phase B5a: single-vendor (Aider parity). Phase B5b: cross-vendor (e.g. Opus plans, Qwen Coder edits). Nobody ships B5b well today. |
-| **B6** | **Kimi + Qwen clients** | Demonstrates "really multi-provider," not just three brands. |
-| **B7** | **Native web search Phase 1** ([#37](https://github.com/zjshen14/opencli/issues/37)) | Anthropic + Gemini + OpenAI Responses. |
+| **B6** | **Kimi + Qwen clients** | Demonstrates "really multi-provider," not just three brands. Requires B1 plumbing. |
+| **B7** | **Native web search Phase 1** ([#37](https://github.com/zjshen14/opencli/issues/37)) | Anthropic + Gemini provider-native. OpenAI Responses API via B2. |
 | **B8** | **LSP for TypeScript** | Quality differentiator for the language we self-dogfood. Bundles a tsserver client. Future: per-language plugins. |
+
+> **Note (2026-05-09):** OpenAI client was implemented before Phase B was drafted; the original B1 slot is now repurposed for provider-override plumbing. Remaining OpenAI work moves to B2.
 
 **Sequencing decision: B5 ships in two stages.** B5a (single-vendor) gives us Aider parity quickly and validates the routing surface. B5b (cross-vendor) is the harder design problem — context translation, tool-call format negotiation, prompt-builder variants — and lands after we've stress-tested B5a in real use.
 
@@ -94,6 +96,6 @@ We commit to three positioning angles, in this order of weight:
 
 These were left open at the time of writing and can revise the roadmap:
 
-1. **Provider clients order in Phase B.** Currently B1 (OpenAI) → B6 (Kimi/Qwen). Could flip if Kimi/Qwen adoption justifies it.
+1. **Kimi/Qwen order in Phase B.** Currently B6 after B1 proxy plumbing. Could pull earlier if adoption justifies it — both require the `--base-url` infrastructure from B1 anyway.
 2. **B8 (LSP) scope.** TypeScript-only first, or design for multi-language from the start? Multi-language is a meaningful effort lift.
 3. **C4 (container sandbox) vs. native sandbox sufficiency.** If A1 covers most users' threat model, C4 may stay deferred indefinitely.

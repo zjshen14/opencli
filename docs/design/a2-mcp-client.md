@@ -1,6 +1,8 @@
 # Design: A2 — MCP client
 
-_Status: Ready for implementation. Tracking issue: to be opened. Phase: [Roadmap A2](../roadmap.md)._
+_Status: Ready for implementation. Tracking issue: [#81](https://github.com/zjshen14/opencli/issues/81). Phase: [Roadmap A2](../roadmap.md)._
+
+_Revision history: 2026-05-09 — incorporated technical review (async shutdown, output truncation flag, error-handling pattern, name-sanitisation moved to manager, hard collision error, `${VAR}`-only expansion, indexed-name fragility, per-server timeout in config)._
 
 ---
 
@@ -22,6 +24,22 @@ The sandbox design (A1) ships first. MCP servers run as subprocesses or network 
 - **Does not support MCP resources or prompts.** Only the `tools` namespace is wired in A2. Resources and prompts are deferred.
 - **Does not implement MCP server mode.** OpenCLI-as-MCP-server is Phase C2, a separate design.
 - **Does not mutate `createDefaultRegistry`.** MCP tools are registered by the CLI layer after the base registry is created — the factory function stays clean.
+
+### Tangential change shipped with A2
+
+The executor currently truncates large outputs via a hardcoded `TRUNCATE_TOOLS = Set(["bash", "grep", "glob"])`. This is broken for MCP — a filesystem MCP server returning a 5 MB file would silently flood the agent context. Two options were considered:
+
+1. Hardcode `name.startsWith("mcp__")` in the executor — leaks the MCP namespace into a layer that should not know about it.
+2. Move the policy to `Tool.truncateOutput?: boolean` — the registry no longer needs to know which tools produce large output.
+
+Option 2 wins. A2 ships this change:
+
+- Add `truncateOutput?: boolean` to the `Tool` interface (`src/tools/base.ts`).
+- Migrate `bash`, `grep`, `glob` to set `truncateOutput: true` on their tool objects.
+- Remove the `TRUNCATE_TOOLS` Set from `executor.ts`; replace the lookup with `tool?.truncateOutput`.
+- The MCP adapter sets `truncateOutput: true` on every MCP tool.
+
+This is a self-contained refactor (~10 LOC change in three files plus the executor) and is required for A2 correctness, so it ships as part of this PR rather than as a follow-up.
 
 ---
 
@@ -102,7 +120,9 @@ export interface McpToolInfo {
 
 `transport` defaults to `"stdio"` when the field is absent, for backward compatibility with the Claude Desktop config format (which has no `transport` key for stdio servers).
 
-**Variable expansion:** `${VAR}` references in string values are expanded against `process.env` at load time. Expansion is limited to string values only — no recursive expansion, no shell metacharacters. Unset variables become empty strings with a startup warning.
+**Variable expansion:** `${VAR}` references in string values are expanded against `process.env` at load time. Only the braced form is recognised — bare `$VAR` is left as a literal so the user does not get surprise expansion of strings like API tokens, paths, or shell-style references they did not intend. Expansion is limited to string values, non-recursive, no shell metacharacters. Unset variables become empty strings with a startup warning.
+
+A literal `${` can be escaped as `$${` (the loader strips one `$` and emits the rest as-is). This is documented in the README; the test suite covers it.
 
 ### `config.ts`
 
@@ -147,35 +167,65 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 // Inside connect():
-const transport =
-  config.transport === "http"
-    ? new StreamableHTTPClientTransport(new URL(config.url), { requestInit: { headers: config.headers } })
-    : new StdioClientTransport({ command: config.command, args: config.args, env: resolvedEnv });
+let transport;
+if (config.transport === "http") {
+  transport = new StreamableHTTPClientTransport(new URL(config.url), {
+    requestInit: { headers: config.headers },
+  });
+} else {
+  // Stdio: merge config.env over process.env so the subprocess sees both
+  // the parent's environment (PATH etc.) and any server-specific overrides.
+  const childEnv: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    ...(config.env ?? {}),
+  };
+  transport = new StdioClientTransport({
+    command: config.command,
+    args: config.args,
+    env: childEnv,
+  });
+}
 
 this.sdkClient = new Client({ name: "opencli", version: "0.1.0" });
 await this.sdkClient.connect(transport);
 ```
 
-For `callTool()`, wrap the SDK result into `ToolResult`:
+For `callTool()`, wrap the SDK result into `ToolResult`. **Note the explicit try/catch** — the SDK throws on transport errors and `AbortSignal.timeout` raises `AbortError` rather than returning a value, so the failure paths in the table above all flow through this handler:
 
 ```typescript
 async callTool(toolName: string, args: Record<string, unknown>): Promise<ToolResult> {
-  const result = await this.sdkClient.callTool(
-    { name: toolName, arguments: args },
-    undefined,
-    { signal: AbortSignal.timeout(this.callTimeout) },
-  );
-  const output = result.content
-    .filter((c) => c.type === "text")
-    .map((c) => (c as { type: "text"; text: string }).text)
-    .join("\n");
-  return result.isError
-    ? { success: false, output, error: output || "MCP tool returned an error" }
-    : { success: true, output };
+  try {
+    const result = await this.sdkClient.callTool(
+      { name: toolName, arguments: args },
+      undefined,
+      { signal: AbortSignal.timeout(this.callTimeout) },
+    );
+    const textParts = result.content
+      .filter((c) => c.type === "text")
+      .map((c) => (c as { type: "text"; text: string }).text);
+    const droppedNonText = result.content.length - textParts.length;
+    let output = textParts.join("\n");
+    if (droppedNonText > 0) {
+      output += `\n[${droppedNonText} non-text content block(s) omitted]`;
+    }
+    return result.isError
+      ? { success: false, output, error: output || "MCP tool returned an error" }
+      : { success: true, output };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const isTimeout = err instanceof Error && err.name === "TimeoutError";
+    return {
+      success: false,
+      output: "",
+      error: isTimeout
+        ? `MCP tool '${toolName}' timed out after ${this.callTimeout}ms`
+        : `MCP tool '${toolName}' failed: ${message}`,
+    };
+  }
 }
 ```
 
-Image/blob content blocks are dropped with a one-line note appended to `output`. Non-text content can be added in a follow-on PR when there's a concrete use case.
+Image/blob content blocks are dropped; the count of dropped blocks is appended to `output`. Non-text content can be plumbed through in a follow-on PR when there's a concrete use case.
 
 ### `adapter.ts`
 
@@ -187,7 +237,7 @@ import type { McpToolInfo } from "./types.js";
 /**
  * Bridges one MCP tool into an OpenCLI Tool.
  *
- * Tool name format: mcp__<serverName>__<toolName>
+ * Tool name format: mcp__<sanitisedServerName>__<toolName>
  * (double-underscore, matching Claude Code's convention for compatibility)
  *
  * All MCP tools require HITL confirmation — the user chose to install the
@@ -195,36 +245,53 @@ import type { McpToolInfo } from "./types.js";
  * specific tool by name persists to .opencli/settings.json via the standard
  * HITL flow with no special handling needed here.
  *
- * MCP tools are write tools (readonly = false) — they are blocked in plan mode.
+ * MCP tools are write tools (readonly = false) — blocked in plan mode.
+ * MCP tools have truncateOutput = true so the executor caps oversized payloads
+ * the same way it does for bash/grep/glob.
+ *
+ * The adapter receives the already-sanitised server name from the manager —
+ * it does not sanitise itself, to avoid duplicate warnings (one per tool).
  */
-export function mcpToolToTool(client: McpClient, info: McpToolInfo): Tool {
-  const toolName = `mcp__${client.serverName}__${info.name}`;
+export function mcpToolToTool(
+  client: McpClient,
+  sanitisedServerName: string,
+  info: McpToolInfo,
+): Tool {
   return {
-    name: toolName,
+    name: `mcp__${sanitisedServerName}__${info.name}`,
     description: `[${client.serverName}] ${info.description}`,
     parameters: info.inputSchema as Tool["parameters"],
     readonly: false,
+    truncateOutput: true,
     requiresConfirmation: () => true,
     execute: (params) => client.callTool(info.name, params),
   };
 }
 ```
 
-**Name sanitisation:** server names are sanitised to `[a-zA-Z0-9_-]` (non-matching chars replaced with `_`) before use in the compound tool name. A warning is logged if sanitisation changed the name.
+**Name sanitisation lives in `manager.ts`, not here.** The manager sanitises each server name once at registration time (`[^a-zA-Z0-9_-]` → `_`), logs a single warning per affected server, and detects collisions across servers (see `registerTools` below). Per-tool sanitisation in the adapter would emit one warning per tool from the same server, which is noise.
 
 ### `manager.ts`
 
 ```typescript
+interface ConnectedServer {
+  client: McpClient;
+  /** Original name from mcp.json. */
+  rawName: string;
+  /** Sanitised: [^a-zA-Z0-9_-] replaced with _. */
+  sanitisedName: string;
+}
+
 export class McpManager {
-  constructor(private clients: McpClient[]) {}
+  constructor(private servers: ConnectedServer[]) {}
 
   /** Connect all servers concurrently. Failed servers are logged but do not abort startup. */
   static async create(config: McpConfig, opts?: McpClientOpts): Promise<McpManager>;
 
   /** Register all successfully-connected servers' tools into the given registry. */
-  registerTools(registry: ToolRegistry): void;
+  async registerTools(registry: ToolRegistry): Promise<void>;
 
-  /** Close all connections. Called on CLI exit (SIGINT/SIGTERM). */
+  /** Close all connections. Called from the CLI shutdown handler. */
   async disconnectAll(): Promise<void>;
 
   /** Number of servers that connected successfully. */
@@ -234,28 +301,93 @@ export class McpManager {
 
 #### `McpManager.create()` — startup flow
 
+The previous draft inferred the server name by indexing `Object.keys()` against the `Promise.allSettled` result array. That's brittle (relies on Object.keys/entries returning identical order), so capture the name inside the entries callback and carry it through.
+
 ```typescript
+type ConnectAttempt =
+  | { ok: true; server: ConnectedServer }
+  | { ok: false; rawName: string; error: unknown };
+
 static async create(config: McpConfig, opts?: McpClientOpts): Promise<McpManager> {
-  const results = await Promise.allSettled(
-    Object.entries(config.mcpServers).map(async ([name, serverConfig]) => {
-      const client = new McpClient(name, serverConfig, opts);
-      await client.connect();  // throws on failure
-      return client;
-    }),
+  const sanitise = (name: string): string => name.replace(/[^a-zA-Z0-9_-]/g, "_");
+
+  // Build the sanitised name table once, up front, and detect cross-server collisions
+  // BEFORE attempting any connections. A collision is a hard error for the offending
+  // entries — the second one is dropped from the connection attempt and logged.
+  const sanitisedByRaw = new Map<string, string>();  // rawName -> sanitised
+  const claimedSanitised = new Map<string, string>(); // sanitised -> first rawName that claimed it
+  const skippedDueToCollision: string[] = [];
+
+  for (const rawName of Object.keys(config.mcpServers)) {
+    const sanitised = sanitise(rawName);
+    if (sanitised !== rawName) {
+      process.stderr.write(
+        `[mcp] '${rawName}': name sanitised to '${sanitised}' for tool naming\n`,
+      );
+    }
+    const previousClaimer = claimedSanitised.get(sanitised);
+    if (previousClaimer !== undefined) {
+      process.stderr.write(
+        `[mcp] '${rawName}': sanitised name '${sanitised}' collides with '${previousClaimer}' — skipping. Rename one in mcp.json.\n`,
+      );
+      skippedDueToCollision.push(rawName);
+      continue;
+    }
+    claimedSanitised.set(sanitised, rawName);
+    sanitisedByRaw.set(rawName, sanitised);
+  }
+
+  const attempts = await Promise.all<Promise<ConnectAttempt>>(
+    Object.entries(config.mcpServers)
+      .filter(([rawName]) => !skippedDueToCollision.includes(rawName))
+      .map(async ([rawName, serverConfig]): Promise<ConnectAttempt> => {
+        try {
+          const client = new McpClient(rawName, serverConfig, opts);
+          await client.connect();
+          return {
+            ok: true,
+            server: { client, rawName, sanitisedName: sanitisedByRaw.get(rawName)! },
+          };
+        } catch (error) {
+          return { ok: false, rawName, error };
+        }
+      }),
   );
 
-  const clients: McpClient[] = [];
-  for (const [i, result] of results.entries()) {
-    const name = Object.keys(config.mcpServers)[i];
-    if (result.status === "fulfilled") {
-      clients.push(result.value);
+  const servers: ConnectedServer[] = [];
+  for (const attempt of attempts) {
+    if (attempt.ok) {
+      servers.push(attempt.server);
     } else {
-      process.stderr.write(`[mcp] ${name}: failed to connect — ${result.reason}\n`);
+      const msg = attempt.error instanceof Error ? attempt.error.message : String(attempt.error);
+      process.stderr.write(`[mcp] '${attempt.rawName}': failed to connect — ${msg}\n`);
     }
   }
-  return new McpManager(clients);
+  return new McpManager(servers);
 }
 ```
+
+#### `McpManager.registerTools()` — tool listing flow
+
+```typescript
+async registerTools(registry: ToolRegistry): Promise<void> {
+  for (const { client, sanitisedName } of this.servers) {
+    let tools: McpToolInfo[];
+    try {
+      tools = await client.listTools();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[mcp] '${client.serverName}': listTools failed — ${msg}\n`);
+      continue;
+    }
+    for (const info of tools) {
+      registry.register(mcpToolToTool(client, sanitisedName, info));
+    }
+  }
+}
+```
+
+Within a single sanitised server name, the MCP server is responsible for ensuring its own tool names are unique (the SDK enforces this on the server side). The cross-server collision case was already addressed at sanitisation time, so by the time `registerTools` runs, every `mcp__<sanitised>__<tool>` name is guaranteed unique.
 
 ### `index.ts`
 
@@ -323,7 +455,8 @@ Use read, glob, or grep to explore the codebase.
 | Server crashes after connect | `McpClient.callTool()` | SDK throws; `callTool` returns `{ success: false, error: "..." }` |
 | Tool call timeout | `AbortSignal.timeout()` | Returns `{ success: false, error: "MCP tool call timed out after 30s" }` |
 | Server name collision with built-in | `mcpToolToTool()` | `mcp__<server>__<tool>` namespace prevents collision with built-ins (`read`, `write`, etc.) |
-| Two servers advertise same tool name | `manager.registerTools()` | Last-registered wins (registry overwrites). Log a warning naming both servers. |
+| Two server names sanitise to the same string | `McpManager.create()` | **Hard error at load time** — the second offender is skipped with a stderr message naming both. Silent overwrite would be dangerous (calls go to the wrong server). |
+| Two tools from the same server have the same name | MCP server side | The MCP SDK forbids this on the server. Not OpenCLI's concern. |
 | Non-text content in tool result | `McpClient.callTool()` | Dropped; appends `"[image/binary content omitted]"` note to output |
 | SIGINT during tool call | In-flight SDK request | `AbortSignal.timeout` is the backstop; the subprocess may be left in a dirty state. Known limitation — documented. |
 
@@ -343,14 +476,37 @@ Add after existing registry creation:
 const mcpConfig = await loadMcpConfig(AGENT_DIR);
 let mcpManager: McpManager | null = null;
 if (mcpConfig && Object.keys(mcpConfig.mcpServers).length > 0) {
+  process.stderr.write(`[mcp] connecting to ${Object.keys(mcpConfig.mcpServers).length} server(s)...\n`);
   mcpManager = await McpManager.create(mcpConfig);
-  mcpManager.registerTools(registry);
+  await mcpManager.registerTools(registry);
   if (mcpManager.connectedCount > 0) {
     process.stderr.write(`[mcp] ${mcpManager.connectedCount} server(s) connected\n`);
   }
 }
-process.on("exit", () => { mcpManager?.disconnectAll(); });
+
+// Centralised shutdown — async-safe.
+const shutdown = async (code: number): Promise<void> => {
+  try {
+    await mcpManager?.disconnectAll();
+  } catch (err) {
+    process.stderr.write(`[mcp] disconnect error: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
+  process.exit(code);
+};
+process.on("SIGINT", () => void shutdown(130));
+process.on("SIGTERM", () => void shutdown(143));
 ```
+
+**Why not `process.on("exit", ...)`** — the `exit` event is synchronous; the event loop is winding down and any returned `Promise` from `disconnectAll()` is silently discarded. The result is leaked stdio subprocesses on every clean exit. SIGINT/SIGTERM run on a live event loop and can await async cleanup.
+
+#### Ancillary change to `src/cli/input.ts`
+
+Two existing `process.exit(0)` call sites (Ctrl+D handling and the `/exit` command) bypass the new shutdown handler. Inject the `shutdown` callback as a constructor arg / option on the input handler so those paths also flow through `disconnectAll()`. The simplest plumbing:
+
+1. `cli/index.ts` constructs the input handler with `{ onExit: () => shutdown(0) }`.
+2. `cli/input.ts` calls `opts.onExit()` instead of `process.exit(0)`.
+
+This is a 2-line change in `input.ts` plus passing the option in `index.ts`. Without it, Ctrl+D leaks stdio subprocesses just like `process.on("exit")` would.
 
 ### `state/config.ts` — no changes
 
@@ -376,20 +532,32 @@ Add to `dependencies`:
 |---|---|---|
 | `loadMcpConfig`: absent file → null | `mcp/config.test.ts` | Missing file handled gracefully |
 | `loadMcpConfig`: malformed JSON → null + warning | same | Parse failure handled |
-| `loadMcpConfig`: `${VAR}` expansion | same | Env vars substituted; unset var → `""` + warning |
+| `loadMcpConfig`: `${VAR}` expansion (braced only) | same | Env vars substituted; unset var → `""` + warning |
+| `loadMcpConfig`: bare `$VAR` left as literal | same | No surprise expansion (Q3 caveat) |
+| `loadMcpConfig`: `$${` → literal `${` | same | Escape sequence works |
 | `loadMcpConfig`: no `transport` field defaults to stdio | same | Backward compat with Claude Desktop format |
+| `loadMcpConfig`: per-server `callTimeout` parsed | same | Q6 wiring |
 | `mcpToolToTool`: name format `mcp__server__tool` | `mcp/adapter.test.ts` | Naming convention |
 | `mcpToolToTool`: `readonly = false` | same | Plan-mode blocking wired up |
+| `mcpToolToTool`: `truncateOutput = true` | same | Large outputs are truncated |
 | `mcpToolToTool`: `requiresConfirmation() = true` | same | HITL gate always fires |
 | `mcpToolToTool`: description prefixed with `[server]` | same | UX clarity |
 | `McpClient.callTool`: text content → `{ success: true, output }` | `mcp/client.test.ts` | Happy path |
 | `McpClient.callTool`: `isError: true` → `{ success: false }` | same | Error propagation |
-| `McpClient.callTool`: image content dropped with note | same | Non-text handling |
-| `McpClient.callTool`: timeout → `{ success: false, error: "...timed out..." }` | same | Timeout guard |
+| `McpClient.callTool`: image content dropped with `[N non-text content block(s) omitted]` note | same | Non-text handling |
+| `McpClient.callTool`: timeout → `{ success: false, error: "...timed out..." }` | same | AbortError caught by try/catch |
+| `McpClient.callTool`: transport error caught (no unhandled rejection) | same | try/catch covers SDK throws |
+| `McpClient`: per-server `callTimeout` overrides global default | same | Q6 behaviour |
 | `McpManager.create`: one server fails → others still load | `mcp/manager.test.ts` | Partial failure isolation |
+| `McpManager.create`: name sanitisation logs once per server, not per tool | same | Per-server warning, not per-tool |
+| `McpManager.create`: collision after sanitisation → second server skipped + stderr | same | Hard collision error |
+| `McpManager.create`: name from entries is carried through (not indexed) | same | Index fragility fix |
 | `McpManager.registerTools`: tools appear in registry | same | Registry integration |
-| Name collision warning logged | same | Collision detection |
-| Executor routes `mcp__*__*` tool through HITL | `core/executor.test.ts` (add cases) | End-to-end HITL for MCP tool |
+| `McpManager.registerTools`: `listTools` failure isolated to that server | same | One bad server doesn't block others |
+| `McpManager.disconnectAll`: stdio subprocess terminates | same | No leaked processes |
+| Executor truncates output when `tool.truncateOutput === true` | `core/executor.test.ts` (update existing cases) | Migration of TRUNCATE_TOOLS Set |
+| Executor routes `mcp__*__*` tool through HITL | same (add cases) | End-to-end HITL for MCP tool |
+| CLI `SIGINT` handler awaits `disconnectAll` before exit | `cli/index.test.ts` (add) | Async shutdown works |
 
 **Test infrastructure:** Use an in-process mock MCP server (the SDK ships a `Server` class) rather than spawning real npm packages. This makes tests fast, deterministic, and self-contained.
 
@@ -414,21 +582,40 @@ await mockServer.connect(serverTransport);
 
 ## Open questions
 
-**Q1 — Transport field backward compat.**
-Claude Desktop's `claude_desktop_config.json` has no `transport` key — it implicitly means stdio. If a user copies their Claude Desktop config directly, we must not reject it. The design treats absent `transport` as `"stdio"`. Is this the right default, or should we require the field explicitly to avoid surprises?
-_Recommendation: default to `"stdio"` for compat. Document the accepted formats in README._
+**Q1 — Transport field backward compat. _(answered: default to `"stdio"`)_**
+Claude Desktop's `claude_desktop_config.json` has no `transport` key — it implicitly means stdio. If a user copies their Claude Desktop config directly, we must not reject it. The design treats absent `transport` as `"stdio"`. Documented in README.
 
-**Q2 — Startup latency.**
-Connecting all MCP servers at startup adds latency before the REPL prompt appears. With a slow server (e.g. one that runs `npx -y ...` and downloads packages on first run), this can be several seconds. Should connection be lazy (on first tool use) or eager (at startup)?
-_Recommendation: eager for A2 (simpler; user knows which servers are configured). Add lazy option in a follow-on if startup latency becomes a real complaint. Surface the `[mcp] N server(s) connected` message early so the user knows what's happening._
+**Q2 — Startup latency. _(answered: eager + progress message)_**
+Connecting all MCP servers at startup adds latency before the REPL prompt appears. With a slow server (e.g. one that runs `npx -y ...` and downloads packages on first run), this can be several seconds. The CLI emits `[mcp] connecting to N server(s)...` before the connect calls so users see progress, then `[mcp] N server(s) connected` after. Lazy connect is a follow-on if startup latency becomes a real complaint.
 
-**Q3 — HTTP transport auth and `${VAR}` expansion.**
-The `headers` field in HTTP servers often contains tokens (`Authorization: Bearer ${GITHUB_TOKEN}`). Variable expansion at load time means the token is read from env at startup. Is this the right place for expansion, or should it happen per-request (to support dynamic tokens)?
-_Recommendation: expand at load time for A2. Dynamic token refresh is an edge case — most tokens are long-lived. Note the limitation in docs._
+**Q3 — `${VAR}` expansion at load time, `${...}` only. _(answered)_**
+Expand at load time for A2 — most tokens are long-lived. Only the braced form `${VAR}` is recognised; bare `$VAR` is left as a literal to avoid accidental expansion of strings (paths, tokens) users did not intend to substitute. `$${` escapes a literal `${`. Per-request token refresh for short-lived OAuth tokens is split out as Q5.
 
-**Q4 — `opencli mcp` subcommand.**
-Should A2 ship a `opencli mcp list` command (shows configured servers and their tool counts) and `opencli mcp add <name> <command> [args...]` (writes to `mcp.json`)? These are QoL features but not required for the core integration.
-_Recommendation: defer to a follow-on. A2 ships the client integration only; users edit `mcp.json` manually. Document the format in README._
+**Q4 — `opencli mcp` subcommand. _(answered: defer)_**
+A2 ships the client integration only; users edit `mcp.json` manually. `opencli mcp list` / `opencli mcp add` are follow-on QoL improvements.
+
+**Q5 — Per-request token refresh for short-lived OAuth tokens. _(open)_**
+Some HTTP MCP servers use OAuth-issued tokens with TTLs of minutes. Load-time expansion captures the token at startup; the connection then breaks when the token expires mid-session. Options:
+
+- (a) Re-expand on every HTTP request (cheap, but the load-time captured value is the same as the runtime value unless something else refreshes the env var).
+- (b) Hook in a token-refresh callback per server: `headers: { Authorization: "Bearer ${GITHUB_TOKEN}" }` plus an optional `refreshCommand: "gh auth token"` that's executed before each request when the token is close to expiry.
+- (c) Defer entirely to a follow-up — most users will rely on long-lived PATs for A2.
+
+_Recommendation: defer (option c) for A2, document the limitation. Revisit if a real user reports an expired-token failure._
+
+**Q6 — Per-server `callTimeout` in `mcp.json`. _(open, recommend yes)_**
+Different servers have different latency profiles. A local filesystem server should time out in 5s; a slow database query MCP server might need 120s. The current `McpClientOpts` only allows a global default.
+
+_Recommendation: add an optional `callTimeout?: number` (milliseconds) field to `McpServerConfig`. The `McpClient` uses the per-server value when present, otherwise falls back to the `McpClientOpts.callTimeout` default. This is a 5-line addition and avoids a follow-up PR. Default global timeout: 30 000 ms._
+
+```jsonc
+{
+  "mcpServers": {
+    "filesystem": { "transport": "stdio", "command": "...", "callTimeout": 5000 },
+    "slow-db":    { "transport": "stdio", "command": "...", "callTimeout": 120000 }
+  }
+}
+```
 
 ---
 
@@ -446,8 +633,14 @@ _Recommendation: defer to a follow-on. A2 ships the client integration only; use
 | Create | `src/mcp/client.test.ts` |
 | Create | `src/mcp/adapter.test.ts` |
 | Create | `src/mcp/manager.test.ts` |
-| Modify | `src/cli/index.ts` — load mcp.json, create McpManager, register tools, hook disconnectAll on exit |
-| Modify | `src/core/executor.test.ts` — add HITL cases for `mcp__*__*` tool names |
-| Modify | `package.json` — add `@modelcontextprotocol/sdk` dependency |
-| Update | `README.md` — document `~/.opencli/mcp.json` format and `mcp__server__tool` naming |
-| Update | `docs/architecture.md` — add `src/mcp/` to source tree; note MCP as a fourth tool surface |
+| Modify | `src/tools/base.ts` — add `truncateOutput?: boolean` to `Tool` interface |
+| Modify | `src/tools/exec/bash.ts` — set `truncateOutput: true` |
+| Modify | `src/tools/file/grep.ts` — set `truncateOutput: true` |
+| Modify | `src/tools/file/glob.ts` — set `truncateOutput: true` |
+| Modify | `src/core/executor.ts` — replace `TRUNCATE_TOOLS` Set with `tool?.truncateOutput` lookup |
+| Modify | `src/core/executor.test.ts` — update truncation cases to drive off the flag; add HITL cases for `mcp__*__*` tools |
+| Modify | `src/cli/index.ts` — load mcp.json, create McpManager, register tools, register async SIGINT/SIGTERM shutdown |
+| Modify | `src/cli/input.ts` — accept `onExit` callback; replace bare `process.exit(0)` calls |
+| Modify | `package.json` — add `@modelcontextprotocol/sdk ^1.x` dependency |
+| Update | `README.md` — document `~/.opencli/mcp.json` format, `${VAR}` expansion rules, `mcp__server__tool` naming, per-server `callTimeout` |
+| Update | `docs/architecture.md` — add `src/mcp/` to source tree; note MCP as a fourth tool surface; note `Tool.truncateOutput` flag |

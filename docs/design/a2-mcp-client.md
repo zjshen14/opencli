@@ -2,7 +2,9 @@
 
 _Status: Ready for implementation. Tracking issue: [#81](https://github.com/zjshen14/opencli/issues/81). Phase: [Roadmap A2](../roadmap.md)._
 
-_Revision history: 2026-05-09 — incorporated technical review (async shutdown, output truncation flag, error-handling pattern, name-sanitisation moved to manager, hard collision error, `${VAR}`-only expansion, indexed-name fragility, per-server timeout in config)._
+_Revision history:_
+- _2026-05-09 — incorporated technical review (async shutdown, output truncation flag, error-handling pattern, name-sanitisation moved to manager, hard collision error, `${VAR}`-only expansion, indexed-name fragility, per-server timeout in config)._
+- _2026-05-09 — added user-facing CLI surface (`opencli mcp add/list/test/remove`, `/mcp` slash command, per-server HITL allow option). Reversed Q4 from "defer" to "ship with A2"._
 
 ---
 
@@ -445,6 +447,147 @@ Use read, glob, or grep to explore the codebase.
 
 ---
 
+## User-facing CLI surface
+
+The connection layer above is invisible to end users. Without a config-management UX, MCP support ships as "edit a JSON file by hand and hope you got it right." A2 ships a small set of subcommands that close that gap. They are wrappers on the same `McpClient`/`McpManager` primitives the REPL uses — no new protocol code.
+
+Interactive prompts use `@clack/prompts` (already a dependency, used by the existing `/plan` flow).
+
+### `opencli mcp add [name] [-- command args...]`
+
+Interactive when called without args, one-shot when called with them.
+
+```
+$ opencli mcp add
+? Server name › filesystem
+? Transport › ● stdio   ○ http
+? Command › npx
+? Args (space-separated, accepts quoted strings) › -y @modelcontextprotocol/server-filesystem /tmp
+? Test connection now? (Y/n) › Y
+
+[mcp] connecting to filesystem...
+[mcp] ✓ connected — 3 tools: read_file, write_file, list_directory
+
+? Save to ~/.opencli/mcp.json? (Y/n) › Y
+Saved.
+```
+
+One-shot form for power users / scripting:
+
+```
+$ opencli mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem /tmp
+[mcp] testing connection...
+[mcp] ✓ connected (3 tools)
+[mcp] saved to ~/.opencli/mcp.json
+```
+
+HTTP form:
+
+```
+$ opencli mcp add github --transport http --url http://localhost:3000/mcp \
+    --header "Authorization: Bearer \${GITHUB_TOKEN}"
+```
+
+Behaviour:
+- Refuses to overwrite an existing entry without `--force`.
+- Always runs the connection probe before saving (a one-shot connect → `listTools` → disconnect). If the probe fails, prompts for "save anyway?" with a default of No.
+- Validates the server name against the sanitisation rule (`[a-zA-Z0-9_-]`) and rejects names that would require sanitisation. The error is much clearer when it fires here than at startup.
+
+### `opencli mcp list`
+
+```
+$ opencli mcp list
+NAME         TRANSPORT  STATUS    TOOLS
+filesystem   stdio      ok        3 (read_file, write_file, list_directory)
+github       http       ok        12
+slow-db      stdio      timeout   —
+```
+
+`STATUS` runs the probe in parallel for all configured servers. `--no-probe` skips the probe and just shows the configured names (faster; useful in scripts).
+
+### `opencli mcp test <name>`
+
+Connects once, lists tools, disconnects. The "did I write the config correctly?" loop without spinning up a full REPL.
+
+```
+$ opencli mcp test filesystem
+[mcp] connecting...
+[mcp] ✓ ok — 3 tools advertised in 240ms
+       • read_file
+       • write_file
+       • list_directory
+```
+
+Exit code: 0 on success, 1 on failure. Suitable for CI smoke tests.
+
+### `opencli mcp remove <name>`
+
+```
+$ opencli mcp remove filesystem
+Remove 'filesystem' from ~/.opencli/mcp.json? (y/N) › y
+Removed.
+```
+
+`--yes` skips the prompt.
+
+### Shared module — `src/cli/mcp-cmd.ts`
+
+The four subcommands live in one new file (`src/cli/mcp-cmd.ts`) registered on the existing commander instance in `cli/index.ts`. Each command is ~30 LOC. They share two helpers:
+
+- `probeServer(name, config): Promise<{ ok: boolean; tools?: string[]; error?: string; latencyMs?: number }>` — wraps a one-shot connect/listTools/disconnect cycle.
+- `writeMcpConfig(updater)` — read-modify-write `~/.opencli/mcp.json` with file locking via `mkdir -p` and atomic rename (`writeFileSync(tmp); renameSync(tmp, final)`).
+
+---
+
+## In-REPL UX
+
+### HITL prompt — name the server, offer per-server allow
+
+The current confirmation prompt (`src/cli/repl.ts:createConfirmFn`) shows tool name and a one-line detail. For MCP tools the prompt expands to make provenance clear and to add a per-server allow option:
+
+```
+  ⚠  mcp__filesystem__write_file requires confirmation
+     Server: filesystem  (stdio: npx -y @modelcontextprotocol/server-filesystem /tmp)
+     Args:   { path: "/tmp/x.txt", contents: "..." }
+
+  Allow mcp__filesystem__write_file?
+    > y  Yes, run once
+      p  Yes, always for this exact call             (project)
+      g  Yes, always for this exact call             (global)
+      t  Yes, always for this tool, any args         (project)
+      s  Yes, always for any tool from 'filesystem'  (project)
+      n  No, skip
+```
+
+For non-MCP tools the prompt is unchanged — the new `t`/`s` choices only render when the tool name starts with `mcp__`.
+
+### Allow-list key extensions
+
+Today the allow-set stores keys of the form `${toolName}:${JSON.stringify(args)}`. To support the two new "always" options the matcher accepts three patterns:
+
+| Pattern | Meaning | Generated by |
+|---|---|---|
+| `tool:<args-json>` | Exact match (existing) | `y` choice (`p`/`g` scope) |
+| `tool:*` | Any args for this tool | `t` choice |
+| `mcp__<server>__*` | Any tool from this MCP server (any args) | `s` choice |
+
+The check function tries exact → tool-wildcard → server-wildcard in that order. No regex; just three string-key lookups. Storage format in `settings.json` is unchanged — wildcards are just strings with `*` in them.
+
+The `s` (server-wildcard) option only appears when the tool name matches `mcp__<server>__*`. The matcher derives the server from the prefix; no new field on the persisted entries.
+
+### `/mcp` slash command
+
+Adds a new entry to the REPL's slash command list (currently `/plan`, `/clear`, `/exit`):
+
+```
+/mcp                         # equivalent to `opencli mcp list` but in-session
+/mcp test <name>             # re-probe one server without leaving the REPL
+```
+
+Same code as the CLI subcommand, output rendered through the existing renderer.
+
+---
+
 ## Failure modes
 
 | Failure | Detection point | Behaviour |
@@ -558,6 +701,18 @@ Add to `dependencies`:
 | Executor truncates output when `tool.truncateOutput === true` | `core/executor.test.ts` (update existing cases) | Migration of TRUNCATE_TOOLS Set |
 | Executor routes `mcp__*__*` tool through HITL | same (add cases) | End-to-end HITL for MCP tool |
 | CLI `SIGINT` handler awaits `disconnectAll` before exit | `cli/index.test.ts` (add) | Async shutdown works |
+| `opencli mcp add` one-shot writes valid JSON to mcp.json | `cli/mcp-cmd.test.ts` | Subcommand round-trip |
+| `opencli mcp add` rejects invalid server names (would require sanitisation) | same | Catches collisions before runtime |
+| `opencli mcp add --force` overrides existing entry | same | Overwrite path |
+| `opencli mcp list` shows all configured servers with probe status | same | Status column populates |
+| `opencli mcp list --no-probe` skips connection check | same | Faster path for scripts |
+| `opencli mcp test` exits 0 on connect, 1 on failure | same | CI suitability |
+| `opencli mcp remove` removes the entry | same | Removal works |
+| HITL prompt: `t` choice persists `tool:*` allow-list key | `cli/repl.test.ts` (add) | Tool-wildcard allow |
+| HITL prompt: `s` choice persists `mcp__<server>__*` allow-list key | same | Server-wildcard allow |
+| HITL prompt: `t`/`s` choices hidden for non-MCP tools | same | Conditional rendering |
+| Allow-list matcher: exact → tool-wildcard → server-wildcard order | same | Match precedence |
+| `/mcp` slash command renders the same as `opencli mcp list` | same | REPL parity |
 
 **Test infrastructure:** Use an in-process mock MCP server (the SDK ships a `Server` class) rather than spawning real npm packages. This makes tests fast, deterministic, and self-contained.
 
@@ -591,8 +746,8 @@ Connecting all MCP servers at startup adds latency before the REPL prompt appear
 **Q3 — `${VAR}` expansion at load time, `${...}` only. _(answered)_**
 Expand at load time for A2 — most tokens are long-lived. Only the braced form `${VAR}` is recognised; bare `$VAR` is left as a literal to avoid accidental expansion of strings (paths, tokens) users did not intend to substitute. `$${` escapes a literal `${`. Per-request token refresh for short-lived OAuth tokens is split out as Q5.
 
-**Q4 — `opencli mcp` subcommand. _(answered: defer)_**
-A2 ships the client integration only; users edit `mcp.json` manually. `opencli mcp list` / `opencli mcp add` are follow-on QoL improvements.
+**Q4 — `opencli mcp` subcommand. _(answered: ship with A2 — see "User-facing CLI surface")_**
+The original recommendation was to defer. Reversed: shipping the protocol layer without `add`/`list`/`test`/`remove` produces a feature that's invisible until users trip over it, contradicts the project's "open + ergonomic" positioning, and only saves ~200-300 LOC of CLI scaffolding. A2 ships the four subcommands plus the `/mcp` REPL command and the per-server HITL allow option.
 
 **Q5 — Per-request token refresh for short-lived OAuth tokens. _(open)_**
 Some HTTP MCP servers use OAuth-issued tokens with TTLs of minutes. Load-time expansion captures the token at startup; the connection then breaks when the token expires mid-session. Options:
@@ -639,8 +794,11 @@ _Recommendation: add an optional `callTimeout?: number` (milliseconds) field to 
 | Modify | `src/tools/file/glob.ts` — set `truncateOutput: true` |
 | Modify | `src/core/executor.ts` — replace `TRUNCATE_TOOLS` Set with `tool?.truncateOutput` lookup |
 | Modify | `src/core/executor.test.ts` — update truncation cases to drive off the flag; add HITL cases for `mcp__*__*` tools |
-| Modify | `src/cli/index.ts` — load mcp.json, create McpManager, register tools, register async SIGINT/SIGTERM shutdown |
+| Modify | `src/cli/index.ts` — load mcp.json, create McpManager, register tools, register async SIGINT/SIGTERM shutdown, register `mcp` subcommand |
 | Modify | `src/cli/input.ts` — accept `onExit` callback; replace bare `process.exit(0)` calls |
+| Modify | `src/cli/repl.ts` — extend HITL prompt with `t`/`s` choices for MCP tools; add `/mcp` slash command |
+| Create | `src/cli/mcp-cmd.ts` — `add`/`list`/`test`/`remove` subcommands; shared `probeServer` and `writeMcpConfig` helpers |
+| Create | `src/cli/mcp-cmd.test.ts` — subcommand tests using in-process `InMemoryTransport` |
 | Modify | `package.json` — add `@modelcontextprotocol/sdk ^1.x` dependency |
-| Update | `README.md` — document `~/.opencli/mcp.json` format, `${VAR}` expansion rules, `mcp__server__tool` naming, per-server `callTimeout` |
-| Update | `docs/architecture.md` — add `src/mcp/` to source tree; note MCP as a fourth tool surface; note `Tool.truncateOutput` flag |
+| Update | `README.md` — document `~/.opencli/mcp.json` format, `${VAR}` expansion rules, `mcp__server__tool` naming, per-server `callTimeout`, the `opencli mcp` subcommand suite |
+| Update | `docs/architecture.md` — add `src/mcp/` to source tree; note MCP as a fourth tool surface; note `Tool.truncateOutput` flag; document `opencli mcp` subcommands |

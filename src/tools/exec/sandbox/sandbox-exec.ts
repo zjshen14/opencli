@@ -37,7 +37,7 @@ function buildAutoProfile(cwd: string): string {
 
 export class SandboxExecRunner implements SandboxRunner {
   readonly mode: SandboxMode;
-  readonly warning: string | null = null;
+  warning: string | null = null;
 
   private profilePath: string;
   private ready: Promise<void>;
@@ -48,23 +48,22 @@ export class SandboxExecRunner implements SandboxRunner {
     this.mode = mode === "strict" ? "auto" : mode;
     const effectiveMode = this.mode;
 
-    if (mode === "strict") {
-      process.stderr.write(
-        "[opencli] warn: strict mode not yet implemented; falling back to auto\n",
-      );
-    }
-
     this.profilePath = join("/tmp", `opencli-sandbox-${randomUUID()}.sb`);
 
-    this.ready = writeFile(this.profilePath, buildAutoProfile(cwd), { mode: 0o600 }).catch(
-      (err: unknown) => {
+    this.ready = writeFile(this.profilePath, buildAutoProfile(cwd), { mode: 0o600 })
+      .then(() => {
+        // Only emit the strict-mode warning when the runner will actually execute.
+        if (mode === "strict") {
+          process.stderr.write(
+            "[opencli] warn: strict mode not yet implemented; falling back to auto\n",
+          );
+        }
+      })
+      .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
-        this.fallback = new PassthroughRunner(
-          effectiveMode,
-          `sandbox-exec profile write failed (${msg}); running without isolation`,
-        );
-      },
-    );
+        this.warning = `sandbox-exec profile write failed (${msg}); running without isolation`;
+        this.fallback = new PassthroughRunner(effectiveMode, this.warning);
+      });
 
     process.on("exit", () => {
       unlink(this.profilePath).catch(() => {});

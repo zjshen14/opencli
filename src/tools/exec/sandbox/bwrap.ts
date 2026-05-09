@@ -45,12 +45,6 @@ export class BwrapRunner implements SandboxRunner {
     this.mode = mode === "strict" ? "auto" : mode;
     this.cwd = cwd;
 
-    if (mode === "strict") {
-      process.stderr.write(
-        "[opencli] warn: strict mode not yet implemented; falling back to auto\n",
-      );
-    }
-
     const bin = detectBwrap();
     if (!bin) {
       this.bwrapBin = "";
@@ -65,6 +59,13 @@ export class BwrapRunner implements SandboxRunner {
         "bwrap user namespaces are disabled on this system; running without sandbox isolation";
       this.fallback = new PassthroughRunner(this.mode, this.warning);
       return;
+    }
+
+    // Emit the strict-mode warning only when the runner will actually execute.
+    if (mode === "strict") {
+      process.stderr.write(
+        "[opencli] warn: strict mode not yet implemented; falling back to auto\n",
+      );
     }
 
     this.bwrapBin = bin;

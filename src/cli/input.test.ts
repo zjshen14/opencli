@@ -1,10 +1,26 @@
-import { describe, it, expect } from "vitest";
-import {
+import { describe, it, expect, afterEach, vi } from "vitest";
+import { rm } from "node:fs/promises";
+import { join } from "node:path";
+import os from "node:os";
+
+// Isolate history writes from the real ~/.opencli
+const tmpHome = join(os.tmpdir(), `opencli-input-test-${Date.now()}`);
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, default: { ...actual, homedir: () => tmpHome }, homedir: () => tmpHome };
+});
+
+// Import after mock so AGENT_DIR resolves to tmpHome.
+// All input.ts exports use the dynamic import to avoid static-import hoisting
+// (which would trigger homedir() before tmpHome is initialized).
+const {
+  loadHistory,
+  saveHistory,
   insertAtCursor,
   deleteBeforeCursor,
   deleteWordBeforeCursor,
   renderSelectOptions,
-} from "./input.js";
+} = await import("./input.js");
 
 describe("insertAtCursor", () => {
   it("appends when cursor is at end", () => {
@@ -125,5 +141,40 @@ describe("renderSelectOptions", () => {
     const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
     expect(strip(first).split("\n")[0]).toContain("›");
     expect(strip(last).split("\n")[2]).toContain("›");
+  });
+});
+
+describe("per-CWD history", () => {
+  afterEach(async () => {
+    await rm(tmpHome, { recursive: true, force: true });
+  });
+
+  it("loadHistory returns [] when no history file exists", async () => {
+    const history = await loadHistory("/some/new/project");
+    expect(history).toEqual([]);
+  });
+
+  it("saveHistory + loadHistory round-trips entries in the same CWD", async () => {
+    const cwd = "/project/alpha";
+    await saveHistory(["second", "first"], cwd);
+    const loaded = await loadHistory(cwd);
+    expect(loaded).toEqual(["second", "first"]);
+  });
+
+  it("histories for different CWDs are independent", async () => {
+    await saveHistory(["alpha-cmd"], "/project/alpha");
+    await saveHistory(["beta-cmd"], "/project/beta");
+    const alpha = await loadHistory("/project/alpha");
+    const beta = await loadHistory("/project/beta");
+    expect(alpha).toEqual(["alpha-cmd"]);
+    expect(beta).toEqual(["beta-cmd"]);
+  });
+
+  it("caps saved history at MAX_HISTORY (500) entries", async () => {
+    const cwd = "/project/cap";
+    const entries = Array.from({ length: 600 }, (_, i) => `cmd-${i}`);
+    await saveHistory(entries, cwd);
+    const loaded = await loadHistory(cwd);
+    expect(loaded.length).toBe(500);
   });
 });

@@ -4,6 +4,7 @@ import type { SkillRegistry } from "../skills/registry.js";
 import { loadSkillFile, processBody } from "../skills/loader.js";
 import { join } from "node:path";
 import { readLine, loadHistory, saveHistory, type SlashCommand } from "./input.js";
+import { expandMentions } from "./mentions.js";
 import { probeServer } from "./mcp-cmd.js";
 import { loadMcpConfig } from "../mcp/config.js";
 import { AGENT_DIR } from "../state/config.js";
@@ -44,7 +45,8 @@ export async function runRepl(
   }
   agent.setSessionTmpDir(session.tmpDir);
 
-  const history = await loadHistory();
+  const cwd = process.cwd();
+  const history = await loadHistory(cwd);
   const skillCommands: SlashCommand[] = skills
     .list()
     .map((s) => ({ name: s.name, description: s.description }));
@@ -56,14 +58,19 @@ export async function runRepl(
     // EOF (Ctrl+D)
     if (raw === null) break;
 
-    const input = raw.trim();
-    if (!input) continue;
+    const rawInput = raw.trim();
+    if (!rawInput) continue;
 
-    // Persist to history (skip duplicates at the top)
-    if (history[0] !== input) {
-      history.unshift(input);
+    // Persist original input to history (skip duplicates at the top)
+    if (history[0] !== rawInput) {
+      history.unshift(rawInput);
     }
-    void session.log({ type: "user", content: input });
+    void session.log({ type: "user", content: rawInput });
+
+    // Expand @file/@glob mentions before passing to agent or slash commands
+    const { expanded, warnings } = await expandMentions(rawInput, cwd);
+    for (const w of warnings) printInfo(w);
+    const input = expanded;
 
     // Built-in commands
     if (input === "/help") {
@@ -182,7 +189,7 @@ export async function runRepl(
     await runAgentTurn(agent, session, userMessage);
   }
 
-  await saveHistory(history);
+  await saveHistory(history, cwd);
   process.stdout.write(chalk.gray("Goodbye.\n"));
 }
 

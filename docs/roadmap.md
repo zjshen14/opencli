@@ -68,6 +68,24 @@ We commit to three positioning angles, in this order of weight:
 | **C4** | **Container sandbox option** | `--sandbox=docker` for users who want stronger isolation than A1 provides. |
 | **C5** | **Sub-agent dispatch** | Once B4 lands, a `task` tool that spawns child agents with their own context becomes straightforward. |
 
+## Phase D — Evaluation
+
+**Goal:** publish SWE-bench Verified numbers competitive with Claude Code and Codex, and ship a unique cross-provider parity benchmark that demonstrates Angle 1 is real.
+
+See [`docs/evaluation.md`](evaluation.md) for the full strategy, scoring rubric, and tooling decisions.
+
+| # | Milestone | Sequencing |
+|---|---|---|
+| **D0** | **Eval foundation** | Now — document current coverage; publish rubric |
+| **D1** | **Scenario suite + provider parity matrix** | Before Phase B — 20 tasks × N providers in CI; parity baseline must exist before B-work begins |
+| **D2** | **Contract evals** (sandbox, plan mode, HITL, headless schema) | Alongside A6 — all A-phase properties must be testable before A closes |
+| **D3** | **SWE-bench Verified harness** | After B5a — stable default config needed before publishing a number |
+| **D4** | **Custom cross-vendor routing benchmark** | After B5b — publishable artifact comparing single-vendor vs cross-vendor routing |
+
+**Sequencing decision: D1 before Phase B.** Provider parity must be baselined before multi-provider features are built. Without a D1 matrix, we can't distinguish B-work improvements from regressions.
+
+**D4 is research output, not a CI gate.** Runs once per B5b iteration; produces a publishable report demonstrating Angle 1's quantitative claim.
+
 ## Deferred (with rationale)
 
 | Item | Issue | Why deferred |
@@ -88,8 +106,9 @@ We commit to three positioning angles, in this order of weight:
 
 ## How this rolls out
 
-- Each milestone gets a tracking issue tagged `roadmap-A` / `roadmap-B` / `roadmap-C`.
+- Each milestone gets a tracking issue tagged `roadmap-A` / `roadmap-B` / `roadmap-C` / `roadmap-D`.
 - A GitHub Milestone per phase groups them; the milestone description links back to this doc.
+- Phase D evaluation milestones are detailed in [`docs/evaluation.md`](evaluation.md).
 - This doc is updated **whenever a phase boundary moves, an angle is re-prioritized, or a deferred item gets pulled forward** — not for routine progress (that lives in the issues).
 
 ## Decisions still open

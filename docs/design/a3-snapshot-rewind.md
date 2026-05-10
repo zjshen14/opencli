@@ -58,13 +58,36 @@ export class SnapshotManager {
   /** True if a snapshot has been captured and not yet consumed. */
   get hasSnapshot(): boolean;
 
-  /** True if git is available and the CWD is inside a git repo. Set by first capture(). */
+  /**
+   * True if git is available and the CWD is inside a git repo.
+   * **Defaults to `true` (optimistic)** before any `capture()` call — the initial
+   * state is "unknown, assume yes." Set to `false` only after a `capture()` failure.
+   * This means `/rewind` before any agent writes shows "no snapshot" (correct), and
+   * the "not in a git repo" message only appears after a write turn has probed git.
+   */
   get gitAvailable(): boolean;
 
   /**
+   * False when `OPENCLI_SNAPSHOT=off` is set. Distinct from `gitAvailable` —
+   * the snapshot may be administratively disabled even when git is available.
+   * The REPL checks this before `gitAvailable` to give an accurate message.
+   */
+  get snapshotEnabled(): boolean;
+
+  /**
+   * A human-readable warning produced by the most recent failed `capture()`.
+   * Consumed (set to null) on first read — the caller emits it once, then it clears.
+   * Null on success or before any capture.
+   *
+   * Mirrors the `SandboxRunner.warning` pattern from A1, adapted for per-turn
+   * rather than startup timing.
+   */
+  drainWarning(): string | null;
+
+  /**
    * The SHA of the most recently captured stash object.
-   * Remains set after a successful rewind — useful for manual recovery
-   * if the user wants to re-apply. Undefined before the first capture.
+   * Remains set after a successful rewind — useful for manual recovery.
+   * Undefined before the first successful capture.
    */
   readonly lastSnapshotSha?: string;
 }
@@ -74,9 +97,10 @@ export class SnapshotManager {
 
 ```typescript
 async capture(cwd: string): Promise<void> {
-  if (this._gitAvailable === false) return;  // permanently disabled this session
+  if (this._gitAvailable === false) return;  // already failed this session — do not retry
 
   // If OPENCLI_SNAPSHOT=off, skip entirely (matches OPENCLI_SANDBOX=off precedent).
+  // Note: _gitAvailable stays true — git may be present; the feature is just disabled.
   if (process.env.OPENCLI_SNAPSHOT === "off") return;
 
   try {
@@ -110,10 +134,24 @@ async capture(cwd: string): Promise<void> {
       this._lastSnapshotSha = sha;
     }
     // Empty stdout = clean tree; no snapshot needed.
-  } catch {
+  } catch (err) {
     // Not a git repo, git not installed, or two consecutive index.lock failures.
     this._gitAvailable = false;
+    this._pendingWarning = err instanceof Error ? err.message : "git snapshot unavailable";
   }
+}
+
+// snapshotEnabled reflects the env-var setting — does not require a capture() to be truthful.
+get snapshotEnabled(): boolean {
+  return process.env.OPENCLI_SNAPSHOT !== "off";
+}
+
+// Consumes and clears the pending warning. The CLI layer calls this after each
+// write-containing turn and emits the result if non-null (logged exactly once).
+drainWarning(): string | null {
+  const w = this._pendingWarning ?? null;
+  this._pendingWarning = undefined;
+  return w;
 }
 ```
 
@@ -204,8 +242,14 @@ Handler:
 
 ```typescript
 if (input === "/rewind") {
-  // Three distinct states require three distinct messages.
+  // Four distinct states, checked in this order:
+  if (!snapshotManager.snapshotEnabled) {
+    printInfo("Snapshot disabled (OPENCLI_SNAPSHOT=off).");
+    continue;
+  }
   if (!snapshotManager.gitAvailable) {
+    // gitAvailable is optimistically true before the first write turn;
+    // this branch fires only after a capture() has already tried and failed.
     printInfo("Rewind unavailable: not in a git repo, or git not installed.");
     continue;
   }
@@ -256,20 +300,25 @@ options?: {
 ```
 
 ```typescript
-// core/agent.ts — inside the run loop, after first write turn
-if (this.snapshotManager && !this.snapshotManager.gitAvailable) {
-  // gitAvailable transitions false after the first failed capture.
-  // Emit the warning exactly once via the CLI layer.
-}
-
+// core/agent.ts — inside the run loop, after executeCalls() returns
 const { results } = await executeCalls(pendingCalls, {
   ...existingDeps,
   snapshot: this.snapshotManager,
   cwd: process.cwd(),
 });
+
+// Drain and surface any snapshot warning produced this turn.
+// Agent yields it as an event; CLI layer logs it to stderr once and discards.
+const snapshotWarning = this.snapshotManager?.drainWarning();
+if (snapshotWarning) {
+  yield { type: "error", message: `[snapshot] ${snapshotWarning}` };
+}
 ```
 
-The REPL receives the same `snapshotManager` reference (passed as a constructor arg to `runRepl`) so `/rewind` calls it directly. The one-time "git unavailable" warning is emitted by the CLI layer by checking `snapshotManager.gitAvailable` after each agent turn that included writes.
+**Why this pattern, not a direct `process.stderr.write` in `agent.ts`:**
+`agent.ts` is in the `core/` layer which must never write to I/O directly (same rule as `SandboxRunner.warning` in A1). The `drainWarning()` method produces the message; the `AgentEvent { type: "error" }` stream carries it to the CLI renderer. `drainWarning()` clears the pending warning on first call, so the same warning is not repeated on subsequent turns. The `error` event type is already rendered in the REPL as a warning — no new event type needed.
+
+The REPL receives the same `snapshotManager` reference (passed as a constructor arg to `runRepl`) so `/rewind` calls it directly.
 
 ---
 
@@ -349,7 +398,8 @@ No changes to tool definitions, the skill system, or provider clients.
 | `executeCalls()`: write batch triggers `capture()` | `core/executor.test.ts` (add) | Executor hook fires |
 | `executeCalls()`: read-only batch does NOT trigger `capture()` | same | No spurious snapshots |
 | `executeCalls()`: `snapshot` absent → no error | same | Optional wiring safe |
-| `/rewind` REPL: `gitAvailable = false` → distinct "not in a git repo" message | `cli/repl.test.ts` (add) | Three-state messages (drives fix #4) |
+| `/rewind` REPL: `snapshotEnabled = false` → "disabled" message (not "no git") | `cli/repl.test.ts` (add) | `OPENCLI_SNAPSHOT=off` gives correct message |
+| `/rewind` REPL: `gitAvailable = false` → distinct "not in a git repo" message | same | Four-state messages |
 | `/rewind` REPL: `hasSnapshot = false` → "no writes" message | same | Guard message |
 | `/rewind` REPL: success → file list printed | same | User-facing output |
 | `/rewind` REPL: failure → SHA printed for manual recovery | same | Error guidance |
@@ -376,7 +426,7 @@ No change needed. In non-interactive mode there is no REPL, so `/rewind` is unre
 | Create | `src/state/snapshot.test.ts` |
 | Modify | `src/core/executor.ts` — add `snapshot?` and `cwd?` to `ExecutorDeps`; call `capture()` before write batch |
 | Modify | `src/core/executor.test.ts` — add snapshot hook tests |
-| Modify | `src/core/agent.ts` — add `snapshotManager?` to constructor options bag; thread snapshot + cwd into `ExecutorDeps`; emit gitAvailable warning to CLI layer |
-| Modify | `src/cli/repl.ts` — add `/rewind` to command list and three-state handler; accept `snapshotManager` param |
+| Modify | `src/core/agent.ts` — add `snapshotManager?` to constructor options bag; thread snapshot + cwd into `ExecutorDeps`; yield `{ type: "error" }` event from `drainWarning()` after each write turn |
+| Modify | `src/cli/repl.ts` — add `/rewind` to command list and four-state handler (`snapshotEnabled` → `gitAvailable` → `hasSnapshot` → rewind); accept `snapshotManager` param |
 | Modify | `src/cli/index.ts` — create `SnapshotManager`; pass via Agent options bag and to `runRepl` |
 | Update | `README.md` — document `/rewind`, `OPENCLI_SNAPSHOT=off`, known limitation (untracked files), minimum git 2.23 |

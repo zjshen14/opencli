@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { Command } from "commander";
 import { createClient, detectProvider } from "../providers/factory.js";
 import { Agent } from "../core/agent.js";

@@ -1,6 +1,6 @@
 # Design: A4 — @file mention expansion + per-CWD input history
 
-_Status: Ready for implementation. Tracking issue: [#88](https://github.com/zjshen14/opencli/issues/88). Phase: [Roadmap A4](../roadmap.md)._
+_Status: Implemented — merged in 3ee9367 (2026-05-10). Tracking issue: [#88](https://github.com/zjshen14/opencli/issues/88). Phase: [Roadmap A4](../roadmap.md)._
 
 ---
 

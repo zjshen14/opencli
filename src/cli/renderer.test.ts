@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   COMPACT_TOOLS,
+  MAX_EXPANDED_LINES,
   MarkdownStreamRenderer,
   toolStyle,
   formatToolArgs,
@@ -8,6 +9,7 @@ import {
   summariseResult,
   printToolCall,
   printToolResult,
+  printToolResultExpanded,
   printToolCallCompact,
   printToolResultCompact,
   printEditDiff,
@@ -416,11 +418,73 @@ describe("print functions write to stderr/stdout", () => {
     expect(stderrSpy).not.toHaveBeenCalled();
   });
 
-  it("printToolResult writes summary for bash", () => {
+  it("printToolResult writes compact summary for short bash output (≤5 lines)", () => {
     printToolResult("bash", "hello world");
     const output = stripAnsi(stderr());
     expect(output).toContain("✓");
     expect(output).toContain("hello world");
+  });
+
+  it("printToolResult renders expanded for long bash output (>5 lines)", () => {
+    const longOutput = Array.from({ length: 7 }, (_, i) => `line${i + 1}`).join("\n");
+    printToolResult("bash", longOutput);
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✓");
+    expect(output).toContain("7 lines");
+    expect(output).toContain("line1");
+    expect(output).toContain("line7");
+  });
+
+  it("printToolResult renders expanded with ✗ for error output", () => {
+    printToolResult("bash", "Error: command not found");
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✗");
+    expect(output).toContain("Error: command not found");
+    expect(output).not.toContain("✓");
+  });
+
+  it("printToolResult stays compact for exactly 5 lines", () => {
+    const fiveLines = Array.from({ length: 5 }, (_, i) => `line${i + 1}`).join("\n");
+    printToolResult("bash", fiveLines);
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✓");
+    expect(output).not.toContain("5 lines");
+  });
+
+  it("printToolResultExpanded shows ✗ for error results", () => {
+    printToolResultExpanded("bash", "Error: failed\ndetail line");
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✗");
+    expect(output).toContain("Error: failed");
+    expect(output).toContain("detail line");
+  });
+
+  it("printToolResultExpanded shows ✓ and line count for non-error results", () => {
+    const lines = Array.from({ length: 7 }, (_, i) => `line${i + 1}`).join("\n");
+    printToolResultExpanded("bash", lines);
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✓");
+    expect(output).toContain("7 lines");
+    expect(output).toContain("line1");
+    expect(output).toContain("line7");
+  });
+
+  it("printToolResultExpanded caps display at MAX_EXPANDED_LINES and shows overflow note", () => {
+    const lines = Array.from({ length: MAX_EXPANDED_LINES + 5 }, (_, i) => `line${i + 1}`).join(
+      "\n",
+    );
+    printToolResultExpanded("bash", lines);
+    const output = stripAnsi(stderr());
+    expect(output).toContain("more lines");
+    expect(output).not.toContain(`line${MAX_EXPANDED_LINES + 2}`);
+  });
+
+  it("printToolResultExpanded error caps body lines at MAX_EXPANDED_LINES", () => {
+    const bodyLines = Array.from({ length: MAX_EXPANDED_LINES + 3 }, (_, i) => `detail${i + 1}`);
+    const result = ["Error: top", ...bodyLines].join("\n");
+    printToolResultExpanded("bash", result);
+    const output = stripAnsi(stderr());
+    expect(output).toContain("more lines");
   });
 
   it("printToolCallCompact writes ○ line to stderr", () => {

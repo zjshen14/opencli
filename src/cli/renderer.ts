@@ -90,11 +90,54 @@ export function printToolCall(name: string, args: Record<string, unknown>): void
   process.stderr.write(box + "\n");
 }
 
-// Result line appended below the full box once execution completes
+export const MAX_EXPANDED_LINES = 20;
+
+// Result line appended below the full box once execution completes.
+// Dispatches to expanded rendering for long outputs (>5 lines) or errors.
 export function printToolResult(name: string, result: string): void {
   if (name === "edit") return; // edit results are shown as a diff instead
+  const trimmed = result.trim();
+  const isError = trimmed.startsWith("Error:");
+  const lineCount = trimmed ? trimmed.split("\n").length : 0;
+  if (isError || lineCount > 5) {
+    printToolResultExpanded(name, result);
+    return;
+  }
   const summary = summariseResult(name, result);
   process.stderr.write(chalk.dim(`  ✓ ${summary}`) + "\n");
+}
+
+// Expanded result display for long outputs (>5 lines) and errors.
+// Errors show ✗ in red; success shows ✓ with a line count header.
+export function printToolResultExpanded(name: string, result: string): void {
+  const trimmed = result.trim();
+  const isError = trimmed.startsWith("Error:");
+  const lines = trimmed ? trimmed.split("\n") : [];
+
+  if (isError) {
+    const errMsg = lines[0]?.slice(0, 80) ?? "Error";
+    process.stderr.write(chalk.red(`  ✗ ${name.padEnd(6)}${errMsg}`) + "\n");
+    const bodyLines = lines.slice(1, MAX_EXPANDED_LINES);
+    for (const line of bodyLines) {
+      process.stderr.write(chalk.dim(`     ${line}`) + "\n");
+    }
+    if (lines.length > MAX_EXPANDED_LINES) {
+      process.stderr.write(
+        chalk.dim(`     (${lines.length - MAX_EXPANDED_LINES} more lines)`) + "\n",
+      );
+    }
+  } else {
+    process.stderr.write(chalk.dim(`  ✓ ${name.padEnd(6)}(${lines.length} lines)`) + "\n");
+    const displayLines = lines.slice(0, MAX_EXPANDED_LINES);
+    for (const line of displayLines) {
+      process.stderr.write(chalk.dim(`     ${line}`) + "\n");
+    }
+    if (lines.length > MAX_EXPANDED_LINES) {
+      process.stderr.write(
+        chalk.dim(`     (${lines.length - MAX_EXPANDED_LINES} more lines)`) + "\n",
+      );
+    }
+  }
 }
 
 // Compact one-liner for read/glob/grep — printed when the call is issued

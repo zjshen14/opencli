@@ -12,6 +12,7 @@ async function initRepo(dir: string): Promise<void> {
   await execAsync("git init", { cwd: dir });
   await execAsync('git config user.email "test@test.com"', { cwd: dir });
   await execAsync('git config user.name "Test"', { cwd: dir });
+  await execAsync("git config commit.gpgsign false", { cwd: dir });
   await writeFile(join(dir, "file.txt"), "initial\n");
   await execAsync("git add .", { cwd: dir });
   await execAsync('git commit -m "init"', { cwd: dir });

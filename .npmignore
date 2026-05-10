@@ -1,0 +1,15 @@
+.github/
+.husky/
+docs/
+scripts/
+src/
+tests/
+tsconfig.json
+tsup.config.ts
+vitest.config.ts
+.env
+.prettierrc
+eslint.config.ts
+AGENTS.md
+CLAUDE.md
+PUBLISHING.md

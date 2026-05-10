@@ -5,6 +5,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import type { ContextManager } from "./context.js";
 import type { ObservabilityHandler } from "./observability.js";
+import type { SnapshotManager } from "../state/snapshot.js";
 
 // Output truncation is controlled by Tool.truncateOutput.
 // read is excluded — it supports offset/limit pagination and agents rely on
@@ -27,6 +28,8 @@ export interface ExecutorDeps {
   readOnly?: boolean;
   confirmFn?: ConfirmFn;
   obs?: ObservabilityHandler;
+  snapshot?: SnapshotManager;
+  cwd?: string;
 }
 
 export function truncateOutput(output: string, callId: string, tmpDir?: string): string {
@@ -148,6 +151,10 @@ export async function executeCalls(
   // parallel for speed.
   let results: FunctionResultPart[];
   if (toolCalls.some((c) => !deps.tools.get(c.name)?.readonly)) {
+    // Snapshot before any writes — capture is idempotent on clean trees and
+    // swallows its own errors internally so it never blocks execution.
+    await deps.snapshot?.capture(deps.cwd ?? process.cwd());
+
     results = [];
     for (const call of toolCalls) {
       results.push(await executeOneCall(call, deps));

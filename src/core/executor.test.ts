@@ -496,3 +496,53 @@ describe("truncateOutput", () => {
     expect(result.length).toBeLessThan(input.length);
   });
 });
+
+describe("snapshot hook", () => {
+  function makeSnapshot() {
+    return { capture: vi.fn(async () => {}), drainWarning: vi.fn(() => null) };
+  }
+
+  it("calls capture() before executing a write-tool batch", async () => {
+    const registry = makeToolRegistry("write", "ok");
+    // write tool is NOT readonly
+    const snapshot = makeSnapshot();
+    await executeCalls([makeToolCall("write")], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      snapshot: snapshot as never,
+    });
+    expect(snapshot.capture).toHaveBeenCalledOnce();
+  });
+
+  it("does NOT call capture() for a read-only tool batch", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "read",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      readonly: true,
+      execute: async () => ({ success: true, output: "data" }),
+    });
+    const snapshot = makeSnapshot();
+    await executeCalls([makeToolCall("read")], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      snapshot: snapshot as never,
+    });
+    expect(snapshot.capture).not.toHaveBeenCalled();
+  });
+
+  it("does not throw when snapshot is absent from deps", async () => {
+    const registry = makeToolRegistry("write", "ok");
+    await expect(
+      executeCalls([makeToolCall("write")], {
+        tools: registry,
+        skills: makeSkillRegistry({}),
+        context: new ContextManager(),
+        // snapshot intentionally omitted
+      }),
+    ).resolves.toBeDefined();
+  });
+});

@@ -69,7 +69,7 @@ Invoke with `/skill-name [args]` or let the model auto-activate based on your re
 | `/test [target]` | Write tests for a function or module |
 | `/commit` | Draft and create a git commit from staged changes |
 
-**Built-in commands:** `/help`, `/clear`, `/exit`
+**Built-in commands:** `/help`, `/plan <task>`, `/rewind`, `/clear`, `/exit`
 
 ### Adding your own skills
 
@@ -145,6 +145,7 @@ Environment variables take precedence over config file:
 | `ANTHROPIC_API_KEY` | Anthropic API key |
 | `OPENCLI_MODEL` | Model override (beats `--model` and config) |
 | `OPENCLI_SANDBOX` | Sandbox mode override: `auto` \| `strict` \| `off` |
+| `OPENCLI_SNAPSHOT` | Set to `off` to disable git snapshot/rewind |
 
 ## Sandbox isolation
 
@@ -175,6 +176,19 @@ OPENCLI_SANDBOX=off opencli chat
 # Config file (~/.opencli/config.json)
 opencli config  # shows current config; edit sandbox field manually
 ```
+
+## Snapshot & rewind
+
+Before the agent writes any file, OpenCLI automatically takes a git snapshot of the current working tree. If the agent makes changes you want to undo, run `/rewind` in the REPL to restore all files to their pre-write state.
+
+```
+/rewind    # restore working tree to the state before this session's writes
+```
+
+- Requires git ≥ 2.23 and a git repository in the project directory.
+- Only tracked files are covered; **untracked files created by the agent are not removed** by `/rewind` (use `git clean -f` manually for those).
+- Staged changes (index) are not touched — only the working tree is restored.
+- Set `OPENCLI_SNAPSHOT=off` to disable the feature entirely.
 
 ## MCP servers
 

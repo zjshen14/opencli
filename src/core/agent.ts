@@ -23,6 +23,9 @@ const STUCK_THRESHOLD = 3;
 
 export type AgentRunMode = "react" | "plan";
 
+const COMPACTION_SYSTEM =
+  "You are a conversation summarizer. Summarize the key decisions, files changed, errors encountered, and current state from this conversation. Be concise — under 200 words. Preserve file paths and function names exactly.";
+
 export class Agent {
   private context: ContextManager;
   private confirmFn?: ConfirmFn;
@@ -41,9 +44,14 @@ export class Agent {
       model?: string;
       onObservability?: ObservabilityHandler;
       snapshotManager?: SnapshotManager;
+      compactionEnabled?: boolean;
     },
   ) {
-    this.context = new ContextManager(systemInstruction, maxHistoryMessages);
+    this.context = new ContextManager(
+      systemInstruction,
+      maxHistoryMessages,
+      options?.compactionEnabled ?? false,
+    );
     this.context.setSkillCatalog(skills.catalogSummary());
     this.model = options?.model ?? "";
     this.obs = options?.onObservability;
@@ -96,6 +104,10 @@ export class Agent {
     while (true) {
       const pendingCalls: FunctionCallPart[] = [];
       let responseText = "";
+
+      if (this.context.needsCompaction()) {
+        await this.compact();
+      }
 
       const messages = this.context.getMessages();
       const estimatedTokens = Math.round(
@@ -237,5 +249,25 @@ export class Agent {
 
   clearHistory(): void {
     this.context.clear();
+  }
+
+  private async compact(): Promise<void> {
+    const compactable = this.context.getCompactableMessages();
+    if (compactable.length === 0) return;
+
+    let summary = "";
+    for await (const event of this.client.stream(compactable, COMPACTION_SYSTEM, [])) {
+      if (event.type === "text") summary += event.text;
+    }
+    if (!summary.trim()) return;
+
+    const summaryMessage: Message = {
+      role: "user",
+      parts: [{ type: "text", text: `[Session summary — earlier context compacted]\n${summary}` }],
+    };
+    this.context.replaceWithSummary(summaryMessage);
+    process.stderr.write(
+      `[opencli] context compacted: ${compactable.length} messages → 1 summary\n`,
+    );
   }
 }

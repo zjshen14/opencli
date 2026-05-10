@@ -169,6 +169,66 @@ describe("Agent plan mode", () => {
   });
 });
 
+describe("Agent compaction", () => {
+  it("calls the LLM to summarize when compaction is triggered", async () => {
+    let compactionCallMessages: Message[] = [];
+
+    const client: LLMClient = {
+      async *stream(messages: Message[], sys: string, _tools: ToolDefinition[]) {
+        if (sys.includes("summarizer")) {
+          // This is the compaction call
+          compactionCallMessages = messages;
+          yield { type: "text", text: "Summary of work done." } as StreamEvent;
+          yield { type: "done" } as StreamEvent;
+        } else {
+          yield { type: "text", text: "done" } as StreamEvent;
+          yield { type: "done" } as StreamEvent;
+        }
+      },
+    };
+
+    // maxHistoryMessages=5, threshold=floor(5*0.8)=4 messages
+    const agent = new Agent(client, makeNoopRegistry(), new SkillRegistry(), undefined, 5, 10, {
+      compactionEnabled: true,
+    });
+
+    // Add 4 messages to the context manually by running 4 separate prompts
+    // Each run adds 1 user + 1 model message = 2 messages, so 2 runs → 4 messages
+    for (const prompt of ["task one", "task two"]) {
+      for await (const _e of agent.run(prompt)) void _e;
+    }
+
+    // On the 3rd run, the first thing the agent does is check needsCompaction()
+    // History now has 4 messages (2 user + 2 model), threshold is 4 → compaction fires
+    for await (const _e of agent.run("task three")) void _e;
+
+    expect(compactionCallMessages.length).toBeGreaterThan(0);
+  });
+
+  it("does not compact when compaction is disabled (default)", async () => {
+    let compactionCalled = false;
+
+    const client: LLMClient = {
+      async *stream(_messages: Message[], sys: string, _tools: ToolDefinition[]) {
+        if (sys.includes("summarizer")) {
+          compactionCalled = true;
+        }
+        yield { type: "text", text: "done" } as StreamEvent;
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+
+    // maxHistoryMessages=5, no compaction option
+    const agent = new Agent(client, makeNoopRegistry(), new SkillRegistry(), undefined, 5, 10);
+
+    for (const prompt of ["task one", "task two", "task three"]) {
+      for await (const _e of agent.run(prompt)) void _e;
+    }
+
+    expect(compactionCalled).toBe(false);
+  });
+});
+
 describe("Agent stuck-loop detection", () => {
   it("emits an error after 3 identical consecutive tool calls", async () => {
     const agent = new Agent(

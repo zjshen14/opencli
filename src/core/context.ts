@@ -1,6 +1,11 @@
 import type { Message, ToolDefinition } from "../providers/types.js";
 import { DEFAULT_SYSTEM_INSTRUCTION, getGitContext, renderSystemInstruction } from "./prompt.js";
 
+// Fraction of maxHistoryMessages at which compaction is triggered (80%)
+const COMPACTION_THRESHOLD = 0.8;
+// Fraction of maxHistoryMessages to retain as recent tail after compaction (40%)
+const COMPACTION_TAIL_FRACTION = 0.4;
+
 export class ContextManager {
   private history: Message[] = [];
   private skillContent: string[] = []; // activated skill bodies, never pruned
@@ -10,12 +15,15 @@ export class ContextManager {
   private cachedSystemInstruction: string | null = null;
   private cachedToolSignature: string | null = null;
   private skillCatalog = "";
+  private readonly compactionEnabled: boolean;
 
   constructor(
     private readonly systemInstructionTemplate = DEFAULT_SYSTEM_INSTRUCTION,
     maxHistoryMessages = 50,
+    compactionEnabled = false,
   ) {
     this.maxHistoryMessages = maxHistoryMessages;
+    this.compactionEnabled = compactionEnabled;
   }
 
   setSessionTmpDir(dir: string): void {
@@ -89,6 +97,28 @@ export class ContextManager {
     this.activatedSkills.clear();
     this.cachedSystemInstruction = null;
     this.cachedToolSignature = null;
+  }
+
+  /** Returns true when the history is at or past the soft compaction threshold. */
+  needsCompaction(): boolean {
+    if (!this.compactionEnabled) return false;
+    return this.history.length >= Math.floor(this.maxHistoryMessages * COMPACTION_THRESHOLD);
+  }
+
+  /**
+   * Returns the older "head" messages to be summarized.
+   * The most recent tail (40% of maxHistoryMessages) is kept verbatim.
+   */
+  getCompactableMessages(): Message[] {
+    const tailSize = Math.max(1, Math.floor(this.maxHistoryMessages * COMPACTION_TAIL_FRACTION));
+    return this.history.slice(0, Math.max(0, this.history.length - tailSize));
+  }
+
+  /** Replaces the compactable head with a single summary message, keeping the tail. */
+  replaceWithSummary(summaryMessage: Message): void {
+    const tailSize = Math.max(1, Math.floor(this.maxHistoryMessages * COMPACTION_TAIL_FRACTION));
+    const tail = this.history.slice(-tailSize);
+    this.history = [summaryMessage, ...tail];
   }
 
   private prune(): void {

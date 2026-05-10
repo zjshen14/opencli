@@ -303,6 +303,62 @@ describe("ContextManager", () => {
   });
 });
 
+describe("ContextManager compaction", () => {
+  it("needsCompaction() returns false by default (compaction disabled)", () => {
+    const ctx = new ContextManager(STUB, 10);
+    for (let i = 0; i < 9; i++) ctx.addMessage(userMsg(`msg ${i}`));
+    expect(ctx.needsCompaction()).toBe(false);
+  });
+
+  it("needsCompaction() returns false below threshold when enabled", () => {
+    const ctx = new ContextManager(STUB, 10, true);
+    // threshold = floor(10 * 0.8) = 8; add 7 messages
+    for (let i = 0; i < 7; i++) ctx.addMessage(userMsg(`msg ${i}`));
+    expect(ctx.needsCompaction()).toBe(false);
+  });
+
+  it("needsCompaction() returns true at threshold when enabled", () => {
+    const ctx = new ContextManager(STUB, 10, true);
+    // threshold = floor(10 * 0.8) = 8
+    for (let i = 0; i < 8; i++) ctx.addMessage(userMsg(`msg ${i}`));
+    expect(ctx.needsCompaction()).toBe(true);
+  });
+
+  it("getCompactableMessages() returns older messages, keeping tail", () => {
+    const ctx = new ContextManager(STUB, 10, true);
+    // tailSize = max(1, floor(10 * 0.4)) = 4
+    for (let i = 0; i < 10; i++) ctx.addMessage(userMsg(`msg ${i}`));
+    const compactable = ctx.getCompactableMessages();
+    // 10 total - 4 tail = 6 compactable
+    expect(compactable).toHaveLength(6);
+    expect((compactable[0].parts[0] as { type: string; text: string }).text).toBe("msg 0");
+    expect((compactable[5].parts[0] as { type: string; text: string }).text).toBe("msg 5");
+  });
+
+  it("replaceWithSummary() replaces old messages with summary + tail", () => {
+    const ctx = new ContextManager(STUB, 10, true);
+    // tailSize = max(1, floor(10 * 0.4)) = 4
+    for (let i = 0; i < 10; i++) ctx.addMessage(userMsg(`msg ${i}`));
+    const summary = userMsg("[Session summary — earlier context compacted]\nDid some work.");
+    ctx.replaceWithSummary(summary);
+    const msgs = ctx.getMessages();
+    // summary + 4 tail messages = 5
+    expect(msgs).toHaveLength(5);
+    expect((msgs[0].parts[0] as { type: string; text: string }).text).toContain("compacted");
+    expect((msgs[1].parts[0] as { type: string; text: string }).text).toBe("msg 6");
+    expect((msgs[4].parts[0] as { type: string; text: string }).text).toBe("msg 9");
+  });
+
+  it("needsCompaction() returns false after replaceWithSummary reduces history", () => {
+    const ctx = new ContextManager(STUB, 10, true);
+    for (let i = 0; i < 8; i++) ctx.addMessage(userMsg(`msg ${i}`));
+    expect(ctx.needsCompaction()).toBe(true);
+    ctx.replaceWithSummary(userMsg("[Session summary]\nDone."));
+    // After compaction: 1 summary + 4 tail = 5 messages — below threshold of 8
+    expect(ctx.needsCompaction()).toBe(false);
+  });
+});
+
 describe("DEFAULT_SYSTEM_INSTRUCTION", () => {
   it("contains all required placeholders", () => {
     expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("{CWD}");

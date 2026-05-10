@@ -40,6 +40,10 @@ program
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
   .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
   .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
+  .option(
+    "--compaction",
+    "Enable context compaction: summarize old messages via LLM instead of dropping them",
+  )
   .action(async (opts) => {
     const sessionId = opts.session ?? (opts.resume ? "latest" : undefined);
     await startChat(
@@ -50,6 +54,7 @@ program
       opts.sandbox as string | undefined,
       opts.provider as string | undefined,
       opts.baseUrl as string | undefined,
+      opts.compaction as boolean | undefined,
     );
   });
 
@@ -167,6 +172,7 @@ async function startChat(
   sandboxFlag?: string,
   providerOverride?: string,
   baseUrlOverride?: string,
+  compaction?: boolean,
 ): Promise<void> {
   const { agent, skills, mcpManager, snapshotManager } = await createAgent(
     modelOverride,
@@ -175,6 +181,7 @@ async function startChat(
     sandboxFlag,
     providerOverride,
     baseUrlOverride,
+    compaction,
   );
 
   const cleanup = async () => {
@@ -292,6 +299,7 @@ async function createAgent(
   sandboxFlag?: string,
   providerOverride?: string,
   baseUrlOverride?: string,
+  compaction?: boolean,
 ) {
   const config = await loadConfig();
   const model = process.env.OPENCLI_MODEL ?? modelOverride ?? config.model;
@@ -331,6 +339,7 @@ async function createAgent(
     model,
     onObservability: debug ? makeDebugHandler() : undefined,
     snapshotManager,
+    compactionEnabled: compaction,
   });
   return { agent, skills, mcpManager, snapshotManager };
 }

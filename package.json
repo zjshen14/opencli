@@ -14,8 +14,21 @@
     "ai",
     "agent",
     "gemini",
-    "claude"
+    "claude",
+    "anthropic",
+    "coding-agent",
+    "ai-agent",
+    "llm",
+    "developer-tools",
+    "code-review",
+    "terminal",
+    "agentic",
+    "model-agnostic",
+    "openai",
+    "mcp",
+    "model-context-protocol"
   ],
+  "homepage": "https://github.com/zjshen14/opencli#readme",
   "author": "Zhijie Shen",
   "license": "MIT",
   "repository": {

@@ -1,60 +1,95 @@
-# OpenCLI
+<div align="center">
 
-A lightweight, open-source AI agent CLI that supports Google Gemini and Anthropic Claude models. Interact via natural-language prompts to perform developer tasks (code review, explanations, debugging, testing, and file operations) with explicit, auditable tool execution and safety checks.
+# 🤖 OpenCLI
 
-> **Status**: Early prototype. Architecture spec in [`docs/architecture.md`](docs/architecture.md). Strategic direction in [`docs/roadmap.md`](docs/roadmap.md).
+**An open-source, model-agnostic AI coding agent for your terminal**
 
-## Installation
+Works with Google Gemini · Anthropic Claude · Any OpenAI-compatible provider
 
-```bash
-npm install
-```
+[![npm version](https://img.shields.io/npm/v/@zjshen/opencli)](https://www.npmjs.com/package/@zjshen/opencli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/zjshen14/opencli/actions/workflows/ci.yml/badge.svg)](https://github.com/zjshen14/opencli/actions)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D20.6-green.svg)](https://nodejs.org)
 
-## Setup
+[Quick Start](#quick-start) · [Features](#features) · [Why OpenCLI?](#why-opencli) · [Skills](#skills) · [Contributing](CONTRIBUTING.md)
 
-**Gemini** — set your API key in `.env`:
+</div>
 
-```bash
-echo "GEMINI_API_KEY=your-key-here" > .env
-```
+---
 
-**Claude (Anthropic)** — set your API key in `.env`:
+<!-- TODO: Replace with actual demo recording (use asciinema or VHS) -->
+<!-- <div align="center">
+  <img src="docs/assets/demo.gif" alt="OpenCLI demo" width="800">
+</div> -->
 
-```bash
-echo "ANTHROPIC_API_KEY=your-key-here" > .env
-```
-
-Or configure permanently:
+## Quick Start
 
 ```bash
-npm run dev -- config --api-key your-gemini-key
-npm run dev -- config --anthropic-api-key your-anthropic-key
+# Install globally
+npm install -g @zjshen/opencli
+
+# Set your API key
+export GEMINI_API_KEY="your-key-here"
+# or
+export ANTHROPIC_API_KEY="your-key-here"
+
+# Start the interactive REPL
+opencli
 ```
+
+Or try it instantly with `npx`:
+
+```bash
+npx @zjshen/opencli
+```
+
+## Features
+
+- 🔀 **Model-agnostic** — Switch between Gemini, Claude, or any OpenAI-compatible provider with a flag
+- 🛡️ **Sandboxed execution** — OS-level isolation for shell commands (macOS `sandbox-exec`, Linux `bwrap`)
+- 🧩 **Extensible skills** — Compatible with the [Agent Skills open standard](https://agentskills.io) (works with Claude Code & Gemini CLI skills)
+- 📋 **Plan mode** — Review and approve changes before they're applied (`/plan <task>`)
+- 🔍 **Auditable tool use** — Every file read, write, and shell command is explicit and confirmable
+- 💬 **Session management** — Resume conversations across sessions
+- ⚡ **Lightweight** — No heavy framework, just `npm install` and go
+
+## Why OpenCLI?
+
+| | OpenCLI | Claude Code | Gemini CLI | Aider |
+|---|:---:|:---:|:---:|:---:|
+| **Model-agnostic** | ✅ Any provider | ❌ Claude only | ❌ Gemini only | ✅ Multiple |
+| **Open source** | ✅ MIT | ❌ Proprietary | ✅ Apache-2.0 | ✅ Apache-2.0 |
+| **Sandboxed execution** | ✅ OS-level | ❌ | ❌ | ❌ |
+| **Extensible skills** | ✅ Agent Skills | ✅ Slash commands | ✅ Agent Skills | ❌ |
+| **Plan → Review → Execute** | ✅ | ✅ | ❌ | ❌ |
+| **Lightweight (zero config)** | ✅ | ✅ | ✅ | ⚠️ Git required |
 
 ## Usage
 
 **Interactive REPL:**
 ```bash
+opencli
+# or
 npm run dev
 ```
 
 **One-shot prompt:**
 ```bash
-npm run dev run "explain src/agent/core.ts"
+opencli run "explain src/core/agent.ts"
 ```
 
 **Select a model:**
 ```bash
 # Gemini (default)
-npm run dev -- chat --model gemini-3.1-pro-preview
+opencli chat --model gemini-3.1-pro-preview
 
 # Claude
-npm run dev -- chat --model claude-sonnet-4-6
+opencli chat --model claude-sonnet-4-6
 ```
 
 **Set default model:**
 ```bash
-npm run dev -- config --model claude-sonnet-4-6
+opencli config --model claude-sonnet-4-6
 ```
 
 ## Skills
@@ -71,7 +106,7 @@ Invoke with `/skill-name [args]` or let the model auto-activate based on your re
 
 **Built-in commands:** `/help`, `/clear`, `/exit`
 
-### Adding your own skills
+### Adding Your Own Skills
 
 Project-scoped (this repo only):
 ```bash
@@ -113,17 +148,6 @@ Skills follow the [Agent Skills open standard](https://agentskills.io) and are c
 | `grep` | Regex search across file contents |
 | `bash` | Run shell commands (blocks destructive patterns) |
 
-## Development
-
-```bash
-npm run dev          # Run with tsx (auto-loads .env)
-npm run build        # Bundle with tsup → dist/
-npm run typecheck    # TypeScript type check
-npm run lint         # ESLint
-npm run lint:fix     # ESLint with auto-fix
-npm test             # Vitest
-```
-
 ## Configuration
 
 Config is stored at `~/.opencli/config.json`.
@@ -146,81 +170,29 @@ Environment variables take precedence over config file:
 | `OPENCLI_MODEL` | Model override (beats `--model` and config) |
 | `OPENCLI_SANDBOX` | Sandbox mode override: `auto` \| `strict` \| `off` |
 
-## Sandbox isolation
+## Sandbox Isolation
 
 The `bash` tool runs inside an OS-level sandbox by default (`--sandbox auto`):
 
-- **macOS** — uses `sandbox-exec` (built-in, no install required). Network access is denied; writes outside the project root and `/tmp` are denied. Note: `sandbox-exec` is deprecated by Apple as of macOS 11 but remains functional through macOS 15. Container mode (planned for Phase C4) will be the production-grade alternative.
-- **Linux** — uses `bwrap` (bubblewrap) via user namespaces. Same isolation contract. Falls back to passthrough with a warning if `bwrap` is not installed or user namespaces are disabled.
+- **macOS** — uses `sandbox-exec` (built-in, no install required). Network access is denied; writes outside the project root and `/tmp` are denied.
+- **Linux** — uses `bwrap` (bubblewrap) via user namespaces. Same isolation contract. Falls back to passthrough with a warning if `bwrap` is not installed.
 - **Windows / other** — no native sandbox; runs without isolation with a warning.
-
-### Sandbox modes
 
 | Mode | Behaviour |
 |------|-----------|
 | `auto` (default) | Network denied; writes allowed only inside CWD and `/tmp` |
-| `strict` | Stub in A1 — falls back to `auto` with a warning. Full read-isolation planned for a future release. |
-| `off` | No sandbox; bit-identical to pre-sandbox behaviour |
-
-### Configuring the sandbox
+| `strict` | Falls back to `auto` with a warning (full isolation planned) |
+| `off` | No sandbox |
 
 ```bash
-# CLI flag (takes highest precedence)
+# CLI flag
 opencli chat --sandbox off
-opencli run --sandbox auto "list files"
 
 # Environment variable
 OPENCLI_SANDBOX=off opencli chat
 
-# Config file (~/.opencli/config.json)
-opencli config  # shows current config; edit sandbox field manually
-```
-
-## MCP servers
-
-OpenCLI can connect to any [Model Context Protocol](https://modelcontextprotocol.io) server and expose its tools to the agent as `mcp__<server>__<tool>`.
-
-### Managing servers
-
-```bash
-opencli mcp add                            # interactive wizard
-opencli mcp add myserver npx -y @myco/mcp-server  # one-shot (stdio)
-opencli mcp add api --transport http --url http://localhost:3000/mcp  # HTTP
-opencli mcp list                           # list configured servers with live status
-opencli mcp test myserver                  # probe connection and list tools
-opencli mcp remove myserver                # remove a server
-```
-
-### Configuration format (`~/.opencli/mcp.json`)
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-      "callTimeout": 30000
-    },
-    "api": {
-      "transport": "http",
-      "url": "http://localhost:3000/mcp",
-      "headers": { "Authorization": "Bearer ${API_TOKEN}" }
-    }
-  }
-}
-```
-
-- **`${VAR}`** in `command`, `args`, `url`, and `headers` is expanded from environment variables at startup. Unset variables expand to `""` with a warning.
-- **`callTimeout`** (milliseconds, per-server) overrides the global default of 60 000 ms.
-- Tool names are prefixed as `mcp__<server>__<tool>`. Non-alphanumeric characters in server names (except `-`) are replaced with `_`.
-- All MCP tool calls require HITL confirmation. The confirmation dialog offers extra choices: allow this tool with any args (`t`), or allow all tools from this server (`s`).
-
-### In-session management
-
-```
-/mcp              # list configured servers
-/mcp test <name>  # probe a server inline
+# Config file
+opencli config  # shows current config
 ```
 
 ## Architecture
@@ -232,3 +204,21 @@ CLI Layer  →  Agent Core  →  LLM Provider (Gemini / Claude)
                   ↓
           Tool System  |  Skill System  |  State
 ```
+
+## Development
+
+```bash
+npm run dev          # Run with tsx (auto-loads .env)
+npm run build        # Bundle with tsup → dist/
+npm run typecheck    # TypeScript type check
+npm run lint         # ESLint
+npm run lint:fix     # ESLint with auto-fix
+npm run format       # Prettier
+npm test             # Vitest
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
+
+## License
+
+[MIT](LICENSE) © Zhijie Shen

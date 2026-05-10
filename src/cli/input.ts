@@ -28,12 +28,16 @@ export interface SlashCommand {
 
 // ── History persistence ───────────────────────────────────────────────────────
 
-const HISTORY_FILE = join(AGENT_DIR, "history");
+const HISTORY_DIR = join(AGENT_DIR, "history");
 const MAX_HISTORY = 500;
 
-export async function loadHistory(): Promise<string[]> {
+function historyFile(cwd: string): string {
+  return join(HISTORY_DIR, Buffer.from(cwd).toString("base64url"));
+}
+
+export async function loadHistory(cwd: string): Promise<string[]> {
   try {
-    const raw = await readFile(HISTORY_FILE, "utf8");
+    const raw = await readFile(historyFile(cwd), "utf8");
     return raw
       .split("\n")
       .map((l) => l.trim())
@@ -44,12 +48,12 @@ export async function loadHistory(): Promise<string[]> {
   }
 }
 
-export async function saveHistory(history: string[]): Promise<void> {
+export async function saveHistory(history: string[], cwd: string): Promise<void> {
   try {
-    await mkdir(AGENT_DIR, { recursive: true });
+    await mkdir(HISTORY_DIR, { recursive: true });
     // Write oldest-first, cap at MAX_HISTORY
     const lines = [...history].reverse().slice(-MAX_HISTORY).join("\n") + "\n";
-    await writeFile(HISTORY_FILE, lines, "utf8");
+    await writeFile(historyFile(cwd), lines, "utf8");
   } catch {
     // Non-fatal — history just won't persist
   }

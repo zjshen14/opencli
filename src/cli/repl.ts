@@ -4,6 +4,7 @@ import type { SkillRegistry } from "../skills/registry.js";
 import { loadSkillFile, processBody } from "../skills/loader.js";
 import { join } from "node:path";
 import { readLine, loadHistory, saveHistory, type SlashCommand } from "./input.js";
+import { expandMentions } from "./mentions.js";
 import { Session } from "../state/session.js";
 import {
   COMPACT_TOOLS,
@@ -43,8 +44,10 @@ export async function runRepl(
   }
   agent.setSessionTmpDir(session.tmpDir);
 
+  const cwd = process.cwd();
+
   // Load persisted history and build the command list for the popup
-  const history = await loadHistory();
+  const history = await loadHistory(cwd);
   const skillCommands: SlashCommand[] = skills
     .list()
     .map((s) => ({ name: s.name, description: s.description }));
@@ -99,6 +102,9 @@ export async function runRepl(
       userMessage = args || `Please follow the ${entry.name} skill instructions.`;
     }
 
+    // Expand @file mentions before sending to the LLM
+    const expandedMessage = await expandMentions(userMessage, cwd);
+
     // Run the agent loop
     const spinner = createSpinner("Thinking…");
     spinner.start();
@@ -108,7 +114,7 @@ export async function runRepl(
 
     try {
       let assistantText = "";
-      for await (const event of agent.run(userMessage)) {
+      for await (const event of agent.run(expandedMessage)) {
         switch (event.type) {
           case "text":
             if (firstToken) {
@@ -179,7 +185,7 @@ export async function runRepl(
     }
   }
 
-  await saveHistory(history);
+  await saveHistory(history, cwd);
   process.stdout.write(chalk.gray("Goodbye.\n"));
 }
 

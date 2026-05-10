@@ -145,4 +145,100 @@ describe("loadMcpConfig", () => {
     const result = await loadMcpConfig(dir);
     expect(result!.mcpServers["fast"].callTimeout).toBe(5000);
   });
+
+  it("expands ${VAR} in stdio command and args", async () => {
+    process.env["MCP_BIN"] = "/usr/local/bin/mcp";
+    process.env["MCP_FLAG"] = "--port=3000";
+    await writeFile(
+      join(dir, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          srv: {
+            transport: "stdio",
+            command: "${MCP_BIN}",
+            args: ["${MCP_FLAG}", "static"],
+          },
+        },
+      }),
+      "utf8",
+    );
+    const result = await loadMcpConfig(dir);
+    const srv = result!.mcpServers["srv"] as { command: string; args: string[] };
+    expect(srv.command).toBe("/usr/local/bin/mcp");
+    expect(srv.args).toEqual(["--port=3000", "static"]);
+    delete process.env["MCP_BIN"];
+    delete process.env["MCP_FLAG"];
+  });
+
+  it("expands ${VAR} in http url", async () => {
+    process.env["MCP_API_BASE"] = "https://api.example.com";
+    await writeFile(
+      join(dir, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          api: { transport: "http", url: "${MCP_API_BASE}/mcp" },
+        },
+      }),
+      "utf8",
+    );
+    const result = await loadMcpConfig(dir);
+    const api = result!.mcpServers["api"] as { url: string };
+    expect(api.url).toBe("https://api.example.com/mcp");
+    delete process.env["MCP_API_BASE"];
+  });
+
+  it("skips stdio server with missing command and warns", async () => {
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await writeFile(
+      join(dir, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          bad: { transport: "stdio" },
+          good: { transport: "stdio", command: "echo" },
+        },
+      }),
+      "utf8",
+    );
+    const result = await loadMcpConfig(dir);
+    expect(result!.mcpServers["bad"]).toBeUndefined();
+    expect(result!.mcpServers["good"]).toBeDefined();
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("missing required 'command'"));
+    spy.mockRestore();
+  });
+
+  it("skips http server with missing url and warns", async () => {
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await writeFile(
+      join(dir, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          bad: { transport: "http" },
+          good: { transport: "http", url: "http://localhost:3000" },
+        },
+      }),
+      "utf8",
+    );
+    const result = await loadMcpConfig(dir);
+    expect(result!.mcpServers["bad"]).toBeUndefined();
+    expect(result!.mcpServers["good"]).toBeDefined();
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("missing required 'url'"));
+    spy.mockRestore();
+  });
+
+  it("ignores non-numeric callTimeout and warns", async () => {
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    await writeFile(
+      join(dir, "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          srv: { transport: "stdio", command: "echo", callTimeout: "30000" },
+        },
+      }),
+      "utf8",
+    );
+    const result = await loadMcpConfig(dir);
+    expect(result!.mcpServers["srv"].callTimeout).toBeUndefined();
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("callTimeout"));
+    spy.mockRestore();
+  });
 });

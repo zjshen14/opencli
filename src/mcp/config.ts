@@ -27,18 +27,21 @@ function expandEnvVars(value: string, context: string): string {
 
 function expandServerConfig(name: string, config: McpServerConfig): McpServerConfig {
   if (config.transport === "http") {
+    const url = expandEnvVars(config.url, name);
     const headers = config.headers
       ? Object.fromEntries(
           Object.entries(config.headers).map(([k, v]) => [k, expandEnvVars(v, name)]),
         )
       : undefined;
-    return { ...config, headers };
+    return { ...config, url, headers };
   }
-  // stdio: expand env values
+  // stdio: expand command, args, and env values
+  const command = expandEnvVars(config.command, name);
+  const args = config.args?.map((a) => expandEnvVars(a, name));
   const env = config.env
     ? Object.fromEntries(Object.entries(config.env).map(([k, v]) => [k, expandEnvVars(v, name)]))
     : undefined;
-  return { ...config, env };
+  return { ...config, command, args, env };
 }
 
 export async function loadMcpConfig(agentDir: string): Promise<McpConfig | null> {
@@ -78,21 +81,37 @@ export async function loadMcpConfig(agentDir: string): Promise<McpConfig | null>
     // Default absent transport to "stdio" for Claude Desktop compat
     const transport = (server.transport as string | undefined) ?? "stdio";
 
+    if (server.callTimeout !== undefined && typeof server.callTimeout !== "number") {
+      process.stderr.write(
+        `[mcp] warn: server '${name}': 'callTimeout' must be a number; ignoring\n`,
+      );
+      server.callTimeout = undefined;
+    }
+    const callTimeout = server.callTimeout as number | undefined;
+
     let config: McpServerConfig;
     if (transport === "http") {
+      if (typeof server.url !== "string" || !server.url) {
+        process.stderr.write(`[mcp] warn: server '${name}' missing required 'url'; skipping\n`);
+        continue;
+      }
       config = {
         transport: "http",
-        url: server.url as string,
+        url: server.url,
         headers: server.headers as Record<string, string> | undefined,
-        callTimeout: server.callTimeout as number | undefined,
+        callTimeout,
       };
     } else {
+      if (typeof server.command !== "string" || !server.command) {
+        process.stderr.write(`[mcp] warn: server '${name}' missing required 'command'; skipping\n`);
+        continue;
+      }
       config = {
         transport: "stdio",
-        command: server.command as string,
+        command: server.command,
         args: server.args as string[] | undefined,
         env: server.env as Record<string, string> | undefined,
-        callTimeout: server.callTimeout as number | undefined,
+        callTimeout,
       };
     }
 

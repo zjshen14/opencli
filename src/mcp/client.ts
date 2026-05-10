@@ -40,7 +40,16 @@ export class McpClient {
       });
     }
     this.sdkClient = new Client({ name: "opencli", version: "0.1.0" });
-    await this.sdkClient.connect(transport);
+    try {
+      await this.sdkClient.connect(transport);
+    } catch (err) {
+      try {
+        await transport.close();
+      } catch {
+        // ignore close errors; the connect error is what matters
+      }
+      throw err;
+    }
   }
 
   async listTools(): Promise<McpToolInfo[]> {

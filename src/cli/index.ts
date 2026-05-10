@@ -185,8 +185,9 @@ async function startChat(
     process.exit(0);
   };
 
-  // SIGTERM from the OS (e.g. docker stop, systemd) also needs cleanup
+  // SIGTERM / SIGINT (signal-driven exit) also need graceful cleanup
   process.once("SIGTERM", () => void onExit());
+  process.once("SIGINT", () => void onExit());
 
   await runRepl(agent, skills, resumeSessionId, onExit);
   await cleanup(); // normal exit (Ctrl+D or /exit)
@@ -231,6 +232,14 @@ async function runSingle(
     return text;
   };
 
+  const sigCleanup = async () => {
+    await mcpManager.disconnectAll();
+    process.exit(0);
+  };
+  const sigHandler = () => void sigCleanup();
+  process.once("SIGINT", sigHandler);
+  process.once("SIGTERM", sigHandler);
+
   try {
     if (planMode) {
       const planText = await stream(prompt, "plan");
@@ -245,6 +254,8 @@ async function runSingle(
       await stream(prompt, "react");
     }
   } finally {
+    process.off("SIGINT", sigHandler);
+    process.off("SIGTERM", sigHandler);
     await mcpManager.disconnectAll();
   }
 }

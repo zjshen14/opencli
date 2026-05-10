@@ -48,7 +48,8 @@ export async function createConfirmFn(): Promise<ConfirmFn> {
     const toolWildcard = `${toolName}:*`;
 
     // Derive MCP server wildcard from name like mcp__<server>__<tool>
-    const mcpMatch = toolName.match(/^mcp__([^_][^_]*)__/);
+    // Use lazy .+? so server names containing _ (e.g. my_server) match correctly.
+    const mcpMatch = toolName.match(/^mcp__(.+?)__/);
     const serverWildcard = mcpMatch ? `mcp__${mcpMatch[1]}__*` : null;
 
     const isAllowed = (key: string) => globalAllowSet.has(key) || projectAllowSet.has(key);

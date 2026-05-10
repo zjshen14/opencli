@@ -1,6 +1,6 @@
 # Design: A2 — MCP client
 
-_Status: Ready for implementation. Tracking issue: [#81](https://github.com/zjshen14/opencli/issues/81). Phase: [Roadmap A2](../roadmap.md)._
+_Status: Implemented — merged in cbe9f49 (2026-05-09). Tracking issue: [#81](https://github.com/zjshen14/opencli/issues/81). Phase: [Roadmap A2](../roadmap.md)._
 
 _Revision history:_
 - _2026-05-09 — incorporated technical review (async shutdown, output truncation flag, error-handling pattern, name-sanitisation moved to manager, hard collision error, `${VAR}`-only expansion, indexed-name fragility, per-server timeout in config)._

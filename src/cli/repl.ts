@@ -12,11 +12,13 @@ import { printSkillActivated, printError, printInfo } from "./renderer.js";
 import { createConfirmFn } from "./confirm.js";
 import { runAgentTurn } from "./runner.js";
 import { runPlanFlow } from "./plan.js";
+import type { SnapshotManager } from "../state/snapshot.js";
 
 // Built-in slash commands (always available)
 const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: "help", description: "list available skills and commands" },
   { name: "plan", description: "explore and draft a plan, then approve before executing" },
+  { name: "rewind", description: "undo agent file changes since last snapshot" },
   { name: "clear", description: "clear conversation history" },
   { name: "exit", description: "exit the agent" },
 ];
@@ -26,6 +28,7 @@ export async function runRepl(
   skills: SkillRegistry,
   resumeSessionId?: string,
   onExit?: () => Promise<void>,
+  snapshotManager?: SnapshotManager,
 ): Promise<void> {
   agent.setConfirmFn(await createConfirmFn());
   printInfo(`OpenCLI — type /help for commands, Ctrl+C to exit\n`);
@@ -84,6 +87,37 @@ export async function runRepl(
         continue;
       }
       await runPlanFlow(agent, session, planPrompt);
+      continue;
+    }
+
+    // /rewind — restore working tree to pre-write snapshot
+    if (input === "/rewind") {
+      if (snapshotManager && !snapshotManager.snapshotEnabled) {
+        printInfo("Snapshot disabled (OPENCLI_SNAPSHOT=off).");
+      } else if (snapshotManager && !snapshotManager.gitAvailable) {
+        printInfo("Rewind unavailable: not in a git repo, or git not installed.");
+      } else if (!snapshotManager || !snapshotManager.hasSnapshot) {
+        printInfo("No snapshot — no writes have happened this session.");
+      } else {
+        const result = await snapshotManager.rewind();
+        if (result.ok) {
+          if (result.restoredFiles.length === 0) {
+            printInfo("Working tree already matches snapshot — nothing to restore.");
+          } else {
+            printInfo(`Rewound ${result.restoredFiles.length} file(s):`);
+            for (const f of result.restoredFiles) {
+              process.stderr.write(`  ${f}\n`);
+            }
+          }
+        } else {
+          printError(`Rewind failed: ${result.error}`);
+          if (snapshotManager.lastSnapshotSha) {
+            printError(
+              `To recover manually: git restore --source ${snapshotManager.lastSnapshotSha} --worktree .`,
+            );
+          }
+        }
+      }
       continue;
     }
 

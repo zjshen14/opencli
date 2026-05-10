@@ -8,6 +8,7 @@ import type { ConfirmFn } from "./executor.js";
 import { buildReminder, buildPlanSuffix } from "./prompt.js";
 import type { FunctionCallPart, Message } from "../providers/types.js";
 import type { ObservabilityHandler } from "./observability.js";
+import type { SnapshotManager } from "../state/snapshot.js";
 
 export type AgentEvent =
   | { type: "text"; text: string }
@@ -27,6 +28,7 @@ export class Agent {
   private confirmFn?: ConfirmFn;
   private model: string;
   private obs?: ObservabilityHandler;
+  private snapshotManager?: SnapshotManager;
 
   constructor(
     private client: LLMClient,
@@ -35,12 +37,17 @@ export class Agent {
     systemInstruction?: string,
     maxHistoryMessages?: number,
     private maxTurns: number = DEFAULT_MAX_TURNS,
-    options?: { model?: string; onObservability?: ObservabilityHandler },
+    options?: {
+      model?: string;
+      onObservability?: ObservabilityHandler;
+      snapshotManager?: SnapshotManager;
+    },
   ) {
     this.context = new ContextManager(systemInstruction, maxHistoryMessages);
     this.context.setSkillCatalog(skills.catalogSummary());
     this.model = options?.model ?? "";
     this.obs = options?.onObservability;
+    this.snapshotManager = options?.snapshotManager;
   }
 
   setConfirmFn(fn: ConfirmFn): void {
@@ -186,7 +193,16 @@ export class Agent {
         readOnly: mode === "plan",
         confirmFn: this.confirmFn,
         obs: this.obs,
+        snapshot: this.snapshotManager,
+        cwd: process.cwd(),
       });
+
+      // Surface any snapshot warning produced this turn as an error event.
+      // drainWarning() clears it so it is only emitted once per failure.
+      const snapshotWarning = this.snapshotManager?.drainWarning();
+      if (snapshotWarning) {
+        yield { type: "error", message: `[snapshot] ${snapshotWarning}` };
+      }
 
       // Append an event-driven reminder to the last tool result based on what
       // tools just ran — fires only when relevant (e.g. edit → "run tests").

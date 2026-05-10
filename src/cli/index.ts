@@ -17,6 +17,7 @@ import type { Config } from "../state/config.js";
 import { loadMcpConfig } from "../mcp/config.js";
 import { McpManager } from "../mcp/manager.js";
 import { registerMcpCommand } from "./mcp-cmd.js";
+import { SnapshotManager } from "../state/snapshot.js";
 
 const program = new Command();
 
@@ -167,7 +168,7 @@ async function startChat(
   providerOverride?: string,
   baseUrlOverride?: string,
 ): Promise<void> {
-  const { agent, skills, mcpManager } = await createAgent(
+  const { agent, skills, mcpManager, snapshotManager } = await createAgent(
     modelOverride,
     maxTurns,
     debug,
@@ -190,7 +191,7 @@ async function startChat(
   process.once("SIGTERM", () => void onExit());
   process.once("SIGINT", () => void onExit());
 
-  await runRepl(agent, skills, resumeSessionId, onExit);
+  await runRepl(agent, skills, resumeSessionId, onExit, snapshotManager);
   await cleanup(); // normal exit (Ctrl+D or /exit)
 }
 
@@ -323,10 +324,13 @@ async function createAgent(
   const skills = new SkillRegistry();
   await skills.discover();
 
+  const snapshotManager = new SnapshotManager();
+
   const systemInstruction = await loadSystemInstruction();
   const agent = new Agent(client, tools, skills, systemInstruction, config.historySize, maxTurns, {
     model,
     onObservability: debug ? makeDebugHandler() : undefined,
+    snapshotManager,
   });
-  return { agent, skills, mcpManager };
+  return { agent, skills, mcpManager, snapshotManager };
 }

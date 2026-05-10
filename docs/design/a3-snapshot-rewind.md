@@ -1,6 +1,6 @@
 # Design: A3 — Git-snapshot rewind
 
-_Status: Ready for implementation. Tracking issue: [#87](https://github.com/zjshen14/opencli/issues/87). Phase: [Roadmap A3](../roadmap.md)._
+_Status: Implemented — merged in 4b3cec3 (2026-05-10). Tracking issue: [#87](https://github.com/zjshen14/opencli/issues/87). Phase: [Roadmap A3](../roadmap.md)._
 
 ---
 

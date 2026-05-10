@@ -65,12 +65,14 @@ export async function runRepl(
     if (history[0] !== rawInput) {
       history.unshift(rawInput);
     }
-    void session.log({ type: "user", content: rawInput });
 
     // Expand @file/@glob mentions before passing to agent or slash commands
     const { expanded, warnings } = await expandMentions(rawInput, cwd);
     for (const w of warnings) printInfo(w);
     const input = expanded;
+
+    // Log expanded content so resumed sessions restore the same context the agent saw
+    void session.log({ type: "user", content: input });
 
     // Built-in commands
     if (input === "/help") {

@@ -291,6 +291,10 @@ src/tools/
     fetch.ts       web_fetch — HTTP GET with content extraction.
 ```
 
+#### `Tool.truncateOutput`
+
+Tools that can return arbitrarily large output (`bash`, `grep`, `glob`, MCP tools) set `truncateOutput: true`. The executor reads this flag and applies middle-truncation (capped at `OPENCLI_MAX_TOOL_OUTPUT`, default 20 000 chars) before feeding the result back to the LLM. Tools that must not truncate (e.g. `read`, `write`) leave the flag absent.
+
 #### Sandbox layer
 
 The sandbox layer wraps every `bash` execution with OS-level isolation. It is layered *after* the HITL confirmation gate — both layers must pass before a command runs.
@@ -422,7 +426,62 @@ Activated skill content is tagged `<skill_content name="...">` and prepended (ne
 
 ---
 
-### 6. State — `src/state/`
+### 6. MCP — `src/mcp/`
+
+The MCP layer connects OpenCLI to external tool servers via the [Model Context Protocol](https://modelcontextprotocol.io). It bridges external tools into the `ToolRegistry` as first-class `Tool` objects, transparent to the agent core.
+
+**Key files:**
+
+```
+src/mcp/
+  types.ts      McpStdioServer, McpHttpServer, McpServerConfig, McpConfig,
+                McpToolInfo — shared types; no SDK imports.
+  config.ts     loadMcpConfig(agentDir) — reads ~/.opencli/mcp.json; expands
+                ${VAR} (braced-only) in command/args/url/headers; defaults absent
+                transport to "stdio"; returns null on absent or malformed file.
+  client.ts     McpClient — wraps @modelcontextprotocol/sdk Client.
+                connect() uses StdioClientTransport or StreamableHTTPClientTransport.
+                callTool() enforces per-server callTimeout (default 60 000 ms) via
+                AbortController; catches AbortError and returns success:false.
+  adapter.ts    mcpToolToTool(client, sanitisedServerName, info) — bridges one MCP
+                tool into a Tool with name mcp__<server>__<tool>, truncateOutput:true,
+                requiresConfirmation:()=>true, readonly:false.
+  manager.ts    McpManager.create(config) — connects all configured servers in
+                parallel, detects post-sanitisation name collisions, logs failures
+                without blocking other servers. registerTools(registry) calls
+                listTools() per server (isolated failure) and registers adapters.
+                disconnectAll() closes all live clients.
+  index.ts      Re-exports all public types and classes.
+```
+
+#### Tool naming and sanitisation
+
+Server names are sanitised by replacing any character that is not `[a-zA-Z0-9_-]` with `_`. If two server names map to the same sanitised form, the second is skipped and a warning is emitted. Tool names become `mcp__<sanitisedServer>__<toolName>`.
+
+#### HITL confirmation for MCP tools
+
+All MCP tools require confirmation. The confirm dialog in the REPL shows two extra choices for MCP tools:
+- `t` — allow this specific tool (any args) for the rest of the project session
+- `s` — allow all tools from this server for the rest of the project session
+
+Both choices persist to `.opencli/settings.json` as a wildcard entry (`mcp__server__tool:*` or `mcp__server__*`).
+
+#### Layer constraints
+
+`src/mcp/` may import from `providers/types` (for shared types) but must never import from `cli/`, `state/`, `core/`, or `tools/`. API keys and the agent dir are passed in from the CLI layer.
+
+#### `opencli mcp` subcommands
+
+```bash
+opencli mcp add [name] [command [args...]]   # add/update a server
+opencli mcp list [--no-probe]                # list servers (probes by default)
+opencli mcp test <name>                      # probe one server
+opencli mcp remove <name> [-y]               # remove a server
+```
+
+---
+
+### 7. State — `src/state/`
 
 **Key files:**
 
@@ -550,6 +609,7 @@ User: /plan refactor auth module
 | `src/core/` | `providers/`, `tools/`, `skills/` | `cli/`, `state/` |
 | `src/providers/` | `providers/` only | `cli/`, `core/`, `tools/`, `skills/`, `state/` |
 | `src/tools/` | `providers/types` | `cli/`, `core/`, `providers/` (non-types), `state/` |
+| `src/mcp/` | `providers/types`, `@modelcontextprotocol/sdk` | `cli/`, `core/`, `tools/`, `state/` |
 | `src/skills/` | Node builtins | `cli/`, `core/`, `providers/`, `tools/`, `state/` |
 | `src/state/` | Node builtins, `providers/factory` (for Provider type) | `cli/`, `core/` |
 

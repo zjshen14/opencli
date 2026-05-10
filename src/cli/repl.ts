@@ -7,6 +7,9 @@ import type { SkillRegistry } from "../skills/registry.js";
 import { loadSkillFile, processBody } from "../skills/loader.js";
 import { join } from "node:path";
 import { readLine, selectKey, loadHistory, saveHistory, type SlashCommand } from "./input.js";
+import { probeServer } from "./mcp-cmd.js";
+import { loadMcpConfig } from "../mcp/config.js";
+import { AGENT_DIR } from "../state/config.js";
 import type { ConfirmFn } from "../core/executor.js";
 import { loadConfig, saveConfig } from "../state/config.js";
 import { loadSettings, saveSettings } from "../state/settings.js";
@@ -41,8 +44,23 @@ export async function createConfirmFn(): Promise<ConfirmFn> {
   return async (toolName, args) => {
     if (!process.stdin.isTTY) return "deny";
 
-    const key = `${toolName}:${JSON.stringify(args)}`;
-    if (globalAllowSet.has(key) || projectAllowSet.has(key)) return "allow";
+    const exactKey = `${toolName}:${JSON.stringify(args)}`;
+    const toolWildcard = `${toolName}:*`;
+
+    // Derive MCP server wildcard from name like mcp__<server>__<tool>
+    // Use lazy .+? so server names containing _ (e.g. my_server) match correctly.
+    const mcpMatch = toolName.match(/^mcp__(.+?)__/);
+    const serverWildcard = mcpMatch ? `mcp__${mcpMatch[1]}__*` : null;
+
+    const isAllowed = (key: string) => globalAllowSet.has(key) || projectAllowSet.has(key);
+
+    if (
+      isAllowed(exactKey) ||
+      isAllowed(toolWildcard) ||
+      (serverWildcard && isAllowed(serverWildcard))
+    ) {
+      return "allow";
+    }
 
     const detail =
       toolName === "bash"
@@ -54,22 +72,38 @@ export async function createConfirmFn(): Promise<ConfirmFn> {
     process.stderr.write(chalk.yellow(`\n  ⚠  ${toolName} requires confirmation\n`));
     process.stderr.write(chalk.dim(`     ${detail}\n`));
 
-    const choice = await selectKey(`Allow ${toolName}?`, [
+    const isMcp = toolName.startsWith("mcp__");
+    const options: Array<{ key: string; label: string }> = [
       { key: "y", label: "Yes, run once" },
       { key: "p", label: "Yes, always for this project  (.opencli/settings.json)" },
       { key: "g", label: "Yes, always globally          (~/.opencli/config.json)" },
-      { key: "n", label: "No, skip" },
-    ]);
+    ];
+    if (isMcp) {
+      options.push({ key: "t", label: `Yes, always for this tool, any args  (project)` });
+      options.push({
+        key: "s",
+        label: `Yes, always for any tool from '${mcpMatch![1]}'  (project)`,
+      });
+    }
+    options.push({ key: "n", label: "No, skip" });
+
+    const choice = await selectKey(`Allow ${toolName}?`, options);
 
     if (choice === null || choice === "n") return "deny";
 
     if (choice === "p") {
-      projectAllowSet.add(key);
+      projectAllowSet.add(exactKey);
       await saveSettings({ permissions: { allow: [...projectAllowSet] } });
     } else if (choice === "g") {
-      globalAllowSet.add(key);
+      globalAllowSet.add(exactKey);
       const cfg = await loadConfig();
       await saveConfig({ permissions: { ...cfg.permissions, allow: [...globalAllowSet] } });
+    } else if (choice === "t") {
+      projectAllowSet.add(toolWildcard);
+      await saveSettings({ permissions: { allow: [...projectAllowSet] } });
+    } else if (choice === "s" && serverWildcard) {
+      projectAllowSet.add(serverWildcard);
+      await saveSettings({ permissions: { allow: [...projectAllowSet] } });
     }
 
     return "allow";
@@ -80,6 +114,7 @@ export async function runRepl(
   agent: Agent,
   skills: SkillRegistry,
   resumeSessionId?: string,
+  onExit?: () => Promise<void>,
 ): Promise<void> {
   agent.setConfirmFn(await createConfirmFn());
   printInfo(`OpenCLI — type /help for commands, Ctrl+C to exit\n`);
@@ -103,7 +138,7 @@ export async function runRepl(
   const allCommands = [...BUILTIN_COMMANDS, ...skillCommands];
 
   while (true) {
-    const raw = await readLine(history, allCommands);
+    const raw = await readLine(history, allCommands, { onExit });
 
     // EOF (Ctrl+D)
     if (raw === null) break;
@@ -162,6 +197,44 @@ export async function runRepl(
         `I have approved the following plan. Execute it step by step, checking off each item as you complete it:\n\n${finalPlan}`,
         "react",
       );
+      continue;
+    }
+
+    // /mcp — quick MCP management from within the REPL
+    if (input === "/mcp" || input.startsWith("/mcp ")) {
+      const subArg = input.slice(4).trim();
+      if (!subArg || subArg === "list") {
+        const config = await loadMcpConfig(AGENT_DIR);
+        if (!config || Object.keys(config.mcpServers).length === 0) {
+          printInfo("No MCP servers configured. Run `opencli mcp add` to add one.\n");
+        } else {
+          for (const [name, cfg] of Object.entries(config.mcpServers)) {
+            process.stderr.write(chalk.bold(name) + chalk.dim(` [${cfg.transport}]`) + "\n");
+          }
+        }
+      } else if (subArg.startsWith("test ")) {
+        const serverName = subArg.slice(5).trim();
+        const config = await loadMcpConfig(AGENT_DIR);
+        const serverConfig = config?.mcpServers[serverName];
+        if (!serverConfig) {
+          printError(`No server named '${serverName}' in mcp.json.`);
+        } else {
+          process.stderr.write(`[mcp] connecting to ${serverName}...\n`);
+          const probe = await probeServer(serverName, serverConfig);
+          if (probe.ok) {
+            process.stderr.write(
+              chalk.green(`[mcp] ✓ ok — ${probe.tools!.length} tools in ${probe.latencyMs}ms\n`),
+            );
+            for (const t of probe.tools!) {
+              process.stderr.write(`       • ${t}\n`);
+            }
+          } else {
+            printError(`[mcp] ✗ ${probe.error}`);
+          }
+        }
+      } else {
+        printError(`Unknown /mcp subcommand. Use /mcp or /mcp test <name>.`);
+      }
       continue;
     }
 

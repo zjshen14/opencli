@@ -248,6 +248,7 @@ describe("executeCalls", () => {
       name: "bash",
       description: "",
       parameters: { type: "object", properties: {} },
+      truncateOutput: true,
       execute: async () => ({ success: true, output: big }),
     });
 

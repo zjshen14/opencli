@@ -43,6 +43,7 @@ const SAFE_COMMANDS = [
 export function createBashTool(runner: SandboxRunner): Tool {
   return {
     name: "bash",
+    truncateOutput: true,
     description:
       "Execute a shell command and return its output. Avoid destructive operations. Commands timeout after 30 seconds.",
     parameters: {

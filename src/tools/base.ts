@@ -19,4 +19,6 @@ export interface Tool {
   requiresConfirmation?: (args: Record<string, unknown>) => boolean;
   /** Return an error message string if params are invalid, or null if valid. */
   validate?: (params: Record<string, unknown>) => string | null;
+  /** When true, the executor middle-truncates output that exceeds MAX_TOOL_OUTPUT. */
+  truncateOutput?: boolean;
 }

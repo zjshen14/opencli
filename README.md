@@ -17,10 +17,9 @@ Works with Google Gemini · Anthropic Claude · Any OpenAI-compatible provider
 
 ---
 
-<!-- TODO: Replace with actual demo recording (use asciinema or VHS) -->
-<!-- <div align="center">
+<div align="center">
   <img src="docs/assets/demo.gif" alt="OpenCLI demo" width="800">
-</div> -->
+</div>
 
 ## Quick Start
 

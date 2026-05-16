@@ -3,11 +3,13 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import type { Scenario } from "./scenarios.js";
 
 const DIST_ENTRY = join(fileURLToPath(import.meta.url), "../../../dist/index.js");
 const FIXTURES_DIR = join(fileURLToPath(import.meta.url), "../fixtures");
+
+const AGENT_TIMEOUT_MS = 120_000;
 const MAX_RETRIES = 2;
 
 export const CLI_BUILT = existsSync(DIST_ENTRY);
@@ -33,6 +35,40 @@ export async function runScenario(
     if (attempt === MAX_RETRIES) return { result, score: "fail" };
   }
   throw new Error("unreachable");
+}
+
+/** Spawn a process and capture stdout, resolving when it exits or the signal fires. */
+function spawnAsync(
+  cmd: string,
+  args: string[],
+  opts: { cwd: string; env: NodeJS.ProcessEnv; signal: AbortSignal },
+): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean }> {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: opts.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+
+    let timedOut = false;
+    const onAbort = () => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      // Give it 5 s to exit cleanly, then SIGKILL
+      setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
+    };
+    opts.signal.addEventListener("abort", onAbort, { once: true });
+
+    child.once("close", (code) => {
+      opts.signal.removeEventListener("abort", onAbort);
+      resolve({ stdout, stderr, exitCode: code ?? -1, timedOut });
+    });
+  });
 }
 
 export async function runScenarioOnce(scenario: Scenario, model: string): Promise<RunResult> {
@@ -67,18 +103,17 @@ export async function runScenarioOnce(scenario: Scenario, model: string): Promis
     ];
     if (!scenario.sandbox) cliArgs.push("--sandbox", "off");
 
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS);
+
     const start = Date.now();
-    const proc = spawnSync("node", cliArgs, {
+    const proc = await spawnAsync("node", cliArgs, {
       cwd: tmpDir,
       env: process.env,
-      timeout: 120_000,
-      maxBuffer: 4 * 1024 * 1024,
+      signal: controller.signal,
     });
+    clearTimeout(timer);
     const durationMs = Date.now() - start;
-
-    const output = proc.stdout?.toString() ?? "";
-    const exitCode = proc.status ?? -1;
-    const timedOut = proc.signal === "SIGTERM";
 
     let typeErrors: string | null = null;
     const expectedFiles = Object.keys(scenario.expected.files ?? {});
@@ -105,7 +140,14 @@ export async function runScenarioOnce(scenario: Scenario, model: string): Promis
       }
     }
 
-    return { output, files, typeErrors, exitCode, timedOut, durationMs };
+    return {
+      output: proc.stdout,
+      files,
+      typeErrors,
+      exitCode: proc.exitCode,
+      timedOut: proc.timedOut,
+      durationMs,
+    };
   } finally {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => undefined);
   }

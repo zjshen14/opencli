@@ -48,7 +48,7 @@ if (!existsSync(DIST_ENTRY)) {
 
     describe.each(providers)("provider: $label ($model)", ({ label, model }) => {
       describe.each(scenarios)("$id", (scenario) => {
-        it(scenario.description, { timeout: 130_000 }, async () => {
+        it(scenario.description, { timeout: 400_000 }, async () => {
           const { result, score } = await runScenario(scenario, model);
           const { reason } = scoreScenario(scenario, result);
           matrix[scenario.id] ??= {};

@@ -9,11 +9,19 @@ export class AnthropicClient implements LLMClient {
   private client: Anthropic;
   private model: string;
   private maxTokens: number;
+  private temperature: number | undefined;
 
-  constructor(apiKey: string, model: string, maxTokens = DEFAULT_MAX_TOKENS, baseUrl?: string) {
+  constructor(
+    apiKey: string,
+    model: string,
+    maxTokens = DEFAULT_MAX_TOKENS,
+    baseUrl?: string,
+    temperature?: number,
+  ) {
     this.client = new Anthropic({ apiKey, ...(baseUrl ? { baseURL: baseUrl } : {}) });
     this.model = model;
     this.maxTokens = maxTokens;
+    this.temperature = temperature;
   }
 
   async *stream(
@@ -44,6 +52,7 @@ export class AnthropicClient implements LLMClient {
       system: systemInstruction,
       messages: anthropicMessages,
       tools: anthropicTools.length > 0 ? anthropicTools : undefined,
+      ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
     });
 
     let currentToolId = "";

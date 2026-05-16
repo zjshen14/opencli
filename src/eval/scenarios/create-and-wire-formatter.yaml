@@ -1,0 +1,12 @@
+id: create-and-wire-formatter
+category: multi-file
+description: Create formatter.ts and import it from task.impl.ts
+prompt: "Create src/formatter.ts with a format(value: number): string function that formats numbers with two decimal places. Then import and use format() in src/task.impl.ts."
+fixture: multi-file
+expected:
+  files:
+    src/formatter.ts:
+      exists: true
+      contains: "format"
+    src/task.impl.ts:
+      contains: "formatter"

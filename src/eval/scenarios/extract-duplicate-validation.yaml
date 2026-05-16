@@ -1,0 +1,9 @@
+id: extract-duplicate-validation
+category: refactor
+description: Extract repeated type-guard blocks into assertNumber()
+prompt: "src/utils.ts has two identical validation blocks that check if an array element is a number. Extract the duplicated logic into a helper function called assertNumber and call it from both places."
+fixture: mini-ts-partial
+expected:
+  files:
+    src/utils.ts:
+      contains: "assertNumber"

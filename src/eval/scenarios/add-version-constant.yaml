@@ -1,0 +1,11 @@
+id: add-version-constant
+category: feature-add
+description: Export a VERSION constant from utils.ts
+prompt: "Add an exported VERSION constant set to '1.0.0' in src/utils.ts."
+fixture: mini-ts-partial
+expected:
+  files:
+    src/utils.ts:
+      contains:
+        - "VERSION"
+        - "'1.0.0'"

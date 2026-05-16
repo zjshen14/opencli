@@ -1,0 +1,9 @@
+id: fix-missing-return
+category: bug-fix
+description: Fix createTask() branch that falls off without returning
+prompt: "createTask() in src/task.ts has a branch that runs console.error but doesn't return anything for invalid input. Fix it to return null."
+fixture: mini-ts-bugs
+expected:
+  files:
+    src/task.ts:
+      contains: "return null"

@@ -1,0 +1,10 @@
+id: fix-null-guard
+category: bug-fix
+description: Fix sum() crashing on empty array
+prompt: "src/utils.ts sum() crashes when called with an empty array. Fix it so it returns 0."
+fixture: mini-ts-bugs
+expected:
+  files:
+    src/utils.ts:
+      contains: ", 0)"
+      notContains: "arr.reduce((a, b) => a + b)"

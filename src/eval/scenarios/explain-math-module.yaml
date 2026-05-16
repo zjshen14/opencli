@@ -1,0 +1,8 @@
+id: explain-math-module
+category: read-explain
+sandbox: auto
+description: Describe exports of math.ts
+prompt: "Describe what src/math.ts exports and what each function does."
+fixture: mini-ts
+expected:
+  outputKeywords: ["add", "subtract", "multiply"]

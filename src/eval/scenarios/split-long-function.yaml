@@ -1,0 +1,9 @@
+id: split-long-function
+category: refactor
+description: Split processTask() into validateTask() + executeTask()
+prompt: "processTask() in src/task.ts is too long. Split it into validateTask() (handles validation) and executeTask() (handles execution), and have processTask() call both in sequence."
+fixture: mini-ts-partial
+expected:
+  files:
+    src/task.ts:
+      contains: ["validateTask", "executeTask"]

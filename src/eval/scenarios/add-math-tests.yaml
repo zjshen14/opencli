@@ -1,0 +1,10 @@
+id: add-math-tests
+category: multi-file
+description: Write a test file for math.ts
+prompt: "Write tests for all functions in src/math.ts. Save them to src/math.test.ts. Test at least one happy-path and one edge case per function."
+fixture: multi-file
+expected:
+  files:
+    src/math.test.ts:
+      exists: true
+      contains: ["add", "subtract", "multiply"]

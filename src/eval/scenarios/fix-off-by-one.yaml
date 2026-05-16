@@ -1,0 +1,11 @@
+id: fix-off-by-one
+category: bug-fix
+sandbox: auto
+description: Fix Counter.value getter returning count - 1
+prompt: "There is a bug in src/counter.ts — the value getter returns one less than expected. Fix it."
+fixture: mini-ts-bugs
+expected:
+  files:
+    src/counter.ts:
+      contains: "return this._count"
+      notContains: "this._count - 1"

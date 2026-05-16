@@ -1,0 +1,10 @@
+id: fix-strict-equality
+category: bug-fix
+description: Fix capitalize() using == instead of ===
+prompt: "capitalize() in src/utils.ts uses loose equality for an empty-string check. Fix it to use strict equality."
+fixture: mini-ts-bugs
+expected:
+  files:
+    src/utils.ts:
+      contains: '=== ""'
+      notContains: '== ""'

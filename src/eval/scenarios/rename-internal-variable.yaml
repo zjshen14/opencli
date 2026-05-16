@@ -1,0 +1,10 @@
+id: rename-internal-variable
+category: refactor
+description: Rename this.x to this.count in counter.ts
+prompt: "The internal state in src/counter.ts is stored in a variable named 'x'. Rename it to 'count' throughout the file."
+fixture: mini-ts-partial
+expected:
+  files:
+    src/counter.ts:
+      contains: "this.count"
+      notContains: "this.x"

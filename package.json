@@ -48,6 +48,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:single": "vitest run --reporter=verbose",
+    "eval": "vitest run src/eval/matrix.test.ts --reporter=verbose",
     "coverage": "vitest run --coverage",
     "prepare": "husky"
   },
@@ -75,7 +76,6 @@
     "husky": "^9.1.7",
     "jiti": "^2.6.1",
     "prettier": "^3.8.1",
-    "promptfoo": "^0.121.11",
     "tsup": "^8.0.0",
     "tsx": "^4.0.0",
     "typescript": "^5.7.0",

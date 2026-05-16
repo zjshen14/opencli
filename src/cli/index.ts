@@ -80,6 +80,7 @@ program
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
   .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
   .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
+  .option("--temperature <float>", "LLM temperature (use 0 for determinism)", parseFloat)
   .action(async (prompt: string, opts) => {
     await runSingle(
       prompt,
@@ -91,6 +92,7 @@ program
       opts.sandbox as string | undefined,
       opts.provider as string | undefined,
       opts.baseUrl as string | undefined,
+      opts.temperature as number | undefined,
     );
   });
 
@@ -205,6 +207,7 @@ async function runSingle(
   sandboxFlag?: string,
   providerOverride?: string,
   baseUrlOverride?: string,
+  temperature?: number,
 ): Promise<void> {
   const { agent, mcpManager } = await createAgent(
     modelOverride,
@@ -213,6 +216,7 @@ async function runSingle(
     sandboxFlag,
     providerOverride,
     baseUrlOverride,
+    temperature,
   );
   if (autoApprove) {
     agent.setConfirmFn(async () => "allow");
@@ -292,6 +296,7 @@ async function createAgent(
   sandboxFlag?: string,
   providerOverride?: string,
   baseUrlOverride?: string,
+  temperature?: number,
 ) {
   const config = await loadConfig();
   const model = process.env.OPENCLI_MODEL ?? modelOverride ?? config.model;
@@ -310,6 +315,7 @@ async function createAgent(
     maxTokens: config.maxTokens,
     provider,
     baseUrl,
+    temperature,
   });
   const tools = createDefaultRegistry(model, runner);
 

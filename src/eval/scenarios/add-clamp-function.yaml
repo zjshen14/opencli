@@ -1,0 +1,9 @@
+id: add-clamp-function
+category: feature-add
+description: Add clamp() to math.ts
+prompt: "Add a clamp(value: number, min: number, max: number): number function to src/math.ts that returns value constrained to [min, max]."
+fixture: mini-ts-partial
+expected:
+  files:
+    src/math.ts:
+      contains: "clamp"

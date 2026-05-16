@@ -1,0 +1,9 @@
+id: add-counter-reset
+category: feature-add
+description: Add reset() method to Counter
+prompt: "Add a reset() method to the Counter class in src/counter.ts that sets the count back to zero."
+fixture: mini-ts-partial
+expected:
+  files:
+    src/counter.ts:
+      contains: "reset"

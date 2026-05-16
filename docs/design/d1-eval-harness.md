@@ -705,7 +705,16 @@ These live in `src/eval/*.test.ts` and run as part of `npm test` (no API calls).
 
 ## Future migration path
 
-If scenarios grow past ~50 or historical trend tracking becomes important, evaluate migrating the matrix runner to **promptfoo**: write one `customProvider.js` that shells out to `opencli run`, reuse the existing YAML scenarios with promptfoo's assertion DSL for output checks, and keep the custom `scorer.ts` for file-state checks. The fixture layer is framework-agnostic and survives any runner migration.
+The custom harness will evolve incrementally. Concrete trigger conditions — if any of these occur, evaluate the feature or a promptfoo migration before adding more custom code:
+
+| Trigger | Action |
+|---|---|
+| Debugging a single failing scenario takes > 5 min | Add `--scenario <id>` filter flag to `npm run eval` |
+| ≥ 3 scenarios are flagged as too brittle for `contains` checks | Introduce LLM-as-judge scoring path in `scorer.ts` |
+| Scenario count exceeds 40 | Build a minimal result viewer / trend tracker, or evaluate promptfoo migration |
+| Caching one provider's results to isolate another's failures becomes necessary | Add per-scenario result cache to runner |
+
+If migrating to promptfoo: write one `customProvider.js` that shells out to `opencli run`, reuse the existing YAML scenarios with promptfoo's `type: javascript` assertion for file-state checks, and keep `scorer.ts` logic inline in the assertion. The fixture layer is framework-agnostic and survives migration. Note: multi-file scenarios require multiple `assert` blocks (not list-vars) to avoid promptfoo's per-item test expansion.
 
 ---
 

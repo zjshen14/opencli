@@ -1,0 +1,7 @@
+id: list-util-exports
+category: read-explain
+description: List exported function names from utils.ts
+prompt: "List all exported function names from src/utils.ts."
+fixture: mini-ts
+expected:
+  outputKeywords: ["clamp", "isEven", "sum", "capitalize"]

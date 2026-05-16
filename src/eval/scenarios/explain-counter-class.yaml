@@ -1,0 +1,7 @@
+id: explain-counter-class
+category: read-explain
+description: Describe the Counter class and its methods
+prompt: "What class does src/counter.ts define? List its methods and describe what each does."
+fixture: mini-ts
+expected:
+  outputKeywords: ["Counter", "increment", "decrement", "value"]

@@ -1,0 +1,7 @@
+id: explain-task-interface
+category: read-explain
+description: Describe the Task interface fields
+prompt: "What fields does the Task interface in src/task.ts have? What does createTask() return?"
+fixture: mini-ts
+expected:
+  outputKeywords: ["id", "title", "done"]

@@ -1,0 +1,9 @@
+id: add-power-function
+category: feature-add
+description: Add power() to math.ts
+prompt: "Add a power(base: number, exp: number): number function to src/math.ts."
+fixture: mini-ts-partial
+expected:
+  files:
+    src/math.ts:
+      contains: "power"

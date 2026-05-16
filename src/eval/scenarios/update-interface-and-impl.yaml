@@ -1,0 +1,11 @@
+id: update-interface-and-impl
+category: multi-file
+description: Add description field to Task interface and update factory
+prompt: "Add a 'description: string' field to the Task interface in src/task.ts. Update createTask() in src/task.impl.ts to accept a description parameter and set it."
+fixture: multi-file
+expected:
+  files:
+    src/task.ts:
+      contains: "description"
+    src/task.impl.ts:
+      contains: "description"

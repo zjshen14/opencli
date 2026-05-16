@@ -32,12 +32,18 @@ export function hasNativeThinking(model: string): boolean {
 export function createClient(
   model: string,
   apiKey: string,
-  options?: { includeUsage?: boolean; maxTokens?: number; provider?: Provider; baseUrl?: string },
+  options?: {
+    includeUsage?: boolean;
+    maxTokens?: number;
+    provider?: Provider;
+    baseUrl?: string;
+    temperature?: number;
+  },
 ): LLMClient {
   const provider = options?.provider ?? detectProvider(model);
   const baseUrl = options?.baseUrl;
   if (provider === "anthropic")
-    return new AnthropicClient(apiKey, model, options?.maxTokens, baseUrl);
+    return new AnthropicClient(apiKey, model, options?.maxTokens, baseUrl, options?.temperature);
   if (provider === "openai") return new OpenAIClient(apiKey, model, { ...options, baseUrl });
-  return new GeminiClient(apiKey, model, options?.maxTokens, baseUrl);
+  return new GeminiClient(apiKey, model, options?.maxTokens, baseUrl, options?.temperature);
 }

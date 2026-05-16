@@ -1,0 +1,9 @@
+id: add-input-validation
+category: feature-add
+description: Add type guard to add()
+prompt: "Add input validation to add() in src/math.ts: throw a TypeError if either argument is not a number."
+fixture: mini-ts-partial
+expected:
+  files:
+    src/math.ts:
+      contains: ["typeof", "TypeError"]

@@ -1,0 +1,10 @@
+id: fix-subtract-operator
+category: bug-fix
+description: Fix subtract() returning sum instead of difference
+prompt: "The subtract function in src/math.ts returns the wrong result — it adds instead of subtracts. Fix it."
+fixture: mini-ts-bugs
+expected:
+  files:
+    src/math.ts:
+      contains: "a - b"
+      notContains: "a + b"

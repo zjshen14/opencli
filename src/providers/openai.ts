@@ -15,16 +15,23 @@ export class OpenAIClient implements LLMClient {
   private model: string;
   private includeUsage: boolean;
   private maxTokens: number;
+  private temperature: number | undefined;
 
   constructor(
     apiKey: string,
     model: string,
-    options?: { includeUsage?: boolean; maxTokens?: number; baseUrl?: string },
+    options?: {
+      includeUsage?: boolean;
+      maxTokens?: number;
+      baseUrl?: string;
+      temperature?: number;
+    },
   ) {
     this.client = new OpenAI({ apiKey, ...(options?.baseUrl ? { baseURL: options.baseUrl } : {}) });
     this.model = model;
     this.includeUsage = options?.includeUsage ?? false;
     this.maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
+    this.temperature = options?.temperature;
   }
 
   async *stream(
@@ -62,6 +69,7 @@ export class OpenAIClient implements LLMClient {
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       stream: true,
       stream_options: this.includeUsage ? { include_usage: true } : undefined,
+      ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
     });
 
     const pendingCalls = new Map<number, { id: string; name: string; args: string }>();

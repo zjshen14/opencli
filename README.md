@@ -61,8 +61,21 @@ npx @zjshen/opencli
 | **Open source** | ✅ MIT | ❌ Proprietary | ✅ Apache-2.0 | ✅ Apache-2.0 |
 | **Sandboxed execution** | ✅ OS-level | ❌ | ❌ | ❌ |
 | **Extensible skills** | ✅ Agent Skills | ✅ Slash commands | ✅ Agent Skills | ❌ |
-| **Plan → Review → Execute** | ✅ | ✅ | ❌ | ❌ |
 | **Lightweight (zero config)** | ✅ | ✅ | ✅ | ⚠️ Git required |
+
+## Frequently Asked Questions (FAQ)
+
+**What is the best open-source alternative to Claude Code?**
+OpenCLI is designed as an open-source, model-agnostic alternative to Claude Code. It supports the same Agent Skills standard and provides a similar seamless terminal experience, but allows you to use Claude, Gemini, or OpenAI models.
+
+**How do I run Gemini or Claude in the terminal?**
+Install OpenCLI via `npm install -g @zjshen/opencli`, set your `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`, and run the `opencli` command. You can switch models easily using `opencli config --model <model-name>`.
+
+**How do I safely sandbox an AI coding agent?**
+OpenCLI automatically sandboxes its bash execution environment by default. On macOS, it uses `sandbox-exec`, and on Linux, it uses `bwrap`. This ensures the AI cannot accidentally destroy your system or access unauthorized files outside your project.
+
+**Does OpenCLI support the Model Context Protocol (MCP)?**
+Yes, OpenCLI fully supports MCP servers. You can configure them using `opencli mcp add` to grant the agent secure access to local databases, GitHub issues, and other external tools.
 
 ## Usage
 

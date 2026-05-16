@@ -12,13 +12,25 @@ A fast evaluation loop that runs 20 hand-written scenarios against all configure
 
 ---
 
+## Framework evaluation — why custom
+
+Three off-the-shelf frameworks were evaluated before committing to a custom harness:
+
+**promptfoo** (TS-native, YAML-driven, multi-provider) is the closest fit. It has YAML scenarios, multi-provider matrix views, an assertion DSL, cost tracking, CI integration, and a result-diff UI. The blocker: OpenCLI's eval target is a CLI binary wrapping sandbox, snapshots, MCP, HITL, and plan mode — not a raw LLM API. promptfoo's custom provider plugin can shell out to a binary, but its assertion model assumes you are evaluating LLM text output, not filesystem state after a multi-turn agent run. Scoring "did the agent actually fix the bug?" against a real git repo requires custom scorers that give back most of promptfoo's complexity anyway.
+
+**inspect_ai** (UK AISI) is the strongest agentic eval framework with proper tool-use and sandboxed execution support. Python-only — a permanent toolchain split for a TypeScript project.
+
+**Decision: custom, with a documented migration path.** Keep custom for D1: scope is small (~600 lines), target is non-standard, the team already knows Vitest. If scenario count exceeds ~50 or historical trend tracking becomes important, evaluate migrating the matrix runner to promptfoo while keeping the fixture and scoring layers.
+
+---
+
 ## File layout
 
 ```
 src/eval/
   runner.ts          # runScenario(scenario, model, opts?) → RunResult
   scorer.ts          # scoreScenario(scenario, result) → ScoreResult
-  report.ts          # formatMatrix(results) → markdown table string
+  report.ts          # formatMatrix(results) → { markdown, json }
   config.ts          # configuredProviders() → { label, model }[]
   matrix.test.ts     # describe.each(providers) × describe.each(scenarios)
   scenarios/
@@ -46,22 +58,36 @@ expected:
   # For bug-fix / feature-add / refactor / multi-file — file state checks:
   files?:
     <relative-path>:
-      contains?: string       # substring required in file
-      notContains?: string    # substring that must be absent
-      exists?: boolean        # file must exist (default true if key is present)
+      contains?: string | string[]  # ALL substrings must appear (AND semantics)
+      notContains?: string          # this substring must be absent
+      exists?: boolean              # file must exist (default true when key is present)
 ```
 
-All string comparisons are case-sensitive. `contains` matches anywhere in the file.
+`contains` accepts either a bare string or an array — all entries are required. String comparisons are case-sensitive and match anywhere in the file. The schema validator (`loadScenarios`) rejects files with invalid YAML at startup.
 
 ---
 
 ## Scoring
 
 ```
-pass    — all expected criteria satisfied
+pass    — all expected criteria satisfied AND (if code-modifying) tsc --noEmit exits 0
 partial — ≥ 50 % of expected.files checks pass (multi-file tasks only)
-fail    — timeout, non-zero exit, no outputKeywords matched, or < 50 % file checks
+fail    — timeout, non-zero agent exit, tsc type errors, no outputKeywords matched,
+          or < 50 % file checks pass
 ```
+
+### TypeScript compilation gate
+
+After every code-modifying scenario (category ≠ `read-explain`), the runner runs `tsc --noEmit` using the fixture's `tsconfig.json`. If this exits non-zero, the score is `fail` regardless of `contains` results. This catches the largest class of bad agent outputs — syntax errors, wrong imports, type mismatches — at near-zero cost.
+
+```typescript
+// In scoreScenario(), after string checks:
+if (result.typeErrors) {
+  return { score: "fail", reason: `tsc errors: ${result.typeErrors.slice(0, 200)}` };
+}
+```
+
+`scorer.ts` never runs `tsc` itself — the runner populates `result.typeErrors` before returning.
 
 `scoreScenario` returns `{ score: "pass" | "partial" | "fail", reason: string }`.
 
@@ -75,31 +101,69 @@ fail    — timeout, non-zero exit, no outputKeywords matched, or < 50 % file ch
 const DIST_ENTRY = resolve(new URL(".", import.meta.url).pathname, "../../../dist/index.js");
 ```
 
-Same pattern as `src/cli/run.smoke.test.ts`. Tests are skipped (`it.skip`) when the binary does not exist — add a top-level note: "Run `npm run build` first."
+Same pattern as `src/cli/run.smoke.test.ts`. Tests are skipped when the binary does not exist — add a top-level note: "Run `npm run build` first."
+
+### Temperature — determinism prerequisite
+
+Running stochastic LLMs at default temperature will produce flaky CI. A cheap model at 60% reliability on a scenario will fail ~3 times in 60 runs. The runner passes `--temperature 0` to every `opencli run` invocation.
+
+**This requires adding `--temperature <float>` to the CLI.** This is a small scope addition included in D1 implementation:
+- Add `--temperature` option to `opencli run` in `cli/index.ts`
+- Thread it through `createClient()` and each provider client's `stream()` call
+- Gemini, Anthropic, and OpenAI all honour `temperature: 0` in their APIs
+
+### Retry budget
+
+Even at temperature 0, some providers exhibit residual stochasticity on borderline tasks. Each scenario is retried up to **2 times** on failure — persistent failures are marked `fail`, intermittent passes count as pass.
+
+```typescript
+const MAX_RETRIES = 2;
+for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+  const result = await runScenarioOnce(scenario, model, tmpDir);
+  const { score } = scoreScenario(scenario, result);
+  if (score !== "fail") return { result, score };
+}
+return { result: lastResult, score: "fail" };
+```
+
+Retry does not multiply cost in practice: most passes succeed on the first attempt.
 
 ### `runScenario` steps
 
 1. Create temp dir: `mkdtemp(join(tmpdir(), "opencli-eval-"))`
-2. Copy fixture: `cp -r src/eval/fixtures/<fixture>/ <tmpdir>/`
-3. `git init && git add . && git commit -m "fixture"` (so snapshot/rewind are git-aware)
-4. Spawn: `node <DIST_ENTRY> run "<prompt>" --model <model> --yes --max-turns 20 --sandbox off`
+2. Copy fixture: `await fs.cp(fixtureDir, tmpDir, { recursive: true })` (cross-platform; requires Node 20+, which is already the project minimum)
+3. Init git:
+   ```
+   git init
+   git -c user.email=eval@opencli -c user.name=eval add .
+   git -c user.email=eval@opencli -c user.name=eval commit -m "fixture"
+   ```
+   Explicit git identity avoids failures on fresh CI containers without global user config.
+4. Spawn: `node <DIST_ENTRY> run "<prompt>" --model <model> --yes --max-turns 20 --temperature 0`
    - `cwd`: temp dir
    - `env`: `{ ...process.env }` (inherits API keys)
+   - For scenarios in `sandboxScenarios` set: omit `--sandbox off` (uses default `auto`)
+   - For all others: `--sandbox off` (avoids filesystem permission issues in temp dirs)
    - Timeout: 120 s via `AbortController`
-5. Capture combined stdout as `output: string`
-6. After process exits, read final FS state for all paths mentioned in `expected.files`
-7. `rm -rf` temp dir
-8. Return `RunResult`
+5. Capture combined stdout as `output: string`; capture stderr separately
+6. After process exits, run `tsc --noEmit` using the fixture's `tsconfig.json`; capture exit code and stderr as `typeErrors`
+7. Read final FS state for all paths mentioned in `expected.files`
+8. `rm -rf` temp dir
+9. Return `RunResult`
 
 ```typescript
 export interface RunResult {
-  output: string;         // full stdout from the agent run
-  files: Record<string, string | null>; // path → content (null = does not exist)
+  output: string;
+  files: Record<string, string | null>;  // null = does not exist
+  typeErrors: string | null;             // null = clean; non-null = tsc stderr
   exitCode: number;
   timedOut: boolean;
   durationMs: number;
+  tokenUsage?: { input: number; output: number };
 }
 ```
+
+Token usage is extracted from the `--output=json` stream when that flag lands (C1). Until then, the field is omitted.
 
 ---
 
@@ -120,11 +184,19 @@ export function configuredProviders(): Provider[] {
     providers.push({ label: "gemini", model: process.env.EVAL_GEMINI_MODEL ?? "gemini-2.0-flash-lite" });
   if (process.env.OPENAI_API_KEY)
     providers.push({ label: "openai", model: process.env.EVAL_OPENAI_MODEL ?? "gpt-4o-mini" });
+
+  if (providers.length === 0) {
+    throw new Error(
+      "No eval providers configured — set at least one of ANTHROPIC_API_KEY, GEMINI_API_KEY, OPENAI_API_KEY"
+    );
+  }
   return providers;
 }
 ```
 
-Provider models are overridable via env vars to allow testing with different tiers without changing code. Defaults are the cheapest capable models for each provider.
+Note: the OpenAI provider client (`src/providers/openai.ts`) already exists — it shipped with B1. All three providers are available from day one.
+
+Provider models are overridable via env vars. Defaults are the cheapest capable models for each provider.
 
 ---
 
@@ -132,27 +204,29 @@ Provider models are overridable via env vars to allow testing with different tie
 
 ```typescript
 // src/eval/matrix.test.ts
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { configuredProviders } from "./config.js";
 import { loadScenarios } from "./scenarios.js";
 import { runScenario } from "./runner.js";
 import { scoreScenario } from "./scorer.js";
 import { formatMatrix } from "./report.js";
 
-const providers = configuredProviders();
-const scenarios = await loadScenarios();
-
-// Accumulate results for the summary matrix printed after all tests.
+let providers: Provider[];
+let scenarios: Scenario[];
 const matrix: Record<string, Record<string, string>> = {};
 
-describe.each(providers)("provider: $label ($model)", ({ label, model }) => {
-  describe.each(scenarios)("$id", (scenario) => {
+beforeAll(async () => {
+  providers = configuredProviders();
+  scenarios = await loadScenarios();
+});
+
+describe.each(() => providers)("provider: $label ($model)", ({ label, model }) => {
+  describe.each(() => scenarios)("$id", (scenario) => {
     it(scenario.description, { timeout: 130_000 }, async () => {
-      const result = await runScenario(scenario, model);
-      const { score, reason } = scoreScenario(scenario, result);
+      const { score, result } = await runScenario(scenario, model);
+      const { reason } = scoreScenario(scenario, result);
       matrix[scenario.id] ??= {};
       matrix[scenario.id][label] = score;
-      // partial is a soft pass in the matrix; hard fail is a test failure
       if (score === "fail") {
         console.log(`[${label}] ${scenario.id} FAIL: ${reason}`);
       }
@@ -162,25 +236,72 @@ describe.each(providers)("provider: $label ($model)", ({ label, model }) => {
 });
 
 afterAll(() => {
-  if (Object.keys(matrix).length > 0) {
-    console.log("\n" + formatMatrix(matrix, providers.map((p) => p.label)));
-  }
+  if (Object.keys(matrix).length === 0) return;
+  const providerLabels = providers.map((p) => p.label);
+  const { markdown, json } = formatMatrix(matrix, providerLabels);
+  console.log("\n" + markdown);
+  const outPath = process.env.EVAL_JSON_OUT;
+  if (outPath) writeFileSync(outPath, JSON.stringify(json, null, 2));
 });
 ```
 
-A single `fail` causes the test to fail. `partial` is a soft pass (no assertion failure) — it is visible in the matrix output. The matrix is printed to stdout at the end for CI summary capture.
+Use `beforeAll` for scenario loading — more conventional than top-level await and compatible with all Vitest versions.
+
+### Parallelization
+
+Vitest runs test files in parallel by default. Within the matrix file, `describe.each(providers)` creates one describe block per provider — these run sequentially within the file, but providers can be split across workers if needed. For D1 (3 providers, 20 scenarios), sequential is fine; total wall-clock at 5 s/scenario average is ~5 min. At 120 s timeout worst-case per scenario: 20 × 3 × 120 s = 120 min. In practice expect 10–20 min. Document in `README` under `npm run eval`.
+
+---
+
+## Report and JSON artifact
+
+```typescript
+export interface MatrixJson {
+  timestamp: string;
+  providers: string[];
+  scenarios: Array<{
+    id: string;
+    category: string;
+    results: Record<string, "pass" | "partial" | "fail">;
+  }>;
+  passRates: Record<string, number>;  // provider → 0–1
+}
+
+export function formatMatrix(
+  matrix: Record<string, Record<string, string>>,
+  providers: string[],
+): { markdown: string; json: MatrixJson }
+```
+
+`EVAL_JSON_OUT=path/to/out.json npm run eval` writes the artifact. CI can diff two JSON files to detect regressions:
+
+```bash
+jq '.passRates' before.json
+jq '.passRates' after.json
+```
 
 ---
 
 ## Parity warning
 
-`formatMatrix` computes per-provider pass rates and appends a warning line if any provider drops more than 15 percentage points below the leading provider:
+`formatMatrix` appends a warning line if any provider drops more than 15 percentage points below the leading provider:
 
 ```
 ⚠  gemini pass rate (75%) is 20pp below leading provider (anthropic 95%)
 ```
 
-This is a console warning only — it does not fail the test suite. The purpose is visibility, not a gate.
+Console warning only — does not fail the suite. Purpose is visibility in CI summary, not a gate.
+
+---
+
+## Sandbox scenarios
+
+Running all scenarios with `--sandbox off` means D1 does not baseline the A1 sandbox feature. Two scenarios run with default sandbox (`auto`) instead:
+
+- `explain-math-module` (read-only, no filesystem writes — safe with sandbox on)
+- `fix-off-by-one` (writes one file — tests that sandbox permits CWD writes)
+
+These are marked in their YAML with `sandbox: auto`. The runner omits `--sandbox off` for those scenario IDs.
 
 ---
 
@@ -191,8 +312,6 @@ Add to `package.json`:
 "eval": "vitest run src/eval/matrix.test.ts --reporter=verbose"
 ```
 
-This runs only the eval matrix, not the full test suite.
-
 ---
 
 ## Fixtures
@@ -201,39 +320,40 @@ This runs only the eval matrix, not the full test suite.
 
 ```
 src/
-  math.ts     — exports add(a, b), subtract(a, b), multiply(a, b)
+  math.ts     — exports add(a, b), subtract(a, b), multiply(a, b) with JSDoc
   utils.ts    — exports clamp(v, lo, hi), isEven(n), sum(arr), capitalize(s)
-  counter.ts  — exports Counter class: increment(), decrement(), reset(), value getter
+  counter.ts  — exports Counter class: increment(), decrement(), value getter
   task.ts     — exports Task interface { id, title, done }, createTask(title) factory
-tsconfig.json
+tsconfig.json — strict mode, module ESNext, noEmit false
 package.json  — name: "mini-ts", type: "module", no dependencies
 ```
 
 ### `mini-ts-bugs/` — same project with deliberate defects
 
-Defects are isolated to one file per bug scenario:
+Each bug is isolated, obvious from context, and has a specific correct fix string:
 
-| Defect | File | What's wrong |
+| Scenario | File | Bug | Expected fix |
+|---|---|---|---|
+| `fix-off-by-one` | `counter.ts` | `get value() { return this._count - 1; }` | `return this._count` without subtraction |
+| `fix-subtract-operator` | `math.ts` | `subtract(a, b) { return a + b; }` | `a - b` |
+| `fix-null-guard` | `utils.ts` | `sum(arr) { return arr.reduce((a, b) => a + b); }` | add initial value `0` to reduce call |
+| `fix-missing-return` | `task.ts` | `if (!title) { console.error("bad"); }` with no return | `return null` in the guard branch |
+| `fix-strict-equality` | `utils.ts` | `capitalize(s) { if (s == "") return s; }` | `===` instead of `==` |
+
+The bug strings are unique within their files — no false-positive `notContains` matches.
+
+### `mini-ts-partial/` — project with intentional gaps
+
+| Scenario | File | What's missing / wrong |
 |---|---|---|
-| off-by-one | `counter.ts` | `get value() { return this._count - 1; }` |
-| null-deref | `utils.ts` | `sum([])` throws because of missing empty-array guard |
-| wrong-operator | `math.ts` | `subtract(a, b)` returns `a + b` instead of `a - b` |
-| missing-return | `task.ts` | `createTask()` branch doesn't return on invalid input (falls off) |
-| string-coerce | `utils.ts` | `capitalize` uses `==` instead of `===` for empty-string check |
-
-Each bug scenario specifies which single file to check. The runner copies the full project, so the agent has all context.
-
-### `mini-ts-partial/` — project with intentional gaps (feature-add and refactor)
-
-| Gap | File | What's missing |
-|---|---|---|
-| no-clamp | `math.ts` | `clamp()` function absent |
-| no-power | `math.ts` | `power(base, exp)` function absent |
-| no-validation | `math.ts` | `add()` lacks type guard for non-number inputs |
-| no-version | `utils.ts` | No `VERSION` constant exported |
-| verbose-duplicate | `utils.ts` | Two identical validation blocks inline (not extracted) |
-| long-fn | `task.ts` | `processTask()` is one 40-line function to be split |
-| bad-varname | `counter.ts` | Internal state stored in `x` instead of `count` |
+| `add-clamp-function` | `math.ts` | `clamp` function absent |
+| `add-power-function` | `math.ts` | `power` function absent |
+| `add-input-validation` | `math.ts` | `add()` has no type guard |
+| `add-version-constant` | `utils.ts` | No `VERSION` export |
+| `add-counter-reset` | `counter.ts` | No `reset()` method |
+| `extract-duplicate-validation` | `utils.ts` | Two copies of: `if (typeof v !== "number") throw new TypeError(...)` — extracted helper should be named `assertNumber` |
+| `rename-internal-variable` | `counter.ts` | State stored in `this.x` throughout |
+| `split-long-function` | `task.ts` | `processTask()` is 40+ lines; must split into `validateTask()` + `executeTask()` |
 
 ### `multi-file/` — slightly expanded project for multi-file tasks
 
@@ -256,6 +376,7 @@ package.json
 ```yaml
 id: explain-math-module
 category: read-explain
+sandbox: auto
 description: Describe exports of math.ts
 prompt: "Describe what src/math.ts exports and what each function does."
 fixture: mini-ts
@@ -298,8 +419,9 @@ expected:
 ```yaml
 id: fix-off-by-one
 category: bug-fix
+sandbox: auto
 description: Fix Counter.value getter returning count - 1
-prompt: "There is a bug in src/counter.ts: the value getter returns one less than expected. Fix it."
+prompt: "There is a bug in src/counter.ts — the value getter returns one less than expected. Fix it."
 fixture: mini-ts-bugs
 expected:
   files:
@@ -312,7 +434,7 @@ expected:
 id: fix-subtract-operator
 category: bug-fix
 description: Fix subtract() returning sum instead of difference
-prompt: "The subtract function in src/math.ts returns the wrong result. Fix it."
+prompt: "The subtract function in src/math.ts returns the wrong result — it adds instead of subtracts. Fix it."
 fixture: mini-ts-bugs
 expected:
   files:
@@ -330,14 +452,15 @@ fixture: mini-ts-bugs
 expected:
   files:
     src/utils.ts:
-      contains: "0"
+      contains: ", 0)"
+      notContains: "arr.reduce((a, b) => a + b)"
 ```
 
 ```yaml
 id: fix-missing-return
 category: bug-fix
 description: Fix createTask() branch that falls off without returning
-prompt: "createTask() in src/task.ts has a branch that doesn't return anything for invalid input. Fix it to return null."
+prompt: "createTask() in src/task.ts has a branch that runs console.error but doesn't return anything for invalid input. Fix it to return null."
 fixture: mini-ts-bugs
 expected:
   files:
@@ -349,12 +472,12 @@ expected:
 id: fix-strict-equality
 category: bug-fix
 description: Fix capitalize() using == instead of ===
-prompt: "capitalize() in src/utils.ts has a loose equality comparison that can cause incorrect results. Fix it."
+prompt: "capitalize() in src/utils.ts uses loose equality for an empty-string check. Fix it to use strict equality."
 fixture: mini-ts-bugs
 expected:
   files:
     src/utils.ts:
-      contains: "==="
+      contains: '=== ""'
       notContains: '== ""'
 ```
 
@@ -393,7 +516,7 @@ fixture: mini-ts-partial
 expected:
   files:
     src/math.ts:
-      contains: "TypeError"
+      contains: ["typeof", "TypeError"]
 ```
 
 ```yaml
@@ -405,8 +528,9 @@ fixture: mini-ts-partial
 expected:
   files:
     src/utils.ts:
-      contains: "VERSION"
-      contains: "'1.0.0'"
+      contains:
+        - "VERSION"
+        - "'1.0.0'"
 ```
 
 ```yaml
@@ -426,39 +550,38 @@ expected:
 ```yaml
 id: extract-duplicate-validation
 category: refactor
-description: Extract repeated validation blocks into a helper
-prompt: "src/utils.ts has two identical validation blocks. Extract the duplicated logic into a named helper function and call it from both places."
+description: Extract repeated type-guard blocks into assertNumber()
+prompt: "src/utils.ts has two identical validation blocks that check if a value is a number. Extract the duplicated logic into a helper function called assertNumber and call it from both places."
 fixture: mini-ts-partial
 expected:
   files:
     src/utils.ts:
-      contains: "function"
+      contains: "assertNumber"
 ```
 
 ```yaml
 id: rename-internal-variable
 category: refactor
-description: Rename x to count in counter.ts
+description: Rename this.x to this.count in counter.ts
 prompt: "The internal state in src/counter.ts is stored in a variable named 'x'. Rename it to 'count' throughout the file."
 fixture: mini-ts-partial
 expected:
   files:
     src/counter.ts:
-      contains: "count"
+      contains: "this.count"
       notContains: "this.x"
 ```
 
 ```yaml
 id: split-long-function
 category: refactor
-description: Split processTask() into validate + execute
-prompt: "processTask() in src/task.ts is too long. Split it into validateTask() and executeTask(), and have processTask() call both in sequence."
+description: Split processTask() into validateTask() + executeTask()
+prompt: "processTask() in src/task.ts is too long. Split it into validateTask() (handles validation) and executeTask() (handles execution), and have processTask() call both in sequence."
 fixture: mini-ts-partial
 expected:
   files:
     src/task.ts:
-      contains: "validateTask"
-      contains: "executeTask"
+      contains: ["validateTask", "executeTask"]
 ```
 
 ### Multi-file (3)
@@ -473,16 +596,14 @@ expected:
   files:
     src/math.test.ts:
       exists: true
-      contains: "add"
-      contains: "subtract"
-      contains: "multiply"
+      contains: ["add", "subtract", "multiply"]
 ```
 
 ```yaml
 id: create-and-wire-formatter
 category: multi-file
 description: Create formatter.ts and import it from utils.ts
-prompt: "Create src/formatter.ts with a format(value: number): string function that formats numbers with two decimal places. Then import and use it in src/utils.ts."
+prompt: "Create src/formatter.ts with a format(value: number): string function that formats numbers with two decimal places. Then import and use format() in src/utils.ts."
 fixture: multi-file
 expected:
   files:
@@ -497,7 +618,7 @@ expected:
 id: update-interface-and-impl
 category: multi-file
 description: Add description field to Task interface and update factory
-prompt: "Add a 'description: string' field to the Task interface in src/task.ts. Update createTask() in src/task.impl.ts to accept and set it."
+prompt: "Add a 'description: string' field to the Task interface in src/task.ts. Update createTask() in src/task.impl.ts to accept a description parameter and set it."
 fixture: multi-file
 expected:
   files:
@@ -526,13 +647,14 @@ export async function loadScenarios(): Promise<Scenario[]> {
 }
 ```
 
-### Fixture copy
+### `--temperature` CLI flag (prerequisite)
 
-Use `cp -r` via `execAsync` for simplicity. No `fs.cp` — Node 16 compat is not needed but keeping it simple avoids edge cases.
+Add to `opencli run` in `cli/index.ts`:
+```
+--temperature <float>   LLM temperature (default: provider default; use 0 for determinism)
+```
 
-### `--max-turns 20`
-
-Caps cost on runaway agents. For simple scenarios, completion happens in 2–5 turns. 20 is generous.
+Thread through `createAgent` → `createClient` → each provider's `stream()` call. All three current providers accept `temperature` in their API request.
 
 ### Skipping when binary not built
 
@@ -543,28 +665,26 @@ if (!CLI_BUILT) {
 }
 ```
 
-Matches the pattern in `run.smoke.test.ts`.
-
-### `contains` with multiple values
-
-A scenario may have multiple `contains` assertions on one file (see `add-math-tests`). The YAML schema should allow `contains` to be either a `string` or `string[]`. The scorer checks all entries with AND semantics.
-
 ---
 
 ## Test strategy for the harness itself
 
-The harness components (`runner.ts`, `scorer.ts`, `report.ts`) are tested offline — no real API calls needed:
+Harness components are tested offline — no real API calls:
 
 | Test | File | What it proves |
 |---|---|---|
 | `scoreScenario` pass: all keywords present | `scorer.test.ts` | Keyword match |
 | `scoreScenario` fail: keyword missing | same | Miss detection |
+| `scoreScenario` fail: typeErrors non-null | same | tsc gate |
 | `scoreScenario` pass: file contains expected string | same | File match |
+| `scoreScenario` pass: file contains all entries in contains[] | same | Array AND semantics |
 | `scoreScenario` partial: 1/2 files match | same | Partial scoring |
 | `formatMatrix` renders correct column widths | `report.test.ts` | Table output |
 | `formatMatrix` emits 15pp warning when threshold breached | same | Parity alert |
-| `configuredProviders` returns only providers with keys set | `config.test.ts` | Env var detection |
-| `runScenario` copies fixture and produces RunResult | `runner.test.ts` | Integration (uses a mock `opencli` script that exits 0 immediately) |
+| `formatMatrix` json field has correct schema | same | JSON artifact |
+| `configuredProviders` throws when no keys set | `config.test.ts` | Empty-list guard |
+| `configuredProviders` returns only providers with keys set | same | Env var detection |
+| `runScenarioOnce` copies fixture and returns RunResult | `runner.test.ts` | Integration (mock opencli script that exits 0) |
 
 These live in `src/eval/*.test.ts` and run as part of `npm test` (no API calls).
 
@@ -575,9 +695,15 @@ These live in `src/eval/*.test.ts` and run as part of `npm test` (no API calls).
 | Command | When | Cost |
 |---|---|---|
 | `npm test` | Every PR (automated) | Free — harness unit tests only |
-| `npm run eval` | Manual trigger on PRs; auto on release branch | ~$1–5 per full run |
+| `npm run eval` | Manual trigger on PRs; auto on release | ~$1–5 per full run (~10–20 min at 5 s/scenario avg) |
 
-The parity matrix output is captured in CI as a job summary annotation.
+`EVAL_JSON_OUT=results.json npm run eval` writes a machine-readable artifact for regression diffing. CI can archive this and compare to the previous release using `jq '.passRates'`.
+
+---
+
+## Future migration path
+
+If scenarios grow past ~50 or historical trend tracking becomes important, evaluate migrating the matrix runner to **promptfoo**: write one `customProvider.js` that shells out to `opencli run`, reuse the existing YAML scenarios with promptfoo's assertion DSL for output checks, and keep the custom `scorer.ts` for file-state checks. The fixture layer is framework-agnostic and survives any runner migration.
 
 ---
 
@@ -600,3 +726,6 @@ The parity matrix output is captured in CI as a job summary annotation.
 | Create | `src/eval/fixtures/mini-ts-partial/` |
 | Create | `src/eval/fixtures/multi-file/` |
 | Modify | `package.json` — add `"eval"` script |
+| Modify | `src/cli/index.ts` — add `--temperature` flag to `run` command |
+| Modify | `src/providers/client.ts` — add `temperature?` to stream options |
+| Modify | `src/providers/gemini.ts`, `anthropic.ts`, `openai.ts` — thread temperature |

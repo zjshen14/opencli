@@ -14,13 +14,15 @@ A fast evaluation loop that runs 20 hand-written scenarios against all configure
 
 ## Framework evaluation — why custom
 
-Three off-the-shelf frameworks were evaluated before committing to a custom harness:
+Three off-the-shelf frameworks were evaluated. A 1-day spike on promptfoo was run before committing (see [#90 spike verdict](https://github.com/zjshen14/opencli/issues/90#issuecomment-4465071961)).
 
-**promptfoo** (TS-native, YAML-driven, multi-provider) is the closest fit. It has YAML scenarios, multi-provider matrix views, an assertion DSL, cost tracking, CI integration, and a result-diff UI. The blocker: OpenCLI's eval target is a CLI binary wrapping sandbox, snapshots, MCP, HITL, and plan mode — not a raw LLM API. promptfoo's custom provider plugin can shell out to a binary, but its assertion model assumes you are evaluating LLM text output, not filesystem state after a multi-turn agent run. Scoring "did the agent actually fix the bug?" against a real git repo requires custom scorers that give back most of promptfoo's complexity anyway.
+**promptfoo** (TS-native, YAML-driven, multi-provider) is the closest fit. It has YAML scenarios, multi-provider matrix views, an assertion DSL, cost tracking, CI integration, and a result-diff UI. The `type: javascript` assertion gives arbitrary access to provider-returned context — filesystem-state scoring is not fighting the framework, it uses the documented extension point. The spike validated this for single-file scenarios (192 lines of glue, clean entry point, readable matrix output).
+
+The blocker is **list-vars expansion**: when a YAML `vars` field contains a list, promptfoo creates separate test cases for each list item rather than passing the array to the provider. This breaks multi-file scenarios — the ones that check two or more output files in a single assertion. The workaround (serialize to a JSON string, parse in the provider) leaks framework internals into the YAML and was not documented. Three of our 20 scenarios are multi-file and specifically the hardest cases. This met the spike's pre-stated "keep custom" criterion: *"the provider context passing required undocumented workarounds."*
 
 **inspect_ai** (UK AISI) is the strongest agentic eval framework with proper tool-use and sandboxed execution support. Python-only — a permanent toolchain split for a TypeScript project.
 
-**Decision: custom, with a documented migration path.** Keep custom for D1: scope is small (~600 lines), target is non-standard, the team already knows Vitest. If scenario count exceeds ~50 or historical trend tracking becomes important, evaluate migrating the matrix runner to promptfoo while keeping the fixture and scoring layers.
+**Decision: custom.** The list-vars issue is structural, not incidental — it reflects how promptfoo's matrix generation is designed. The custom harness handles multi-file scenarios naturally via `string | string[]` in the scenario schema. The promptfoo spike is preserved in `scripts/` as a reference for single-file use cases and a starting point if promptfoo fixes list-vars handling in a future release.
 
 ---
 

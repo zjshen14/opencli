@@ -10,7 +10,14 @@ const DIST_ENTRY = join(fileURLToPath(import.meta.url), "../../../dist/index.js"
 const FIXTURES_DIR = join(fileURLToPath(import.meta.url), "../fixtures");
 
 const AGENT_TIMEOUT_MS = 120_000;
-const MAX_RETRIES = 2;
+// No runner-level retries: the agent already retries internally (withRetry in providers).
+// Retrying at this layer compounds rate-limit pressure without benefit.
+// Re-enable if you observe transient non-rate-limit failures in CI.
+const MAX_RETRIES = 0;
+
+// Optional inter-scenario delay to stay within free-tier TPM limits.
+// Set EVAL_SCENARIO_DELAY_MS=15000 when running against a free-tier key.
+const SCENARIO_DELAY_MS = parseInt(process.env.EVAL_SCENARIO_DELAY_MS ?? "0", 10);
 
 export const CLI_BUILT = existsSync(DIST_ENTRY);
 
@@ -28,6 +35,7 @@ export async function runScenario(
   model: string,
 ): Promise<{ result: RunResult; score: "pass" | "partial" | "fail" }> {
   const { scoreScenario } = await import("./scorer.js");
+  if (SCENARIO_DELAY_MS > 0) await new Promise((r) => setTimeout(r, SCENARIO_DELAY_MS));
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const result = await runScenarioOnce(scenario, model);
     const { score } = scoreScenario(scenario, result);

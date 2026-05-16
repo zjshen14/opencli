@@ -1,6 +1,6 @@
 # Design: D1 — Scenario suite + cross-provider parity matrix
 
-_Status: Ready for implementation. Tracking issue: [#90](https://github.com/zjshen14/opencli/issues/90). Phase: [Roadmap D1](../roadmap.md#phase-d--evaluation)._
+_Status: Implemented — merged in 976409e (2026-05-15). Tracking issue: [#90](https://github.com/zjshen14/opencli/issues/90). Phase: [Roadmap D1](../roadmap.md#phase-d--evaluation)._
 
 ---
 

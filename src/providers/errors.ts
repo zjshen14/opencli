@@ -8,15 +8,22 @@ function extractStatus(err: unknown): number | undefined {
   return undefined;
 }
 
-// Gemini SDK error messages are double-nested JSON:
-// outer: {"error":{"message":"<inner_json_string>","code":N}}
-// inner: {"error":{"code":N,"message":"<human message>","status":"..."}}
-// Unwrap both layers to surface the actionable message.
-function extractGeminiMessage(raw: string): string {
+// SDK error messages often contain JSON with a nested human-readable description.
+// This handles single-level {"error":{"message":"..."}} or {"message":"..."} payloads,
+// and also Gemini's double-nested pattern where the outer message field is itself JSON.
+function extractHumanMessage(raw: string): string {
   try {
-    const outer = JSON.parse(raw) as { error?: { message?: string } };
-    const inner = JSON.parse(outer?.error?.message ?? "{}") as { error?: { message?: string } };
-    return inner?.error?.message ?? outer?.error?.message ?? raw;
+    type Payload = { error?: { message?: string }; message?: string };
+    const outer = JSON.parse(raw) as Payload;
+    const candidate = outer?.error?.message ?? outer?.message;
+    if (!candidate) return raw;
+    // Gemini wraps a second JSON string inside the outer message field — unwrap it.
+    try {
+      const inner = JSON.parse(candidate) as Payload;
+      return inner?.error?.message ?? inner?.message ?? candidate;
+    } catch {
+      return candidate;
+    }
   } catch {
     return raw;
   }
@@ -27,8 +34,7 @@ export function toFriendlyError(err: unknown, provider: ProviderName): Error {
   const original = err instanceof Error ? err : new Error(String(err));
 
   let message: string;
-  const innerMsg =
-    provider === "Gemini" ? extractGeminiMessage(original.message) : original.message;
+  const innerMsg = extractHumanMessage(original.message);
   if (status === 400) {
     // 400 covers many distinct Gemini cases (expired key, billing not enabled,
     // invalid schema, context too long, etc.) — surface the inner message directly.
@@ -50,7 +56,7 @@ export function toFriendlyError(err: unknown, provider: ProviderName): Error {
   } else if (status !== undefined && status >= 500) {
     message = `${provider} server error (${status}). Try again in a moment.`;
   } else {
-    message = `${provider} request failed: ${original.message}`;
+    message = `${provider} request failed: ${innerMsg}`;
   }
 
   const friendly = new Error(message);

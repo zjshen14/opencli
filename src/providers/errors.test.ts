@@ -45,7 +45,7 @@ describe("toFriendlyError", () => {
     expect(err.message).toContain("--model");
   });
 
-  it("unwraps Gemini double-nested JSON in 400 message", () => {
+  it("unwraps double-nested JSON in 400 message for any provider", () => {
     const inner = JSON.stringify({
       error: {
         code: 400,
@@ -54,9 +54,11 @@ describe("toFriendlyError", () => {
       },
     });
     const outer = JSON.stringify({ error: { message: inner, code: 400, status: "Bad Request" } });
-    const err = toFriendlyError(makeStatusError(400, outer), "Gemini");
-    expect(err.message).toContain("API key expired");
-    expect(err.message).not.toContain("{");
+    for (const provider of ["Gemini", "Anthropic", "OpenAI"] as const) {
+      const err = toFriendlyError(makeStatusError(400, outer), provider);
+      expect(err.message).toContain("API key expired");
+      expect(err.message).not.toContain("{");
+    }
   });
 
   it("maps 403 to access denied message", () => {

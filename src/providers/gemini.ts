@@ -8,6 +8,7 @@ import {
 import type { LLMClient } from "./client.js";
 import type { Message, StreamEvent, ToolDefinition } from "./types.js";
 import { withRetry } from "./retry.js";
+import { toFriendlyError } from "./errors.js";
 
 const DEFAULT_MODEL = "gemini-3-flash-preview";
 
@@ -41,10 +42,14 @@ export class GeminiClient implements LLMClient {
     const contents = this.messagesToContents(messages);
     const functionDeclarations = tools.map(definitionToFunctionDeclaration);
 
-    yield* withRetry(
-      () => this._streamOnce(contents, systemInstruction, functionDeclarations),
-      (err) => err instanceof ApiError && [429, 500, 502, 503].includes(err.status),
-    );
+    try {
+      yield* withRetry(
+        () => this._streamOnce(contents, systemInstruction, functionDeclarations),
+        (err) => err instanceof ApiError && [429, 500, 502, 503].includes(err.status),
+      );
+    } catch (err) {
+      throw toFriendlyError(err, "Gemini");
+    }
   }
 
   private async *_streamOnce(

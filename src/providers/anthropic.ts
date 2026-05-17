@@ -2,6 +2,7 @@ import Anthropic, { APIError } from "@anthropic-ai/sdk";
 import type { LLMClient } from "./client.js";
 import type { Message, StreamEvent, ToolDefinition } from "./types.js";
 import { withRetry } from "./retry.js";
+import { toFriendlyError } from "./errors.js";
 
 const DEFAULT_MAX_TOKENS = 8096;
 
@@ -32,13 +33,17 @@ export class AnthropicClient implements LLMClient {
     const anthropicMessages = messagesToAnthropicParams(messages);
     const anthropicTools = tools.map(definitionToAnthropicTool);
 
-    yield* withRetry(
-      () => this._streamOnce(anthropicMessages, systemInstruction, anthropicTools),
-      (err) =>
-        err instanceof APIError &&
-        err.status !== undefined &&
-        [429, 500, 502, 529].includes(err.status),
-    );
+    try {
+      yield* withRetry(
+        () => this._streamOnce(anthropicMessages, systemInstruction, anthropicTools),
+        (err) =>
+          err instanceof APIError &&
+          err.status !== undefined &&
+          [429, 500, 502, 529].includes(err.status),
+      );
+    } catch (err) {
+      throw toFriendlyError(err, "Anthropic");
+    }
   }
 
   private async *_streamOnce(

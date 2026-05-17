@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { LLMClient } from "./client.js";
 import type { Message, StreamEvent, ToolDefinition } from "./types.js";
 import { withRetry } from "./retry.js";
+import { toFriendlyError } from "./errors.js";
 
 const DEFAULT_MAX_TOKENS = 8096;
 
@@ -43,19 +44,23 @@ export class OpenAIClient implements LLMClient {
     const openaiMessages = messagesToOpenAIParams(messages, systemInstruction, reasoning);
     const openaiTools: OpenAI.ChatCompletionFunctionTool[] = tools.map(definitionToOpenAITool);
 
-    yield* withRetry(
-      () => this._streamOnce(openaiMessages, openaiTools),
-      (err) => {
-        const msg = err.message;
-        return (
-          msg.includes("429") ||
-          msg.includes("500") ||
-          msg.includes("502") ||
-          msg.includes("503") ||
-          msg.includes("rate_limit")
-        );
-      },
-    );
+    try {
+      yield* withRetry(
+        () => this._streamOnce(openaiMessages, openaiTools),
+        (err) => {
+          const msg = err.message;
+          return (
+            msg.includes("429") ||
+            msg.includes("500") ||
+            msg.includes("502") ||
+            msg.includes("503") ||
+            msg.includes("rate_limit")
+          );
+        },
+      );
+    } catch (err) {
+      throw toFriendlyError(err, "OpenAI");
+    }
   }
 
   private async *_streamOnce(

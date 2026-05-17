@@ -46,7 +46,7 @@ describe("AnthropicClient error handling", () => {
       .next()
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe("string error");
+    expect((err as Error).message).toContain("string error");
     expect(mockStream).toHaveBeenCalledTimes(1);
   });
 
@@ -59,7 +59,7 @@ describe("AnthropicClient error handling", () => {
       .next()
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe("42");
+    expect((err as Error).message).toContain("42");
     expect(mockStream).toHaveBeenCalledTimes(1);
   });
 
@@ -73,8 +73,8 @@ describe("AnthropicClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(APIError);
-    expect((err as APIError).status).toBe(500);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("server error (500)");
     expect(mockStream).toHaveBeenCalledTimes(3);
   });
 
@@ -88,8 +88,8 @@ describe("AnthropicClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(APIError);
-    expect((err as APIError).status).toBe(502);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("server error (502)");
     expect(mockStream).toHaveBeenCalledTimes(3);
   });
 
@@ -103,8 +103,8 @@ describe("AnthropicClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(APIError);
-    expect((err as APIError).status).toBe(429);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("rate limit");
     expect(mockStream).toHaveBeenCalledTimes(3);
   });
 
@@ -118,8 +118,8 @@ describe("AnthropicClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(APIError);
-    expect((err as APIError).status).toBe(529);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("server error (529)");
     expect(mockStream).toHaveBeenCalledTimes(3);
   });
 
@@ -131,8 +131,8 @@ describe("AnthropicClient error handling", () => {
       .stream([], "sys", [])
       .next()
       .catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(APIError);
-    expect((err as APIError).status).toBe(400);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("bad request (400)");
     expect(mockStream).toHaveBeenCalledTimes(1);
   });
 

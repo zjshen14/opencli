@@ -34,7 +34,7 @@ describe("OpenAIClient error handling", () => {
       .next()
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe("string error");
+    expect((err as Error).message).toContain("string error");
     expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
@@ -45,7 +45,7 @@ describe("OpenAIClient error handling", () => {
       .next()
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe("42");
+    expect((err as Error).message).toContain("42");
     expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 

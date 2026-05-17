@@ -43,7 +43,7 @@ describe("GeminiClient error handling", () => {
       .next()
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe("string error");
+    expect((err as Error).message).toContain("string error");
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(1);
   });
 
@@ -56,7 +56,7 @@ describe("GeminiClient error handling", () => {
       .next()
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe("42");
+    expect((err as Error).message).toContain("42");
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(1);
   });
 
@@ -70,8 +70,8 @@ describe("GeminiClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(500);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("server error (500)");
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(3);
   });
 
@@ -85,8 +85,8 @@ describe("GeminiClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(502);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("server error (502)");
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(3);
   });
 
@@ -100,8 +100,8 @@ describe("GeminiClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(429);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("rate limit");
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(3);
   });
 
@@ -115,8 +115,8 @@ describe("GeminiClient error handling", () => {
       .catch((e: unknown) => e);
     await vi.runAllTimersAsync();
     const err = await errPromise;
-    expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(503);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("server error (503)");
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(3);
   });
 
@@ -128,8 +128,8 @@ describe("GeminiClient error handling", () => {
       .stream([], "sys", [])
       .next()
       .catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(400);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain("bad request (400)");
     expect(mockGenerateContentStream).toHaveBeenCalledTimes(1);
   });
 

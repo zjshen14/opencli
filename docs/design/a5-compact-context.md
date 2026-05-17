@@ -1,6 +1,6 @@
 # Design: A5 — /compact + /context
 
-_Status: Ready for implementation. Tracking issue: [#26](https://github.com/zjshen14/opencli/issues/26). Phase: [Roadmap A5](../roadmap.md)._
+_Status: Staged into A5a (Ready for implementation) and A5b (Ready for design review after A5a ships). Tracking issues: [#26](https://github.com/zjshen14/opencli/issues/26) (A5a), [#27](https://github.com/zjshen14/opencli/issues/27) (A5b). Phase: [Roadmap A5](../roadmap.md)._
 
 ---
 
@@ -8,20 +8,66 @@ _Status: Ready for implementation. Tracking issue: [#26](https://github.com/zjsh
 
 `ContextManager.prune()` hard-drops old messages with `slice(-maxHistoryMessages)`. On long sessions the agent loses its original task description, early decisions, and file paths it already visited — causing drift and repeated work. Users have no way to see how full the context window is or to do anything about it before the drop happens silently.
 
-**Goal:** give users a `/compact` command that replaces old messages with an LLM-generated structured summary, and a `/context` command that reports current token usage. Also add auto-compact that fires at 75% of the model's actual context window.
+**Goal:** give users manual control over context compaction via `/compact` and visibility via `/context`, then add smart auto-compaction after real-session validation.
+
+---
+
+## Execution plan — two phases
+
+The feedback from the [design review](https://github.com/zjshen14/opencli/issues/26#issuecomment-4469196098) identified critical gaps in auto-compact logic (mid-task triggers, trajectory elongation risk, token estimation accuracy). Ship in two stages:
+
+### **A5a — Manual context compaction (ready to implement)**
+- User-triggered `/compact` command with structured LLM summary
+- `/context` command showing token usage + percentage
+- Core algorithm: tail-keep + error-signal extraction
+- **No auto-compact.** Collects real-session data for Phase 2 validation.
+- ~6 files, ~2 days to implement + test
+
+### **A5b — Auto-compact with safety gates (design review complete, blocked on A5a)**
+- Accurate token counting via provider APIs (not JSON.stringify hack)
+- Auto-compact only after agent completes a full turn (blocks mid-task triggers)
+- Config gate: `autoCompact: false` default; flip after A5a validation
+- Threshold warnings when approaching 60% and 75%
+- Original prompt preservation: keep first 2 messages verbatim
+- Better compaction model failure handling
+- ~8 files, ~3 days to implement + real-session integration tests
+
+**Sequencing:**
+1. A5a ships → users can manually `/compact` long sessions
+2. Real sessions accumulate for 1–2 weeks → understand actual compaction value/cost/failures
+3. A5b design refined with real data → estimate auto-compact safety
+4. A5b implements and tests with real scenario replays
+5. Auto-compact lands opt-in by default (config flag), flips on after validation
 
 ---
 
 ## Scope
 
-| Item | V1 (this milestone) |
+### A5a (manual compaction)
+
+| Item | Status |
 |---|---|
-| `/compact` — manual structured LLM summarization | ✓ |
-| `/context` — print estimated tokens vs. context window | ✓ |
-| Auto-compact at 75% token threshold | ✓ |
-| `createCompactionClient()` — cheapest model per provider | ✓ |
-| Persistent token bar in REPL footer | Deferred to A6 (UX rendering milestone) |
-| `--compaction-model` CLI flag | Deferred — config field `compactionModel` is the extension point |
+| `/compact` — manual structured LLM summarization | ✓ Spec'd |
+| `/context` — print estimated tokens vs. context window | ✓ Spec'd |
+| Core compaction algorithm + unit tests | ✓ Spec'd |
+| Cheap compaction model via provider selection | ✓ Spec'd |
+| Auto-compact hook | ✗ Deferred to A5b |
+| Token API integration | ✗ Deferred to A5b |
+| Threshold warnings | ✗ Deferred to A5b |
+| Persistent token bar in REPL footer | ✗ Deferred to A6 (UX rendering) |
+| `--compaction-model` CLI flag | ✗ Deferred (config field is extension point) |
+
+### A5b (auto-compact, post-A5a)
+
+| Item | Status |
+|---|---|
+| Auto-compact with provider token APIs | TBD (design review) |
+| Turn-boundary detection (no mid-task triggers) | TBD |
+| Config gate `autoCompact: false` default | TBD |
+| Original prompt preservation | TBD |
+| Compaction failure handling | TBD |
+| Threshold warnings + visibility | TBD |
+| Real-session integration tests | TBD |
 
 ---
 
@@ -74,7 +120,29 @@ Free-form summaries silently drop content. Named sections act as checklists — 
 
 ---
 
-## Algorithm
+## A5a — What is (and is NOT) included
+
+**What A5a implements:**
+- User can call `/compact` at any time to summarize old messages
+- `/context` shows current token usage and percentage of context window
+- Core compaction algorithm: tail-keep (last 10 messages) + head-summarize + error-signal extraction
+- Structured 5-section summary prompt (Task/Progress/Decisions/Errors/State)
+- Cheap compaction model selection (haiku/flash-lite per provider)
+- Unit tests for structural properties
+
+**What A5a explicitly does NOT do:**
+- No auto-compact hook. No timer or threshold trigger. Users decide when to compact.
+- No token API integration. Keeps the `JSON.stringify.length / 4` estimate (known to be 2–3× inaccurate; documented as a known gap for A5b).
+- No original prompt preservation logic. Summarizes everything in the head (A5b will keep first 2 messages verbatim).
+- No compaction model failure handling beyond "propagate the error." The `/compact` command can fail and the user retries (A5b adds retry + fallback logic).
+- No mid-task compaction risk (doesn't apply; manual invocation is always at a user choice point).
+- No observability or metrics (A5b instruments this).
+
+A5a ships a manual escape hatch. It is not yet a smart, automatic system. That comes in A5b after real-session validation.
+
+---
+
+## Algorithm (shared between A5a and A5b)
 
 ```
 compactHistory(context, compactionClient):
@@ -130,7 +198,9 @@ const summaryMessage: Message = {
 
 ---
 
-## Context window lookup
+## Context window lookup (A5a + A5b shared)
+
+Used by `/context` display (A5a) and auto-compact trigger (A5b):
 
 ```typescript
 // Matched longest-prefix-first.
@@ -155,12 +225,8 @@ export function contextWindowFor(model: string): number {
 }
 ```
 
-Auto-compact fires when:
-
-```typescript
-estimatedTokens >= COMPACT_THRESHOLD * contextWindowFor(this.model)
-// COMPACT_THRESHOLD = 0.75
-```
+In **A5a** (`/context` display): shows `estimatedTokens / contextWindow * 100%`.
+In **A5b** (auto-compact): threshold will be `estimatedTokens >= 0.75 * contextWindowFor(model)` — defined in A5b spec.
 
 ---
 
@@ -247,10 +313,7 @@ export async function compactHistory(
   compactionClient: LLMClient,
 ): Promise<CompactResult>;
 
-/** Returns true when the agent loop should trigger auto-compact. */
-export function isAutoCompactNeeded(estimatedTokens: number, model: string): boolean;
-
-/** Look up the context window size for a model, with a conservative fallback. */
+/** Look up the context window size for a model, with a conservative fallback. Used by /context (A5a) and auto-compact (A5b). */
 export function contextWindowFor(model: string): number;
 ```
 
@@ -302,26 +365,7 @@ constructor(
 }
 ```
 
-### New `AgentEvent` variant
-
-```typescript
-| { type: "compact"; messagesRemoved: number; summaryLength: number }
-```
-
-### Auto-compact hook in the main loop
-
-After `estimatedTokens` is computed (already present), before the LLM call:
-
-```typescript
-if (isAutoCompactNeeded(estimatedTokens, this.model)) {
-  const result = await compactHistory(this.context, this.compactionClient);
-  if (result.messagesRemoved > 0) {
-    yield { type: "compact", messagesRemoved: result.messagesRemoved, summaryLength: result.summaryLength };
-  }
-}
-```
-
-### Manual compact and context stats
+### Manual compact and context stats (A5a)
 
 ```typescript
 async compact(): Promise<CompactResult> {
@@ -392,7 +436,7 @@ if (input === "/compact") {
 }
 ```
 
-### `/context` handler
+### `/context` handler (A5a)
 
 ```typescript
 if (input === "/context") {
@@ -404,19 +448,9 @@ if (input === "/context") {
 }
 ```
 
-### Handle auto-compact events in the render loop
-
-```typescript
-} else if (event.type === "compact") {
-  printInfo(
-    `[auto-compacted: ${event.messagesRemoved} messages replaced by structured summary]`,
-  );
-}
-```
-
 ---
 
-## Failure modes
+## Failure modes (A5a only)
 
 | Failure | Behaviour |
 |---|---|
@@ -424,12 +458,11 @@ if (input === "/context") {
 | All messages fit in KEEP_RECENT window | Returns `{ messagesRemoved: 0 }`; REPL prints "fills the full window" |
 | Compaction model API error | `compact()` propagates the error; REPL catches and prints via `printError()`; history untouched |
 | Compaction model returns empty summary | Summary message is `[Session context compacted]\n\n` — visibly empty; REPL still prints stats |
-| Model not in context window table | Falls back to 100K conservative default; auto-compact fires later than optimal but not incorrectly |
-| Auto-compact fires mid-stream | The check runs before the LLM call, never during a stream; history is stable at the time of compaction |
+| Model not in context window table | Falls back to 100K conservative default; `/context` shows the fallback |
 
 ---
 
-## Test strategy
+## Test strategy (A5a)
 
 ### `src/core/compact.test.ts` (new)
 
@@ -443,8 +476,8 @@ if (input === "/context") {
 | Mock client returns empty string → summary message has empty body | Empty summary |
 | Head contains function_result with "Error:" → error block present in summary | Error signal preservation |
 | Head contains function_result without "Error:" → no error block | Error detection specificity |
-| `isAutoCompactNeeded(150_001, "claude-sonnet-4-6")` → true (75% of 200K) | Threshold math |
-| `isAutoCompactNeeded(149_999, "claude-sonnet-4-6")` → false | Threshold boundary |
+| `contextWindowFor("claude-opus-4-7")` → 200_000 | Lookup exact match |
+| `contextWindowFor("gemini-2.5-whatever")` → 1_048_576 | Lookup prefix match |
 | `contextWindowFor("unknown-model-xyz")` → 100_000 | Fallback |
 
 Use a mock `LLMClient` that returns a fixed summary string. No real API calls.
@@ -485,31 +518,32 @@ To evaluate compaction quality you need sessions long enough to trigger compacti
 
 ### Proposed evaluation path
 
-**Phase 1 — V1 (now):** Structural unit tests only. Covers format, error-signal extraction, and threshold math. This is what the test strategy above specifies.
+**Phase 1 — A5a (now):** Structural unit tests only. Covers format, error-signal extraction, and context window lookup. This is what the test strategy above specifies.
 
-**Phase 2 — post-V1 (after real sessions):** Manual inspection. Collect a handful of real session logs that were auto-compacted. Read the summary against the original head messages. This surfaces the first real failures cheaply and guides prompt tuning without requiring infrastructure.
+**Phase 2 — A5a post-ship (after real sessions):** Manual inspection. Collect a handful of real session logs where users called `/compact` manually. Read each summary against the original head messages. This surfaces the first real failures cheaply and guides prompt tuning without requiring infrastructure. Run for 1–2 weeks to gather enough data.
 
-**Phase 3 — D1 integration (medium-term):** The D1 eval harness already runs full agent sessions against known scenarios. Extend it with one or two scenarios that produce enough history to cross the 75% token threshold — then compare solve rate before and after compaction is enabled. This is the most honest signal: if the agent still completes the task, the summary preserved enough. JetBrains and OpenHands both use this approach (arXiv:2508.21433; OpenHands SWE-bench results).
+**Phase 3 — A5b (medium-term, after Phase 2 data):** Design review of A5b with Phase 2 findings. Then implement auto-compact with opt-in gate. D1 integration: extend the eval harness with one or two scenarios that produce enough history to cross the 75% token threshold (e.g., 15-turn multi-file refactor), then compare solve rate before and after auto-compact is enabled. This is the most honest signal: if the agent still completes the task, the summary preserved enough.
 
-**Phase 4 — fact recall scoring (if problems emerge):** If Phase 3 reveals quality regressions, add structured recall measurement. Approach: before compaction, extract "ground truth facts" from the head messages — every file path, every error message, every explicit decision. After compaction, check what fraction appear in the summary text. This is more objective than LLM-as-judge because it tests specific claims rather than fluency. Factory.ai's 6-dimension LLM-as-judge evaluation is an alternative if recall scoring proves too brittle.
-
-### What to instrument now to enable Phase 3
-
-The D1 harness runs `node dist/index.js run` as a subprocess and checks output. To measure compaction impact:
-
-1. Add a long scenario to the D1 scenario set — e.g., a multi-file refactor that requires 15+ tool calls, generating enough history to approach the context threshold.
-2. The agent already emits `compact` events; the CLI already prints `[auto-compacted: ...]`. The D1 runner can check for this string in the output to confirm compaction fired.
-3. Run the same scenario with `maxHistoryMessages=1000` (effectively disabling compaction) and with the default threshold. Compare solve rates across N runs.
-
-This does not need to happen in A5. Flagging it here so the D1 harness extension is a known follow-on task, not a surprise.
+**Phase 4 — Structured eval (if Phase 3 reveals problems):** If auto-compact causes regressions, add structured recall measurement. Extract "ground truth facts" from the head messages before compaction — every file path, every error message, every explicit decision. Check what fraction appear in the summary. This is more objective than LLM-as-judge because it tests specific claims rather than fluency.
 
 ---
 
-## Deferred
+## Deferred to A5b (auto-compact phase)
 
-### Auto-compact V2: observation masking
+- **Auto-compact trigger** — only after A5a ships and Phase 2 real-session inspection completes
+- **Token API integration** — replace `JSON.stringify.length / 4` with provider `countTokens` APIs; critical for accuracy
+- **Original prompt preservation** — keep first 2 messages verbatim to prevent constraint loss
+- **Compaction model failure handling** — retry logic + fallback to main client
+- **Turn-boundary detection** — trigger only after agent completes a full turn (no mid-task compaction)
+- **Threshold warnings** — print hint at 60%, stronger hint at 75%
+- **Config gate** — `autoCompact: false` default; flip to `true` after Phase 3 validation
+- **Observability** — metrics for compaction frequency, token freed, costs
 
-The JetBrains "Complexity Trap" paper (arXiv:2508.21433) shows observation masking matches or beats LLM summarization in most coding-agent benchmarks at zero additional API cost. A future iteration could try masking as the primary strategy: keep the last M=10 tool-result messages verbatim, replace older ones with a one-line placeholder. This avoids trajectory elongation entirely and has no compaction model cost. Needs evaluation against real OpenCLI sessions before adopting.
+## Deferred to future milestones
+
+### Observation masking (post-A5b evaluation)
+
+The JetBrains "Complexity Trap" paper (arXiv:2508.21433) shows observation masking matches or beats LLM summarization in most coding-agent benchmarks at zero additional API cost. After A5b ships and we have real data, consider masking as an alternative: keep the last M=10 tool-result messages verbatim, replace older ones with a one-line placeholder. This avoids trajectory elongation entirely and has no compaction model cost.
 
 ### Persistent token bar in REPL footer
 
@@ -538,15 +572,21 @@ The `COMPACTION_MODELS` table hard-codes cheapest-per-provider. A config field `
 
 ---
 
-## File change summary
+## File change summary — A5a only
 
 | Action | File |
 |---|---|
-| Create | `src/core/compact.ts` |
-| Create | `src/core/compact.test.ts` |
-| Modify | `src/core/context.ts` — `replaceHistory()`, `messageCount` getter, `maxMessages` getter |
-| Modify | `src/core/context.test.ts` — new method tests |
-| Modify | `src/core/agent.ts` — `compactionClient` constructor option, `compact` event, auto-compact hook, `compact()`, `getContextStats()` |
-| Modify | `src/providers/factory.ts` — `COMPACTION_MODELS`, `createCompactionClient()` |
-| Modify | `src/cli/index.ts` — create and pass `compactionClient` to Agent |
-| Modify | `src/cli/repl.ts` — `/compact`, `/context` handlers; handle `compact` event |
+| Create | `src/core/compact.ts` — `compactHistory()`, `contextWindowFor()`, structured prompt, error extraction |
+| Create | `src/core/compact.test.ts` — unit tests for compaction algorithm and error detection |
+| Modify | `src/core/context.ts` — add `replaceHistory()`, `messageCount` getter, `maxMessages` getter |
+| Modify | `src/core/context.test.ts` — extend with new getter/method tests |
+| Modify | `src/core/agent.ts` — add `compactionClient` constructor option, add `compact()` and `getContextStats()` methods |
+| Modify | `src/providers/factory.ts` — add `COMPACTION_MODELS` map, add `createCompactionClient()` function |
+| Modify | `src/cli/index.ts` — create and pass `compactionClient` to Agent constructor |
+| Modify | `src/cli/repl.ts` — add `/compact` handler, add `/context` handler |
+
+**A5b (auto-compact, deferred) will additionally modify:**
+- `src/core/agent.ts` — add `compact` event type, add auto-compact hook in main loop
+- `src/core/compact.ts` — add token API client integration, add `isAutoCompactNeeded()` function
+- `src/cli/repl.ts` — add threshold warnings, handle `compact` events
+- Config system — add `autoCompact: boolean` field (default false)

@@ -31,7 +31,7 @@ export function hasNativeThinking(model: string): boolean {
 
 const COMPACTION_MODELS: Record<string, string> = {
   anthropic: "claude-haiku-4-5-20251001",
-  gemini: "gemini-2.0-flash-lite",
+  gemini: "gemini-3.1-flash-lite-preview",
   openai: "gpt-4.1-mini",
 };
 

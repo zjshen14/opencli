@@ -7,6 +7,10 @@ It must be kept in sync with `CLAUDE.md` — see `docs/engineering-practices.md`
 
 OpenCLI — an open-source AI agent CLI that supports Google Gemini and Anthropic Claude models, modeled after Claude Code. The implementation is a working prototype in TypeScript/Node.js (ESM, Node 20+).
 
+## Getting Started with a Task
+
+**New to this project?** Start here: [Task Workflow](docs/task-workflow.md) — it walks you through the typical task lifecycle, from reading the issue to committing your work. It references this document and [docs/engineering-practices.md](docs/engineering-practices.md) for the conventions you need to know.
+
 ## Commands
 
 ```bash

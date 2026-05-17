@@ -116,10 +116,39 @@ export class ContextManager {
       startIdx++;
     }
 
-    // Guard: if no clean start was found (entire window is model/tool-result
-    // turns with no user input), fall back to the unmodified slice rather than
-    // leaving history empty — an empty contents array causes providers to reject
-    // the next API call outright.
-    this.history = startIdx < sliced.length ? sliced.slice(startIdx) : sliced;
+    if (startIdx < sliced.length) {
+      this.history = sliced.slice(startIdx);
+      return;
+    }
+
+    // No clean user message found from the head — scan from the tail so we
+    // don't return a model-first window (providers reject with INVALID_ARGUMENT).
+    // This happens when a single user turn triggers so many tool-call/result
+    // pairs that the original user message scrolls out of the window.
+    let tailIdx = sliced.length - 1;
+    while (tailIdx >= 0) {
+      const msg = sliced[tailIdx];
+      if (msg.role === "user" && !msg.parts.some((p) => p.type === "function_result")) {
+        break;
+      }
+      tailIdx--;
+    }
+
+    if (tailIdx >= 0) {
+      this.history = sliced.slice(tailIdx);
+      return;
+    }
+
+    // Truly pathological: no clean user text message anywhere in the window
+    // (e.g. maxHistoryMessages is so small the window is pure tool-call/result
+    // pairs). Prepend a synthetic anchor so history never starts with a model
+    // turn — providers require the first message to be a user text message.
+    this.history = [
+      {
+        role: "user",
+        parts: [{ type: "text", text: "(earlier context unavailable — history was pruned)" }],
+      },
+      ...sliced,
+    ];
   }
 }

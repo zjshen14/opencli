@@ -42,22 +42,22 @@ Before specifying the algorithm, a survey of production agents and academic lite
 
 ### Academic literature
 
-**"The Complexity Trap" (JetBrains, NeurIPS 2025 DL4Code Workshop, arXiv:2508.21433)**
+**["The Complexity Trap" (JetBrains, NeurIPS 2025 DL4Code Workshop, arXiv:2508.21433)](https://arxiv.org/abs/2508.21433)**
 The most directly relevant finding: simple observation masking outperforms LLM summarization in 4 out of 5 coding-agent test settings. LLM summarization introduces **trajectory elongation** — compressing failure signals causes agents to retry things they already tried, running ~15% more turns. Observations dominate token consumption (~84% of turn tokens in SE agent trajectories). LLM summarization adds 5–7% extra API cost for the summary call itself.
 
-**MemGPT (Packer et al., 2023, arXiv:2310.08560)**
+**[MemGPT (Packer et al., 2023, arXiv:2310.08560)](https://arxiv.org/abs/2310.08560)**
 OS-inspired virtual context: main context (FIFO history with a rolling recursive summary at position 0) + external archival storage (LanceDB, searchable via agent tool calls). The agent itself manages memory. Recursive summary means each eviction merges the old summary with the newly evicted batch.
 
-**TACO: Terminal Agent Context Compression (2025, arXiv:2604.19572)**
+**[TACO: Terminal Agent Context Compression (2025, arXiv:2604.19572)](https://arxiv.org/html/2604.19572v1)**
 Maintains a global rule pool of compression rules evolved from failure analysis. Critical rule: **outputs containing error or failure signals are always kept verbatim** — never compressed. Compression rules have `keep patterns` (errors, success indicators) and `strip patterns` (progress bars, verbose listings).
 
-**Acon: Optimizing Context Compression for Long-Horizon Agents (2025, arXiv:2510.00615)**
+**[Acon: Optimizing Context Compression for Long-Horizon Agents (2025, arXiv:2510.00615)](https://arxiv.org/html/2510.00615v1)**
 Gradient-free guideline optimization: analyzes sessions where the agent succeeded with full context but failed with compressed context, then refines compression guidelines. Key insight: causal relations (why a decision was made), evolving states (what changed), and preconditions must survive compression.
 
-**HiAgent: Hierarchical Working Memory Management (ACL 2025, arXiv:2408.09559)**
+**[HiAgent: Hierarchical Working Memory Management (ACL 2025, arXiv:2408.09559)](https://arxiv.org/abs/2408.09559)**
 Subgoal-based summarization: when a subgoal completes, all action-observation pairs for it are summarized. Results: 2× success rate, 3.8 fewer steps, 35% shorter context vs. flat management.
 
-**Factory.ai structured summarization evaluation**
+**[Factory.ai structured summarization evaluation](https://factory.ai/news/evaluating-compression)**
 Free-form summaries silently drop content. Named sections act as checklists — the model is forced to look for that type of information before moving on. Six quality dimensions: accuracy (file paths, error messages) > artifact trail (what was read/modified) > continuity (seamless resumption) > context awareness > completeness > instruction following. Factory scored 3.70 vs. Anthropic 3.44 vs. OpenAI 3.35.
 
 ### Key conclusions for OpenCLI
@@ -525,16 +525,16 @@ The `COMPACTION_MODELS` table hard-codes cheapest-per-provider. A config field `
 
 | Source | What it contributed |
 |---|---|
-| "The Complexity Trap" (JetBrains, NeurIPS 2025 DL4Code, arXiv:2508.21433) | Observation masking vs. LLM summarization benchmark; trajectory elongation effect; 84% of tokens are observations |
-| MemGPT / Letta (Packer et al., 2023, arXiv:2310.08560) | Recursive summarization; two-tier memory hierarchy; agent-managed archival storage |
-| TACO (2025, arXiv:2604.19572) | Error signals must be kept verbatim; rule-based compression; global rule pool with confidence scoring |
-| Acon (2025, arXiv:2510.00615) | Causal relations, evolving states, preconditions as critical content; gradient-free guideline optimization |
-| HiAgent (ACL 2025, arXiv:2408.09559) | Subgoal-aligned summarization; 2× success rate, 35% shorter context |
-| Factory.ai structured summarization evaluation | Named sections vs. free-form; 3.70 vs. 3.44 quality score; 6 quality dimensions |
-| Claude Code compaction documentation | `compact_20260112` API strategy; CLAUDE.md re-injection; microcompact; $0.40 per compaction cost data |
-| Gemini CLI source (DeepWiki) | 50% threshold; two-pass verify; 30% tail preservation; `findCompressSplitPoint()` |
-| OpenHands condenser architecture | Event store; nine pluggable condenser strategies; cheaper dedicated model for summarization |
-| SWE-agent observation masking | M=10 window; 52% cost reduction; 2.6% solve-rate improvement |
+| ["The Complexity Trap" (JetBrains, NeurIPS 2025 DL4Code, arXiv:2508.21433)](https://arxiv.org/abs/2508.21433) | Observation masking vs. LLM summarization benchmark; trajectory elongation effect; 84% of tokens are observations |
+| [MemGPT / Letta (Packer et al., 2023, arXiv:2310.08560)](https://arxiv.org/abs/2310.08560) | Recursive summarization; two-tier memory hierarchy; agent-managed archival storage |
+| [TACO (2025, arXiv:2604.19572)](https://arxiv.org/html/2604.19572v1) | Error signals must be kept verbatim; rule-based compression; global rule pool with confidence scoring |
+| [Acon (2025, arXiv:2510.00615)](https://arxiv.org/html/2510.00615v1) | Causal relations, evolving states, preconditions as critical content; gradient-free guideline optimization |
+| [HiAgent (ACL 2025, arXiv:2408.09559)](https://arxiv.org/abs/2408.09559) | Subgoal-aligned summarization; 2× success rate, 35% shorter context |
+| [Factory.ai structured summarization evaluation](https://factory.ai/news/evaluating-compression) | Named sections vs. free-form; 3.70 vs. 3.44 quality score; 6 quality dimensions |
+| [Claude Code compaction documentation](https://platform.claude.com/docs/en/build-with-claude/compaction) | `compact_20260112` API strategy; CLAUDE.md re-injection; microcompact; $0.40 per compaction cost data |
+| [Gemini CLI context management (DeepWiki)](https://deepwiki.com/google-gemini/gemini-cli/4.12-chat-compression-and-context-management) | 50% threshold; two-pass verify; 30% tail preservation; `findCompressSplitPoint()` |
+| [OpenHands condenser architecture](https://docs.openhands.dev/sdk/arch/condenser) | Event store; nine pluggable condenser strategies; cheaper dedicated model for summarization |
+| [SWE-agent (Princeton NLP)](https://swe-agent.com/) | M=10 observation masking; 52% cost reduction; 2.6% solve-rate improvement |
 
 ---
 

@@ -29,6 +29,18 @@ export function hasNativeThinking(model: string): boolean {
   return false;
 }
 
+const COMPACTION_MODELS: Record<string, string> = {
+  anthropic: "claude-haiku-4-5-20251001",
+  gemini: "gemini-2.0-flash-lite",
+  openai: "gpt-4.1-mini",
+};
+
+export function createCompactionClient(sessionModel: string, apiKey: string): LLMClient {
+  const provider = detectProvider(sessionModel);
+  const model = COMPACTION_MODELS[provider] ?? sessionModel;
+  return createClient(model, apiKey, { provider });
+}
+
 export function createClient(
   model: string,
   apiKey: string,

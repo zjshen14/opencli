@@ -9,6 +9,8 @@ import { buildReminder, buildPlanSuffix } from "./prompt.js";
 import type { FunctionCallPart, Message } from "../providers/types.js";
 import type { ObservabilityHandler } from "./observability.js";
 import type { SnapshotManager } from "../state/snapshot.js";
+import { compactHistory, contextWindowFor } from "./compact.js";
+import type { CompactResult } from "./compact.js";
 
 export type AgentEvent =
   | { type: "text"; text: string }
@@ -29,6 +31,7 @@ export class Agent {
   private model: string;
   private obs?: ObservabilityHandler;
   private snapshotManager?: SnapshotManager;
+  private compactionClient: LLMClient;
 
   constructor(
     private client: LLMClient,
@@ -41,6 +44,7 @@ export class Agent {
       model?: string;
       onObservability?: ObservabilityHandler;
       snapshotManager?: SnapshotManager;
+      compactionClient?: LLMClient;
     },
   ) {
     this.context = new ContextManager(systemInstruction, maxHistoryMessages);
@@ -48,6 +52,7 @@ export class Agent {
     this.model = options?.model ?? "";
     this.obs = options?.onObservability;
     this.snapshotManager = options?.snapshotManager;
+    this.compactionClient = options?.compactionClient ?? client;
   }
 
   setConfirmFn(fn: ConfirmFn): void {
@@ -233,6 +238,25 @@ export class Agent {
         });
       }
     }
+  }
+
+  async compact(): Promise<CompactResult> {
+    return compactHistory(this.context, this.compactionClient);
+  }
+
+  getContextStats(): {
+    messageCount: number;
+    estimatedTokens: number;
+    contextWindow: number;
+    maxHistoryMessages: number;
+  } {
+    const messages = this.context.getMessages();
+    return {
+      messageCount: this.context.messageCount,
+      estimatedTokens: Math.round(JSON.stringify(messages).length / 4),
+      contextWindow: contextWindowFor(this.model),
+      maxHistoryMessages: this.context.maxMessages,
+    };
   }
 
   clearHistory(): void {

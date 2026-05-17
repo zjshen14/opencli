@@ -1,0 +1,127 @@
+import type { LLMClient } from "../providers/client.js";
+import type { Message } from "../providers/types.js";
+import type { ContextManager } from "./context.js";
+
+export interface CompactResult {
+  messagesRemoved: number;
+  summaryLength: number;
+}
+
+const KEEP_RECENT = 10;
+const COMPACT_MIN_MESSAGES = 4;
+
+// Longest-prefix-first; order matters — more specific prefixes must come before shorter ones.
+const MODEL_CONTEXT_WINDOWS: [prefix: string, tokens: number][] = [
+  ["gemini-2.5", 1_048_576],
+  ["gemini-2.0", 1_048_576],
+  ["gemini-1.5", 1_048_576],
+  ["claude-", 200_000],
+  ["gpt-4o", 128_000],
+  ["o1", 200_000],
+  ["o3", 200_000],
+  ["o4", 200_000],
+];
+
+const DEFAULT_CONTEXT_WINDOW = 100_000;
+
+const SUMMARIZATION_PROMPT = `Summarize this coding session for context compaction.
+Respond with exactly these five sections using these headers — do not add or rename sections:
+
+## Task
+The original user request and overall goal. One or two sentences.
+
+## Progress
+What has been completed. List every file created or modified with its exact path.
+
+## Decisions
+Key technical choices made during the session and the reason for each.
+
+## Errors
+Any error messages or test failures encountered. Quote them exactly — do not paraphrase.
+If resolved, state the resolution. If unresolved, say so.
+
+## State
+Current state of work and the immediate next steps remaining.
+
+Rules:
+- Under 400 words total.
+- Copy file paths, error messages, function names, and version numbers exactly.
+- Do not narrate tool calls. Focus on outcomes and current state.`;
+
+export function contextWindowFor(model: string): number {
+  for (const [prefix, size] of MODEL_CONTEXT_WINDOWS) {
+    if (model.startsWith(prefix)) return size;
+  }
+  return DEFAULT_CONTEXT_WINDOW;
+}
+
+function extractErrorResults(messages: Message[]): string[] {
+  const errors: string[] = [];
+  for (const msg of messages) {
+    for (const part of msg.parts) {
+      if (part.type === "function_result" && part.result.includes("Error:")) {
+        errors.push(`[${part.name}] ${part.result}`);
+      }
+    }
+  }
+  return errors;
+}
+
+async function streamToText(
+  client: LLMClient,
+  messages: Message[],
+  prompt: string,
+): Promise<string> {
+  const chunks: string[] = [];
+  for await (const event of client.stream(messages, prompt, [])) {
+    if (event.type === "text") chunks.push(event.text);
+  }
+  return chunks.join("");
+}
+
+/**
+ * Replace old messages in `context` with a structured LLM-generated summary.
+ * Keeps the most recent KEEP_RECENT messages verbatim.
+ * Error signals from tool results are quoted verbatim in the summary.
+ * Returns { messagesRemoved: 0 } if history is too short to compact.
+ * Never throws — propagates LLM errors to the caller.
+ */
+export async function compactHistory(
+  context: ContextManager,
+  compactionClient: LLMClient,
+): Promise<CompactResult> {
+  if (context.messageCount < COMPACT_MIN_MESSAGES) {
+    return { messagesRemoved: 0, summaryLength: 0 };
+  }
+
+  const messages = context.getMessages();
+  const tail = messages.slice(-KEEP_RECENT);
+  const head = messages.slice(0, -KEEP_RECENT);
+
+  if (head.length === 0) {
+    return { messagesRemoved: 0, summaryLength: 0 };
+  }
+
+  const errors = extractErrorResults(head);
+  const summary = await streamToText(compactionClient, head, SUMMARIZATION_PROMPT);
+
+  const errorBlock =
+    errors.length > 0
+      ? `\n\n### Verbatim error outputs preserved from compacted history\n\n` +
+        errors.map((e) => "```\n" + e + "\n```").join("\n\n")
+      : "";
+
+  const summaryMessage: Message = {
+    role: "user",
+    parts: [
+      {
+        type: "text",
+        text: `[Session context compacted — earlier conversation summarized]\n\n${summary}${errorBlock}`,
+      },
+    ],
+  };
+
+  context.restoreMessages([summaryMessage, ...tail]);
+
+  return { messagesRemoved: head.length, summaryLength: summary.length };
+}

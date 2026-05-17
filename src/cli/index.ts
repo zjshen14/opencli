@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { createClient, detectProvider } from "../providers/factory.js";
+import { createClient, createCompactionClient, detectProvider } from "../providers/factory.js";
 import { Agent } from "../core/agent.js";
 import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
@@ -333,10 +333,12 @@ async function createAgent(
   const snapshotManager = new SnapshotManager();
 
   const systemInstruction = await loadSystemInstruction();
+  const compactionClient = createCompactionClient(model, apiKey);
   const agent = new Agent(client, tools, skills, systemInstruction, config.historySize, maxTurns, {
     model,
     onObservability: debug ? makeDebugHandler() : undefined,
     snapshotManager,
+    compactionClient,
   });
   return { agent, skills, mcpManager, snapshotManager };
 }

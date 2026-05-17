@@ -19,6 +19,8 @@ import type { SnapshotManager } from "../state/snapshot.js";
 const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: "help", description: "list available skills and commands" },
   { name: "plan", description: "explore and draft a plan, then approve before executing" },
+  { name: "compact", description: "summarize older conversation history to free context" },
+  { name: "context", description: "show current token usage vs. context window" },
   { name: "rewind", description: "undo agent file changes since last snapshot" },
   { name: "clear", description: "clear conversation history" },
   { name: "exit", description: "exit the agent" },
@@ -96,6 +98,40 @@ export async function runRepl(
         continue;
       }
       await runPlanFlow(agent, session, planPrompt);
+      continue;
+    }
+
+    // /compact — summarize older conversation history to free context
+    if (input === "/compact") {
+      const stats = agent.getContextStats();
+      if (stats.messageCount < 4) {
+        printInfo("Nothing to compact — conversation is too short.");
+        continue;
+      }
+      printInfo("Compacting conversation history…");
+      try {
+        const result = await agent.compact();
+        if (result.messagesRemoved === 0) {
+          printInfo("Nothing to compact — recent messages fill the full window.");
+        } else {
+          printInfo(
+            `Compacted ${result.messagesRemoved} message(s) into a ${result.summaryLength}-char summary.`,
+          );
+        }
+      } catch (err) {
+        printError(`Compaction failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      continue;
+    }
+
+    // /context — show estimated token usage vs. context window
+    if (input === "/context") {
+      const { messageCount, estimatedTokens, contextWindow } = agent.getContextStats();
+      const pct = Math.round((estimatedTokens / contextWindow) * 100);
+      printInfo(
+        `Est. tokens:  ~${estimatedTokens.toLocaleString()} / ${contextWindow.toLocaleString()}  (${pct}%)`,
+      );
+      printInfo(`Messages:     ${messageCount}`);
       continue;
     }
 

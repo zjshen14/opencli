@@ -83,6 +83,14 @@ export class ContextManager {
     this.history = messages;
   }
 
+  get messageCount(): number {
+    return this.history.length;
+  }
+
+  get maxMessages(): number {
+    return this.maxHistoryMessages;
+  }
+
   clear(): void {
     this.history = [];
     this.skillContent = [];

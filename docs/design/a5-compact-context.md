@@ -468,6 +468,43 @@ Use a mock `LLMClient` that returns a fixed summary string. No real API calls.
 
 ---
 
+## Compaction quality evaluation
+
+### Why it is harder than unit testing
+
+The unit tests in the previous section verify structural properties — sections present, error signals quoted, message count correct. They do not verify semantic fidelity: whether the summary preserved everything the agent will actually need. There is a gap between "the summary looks complete" and "the agent can finish the task after compaction."
+
+Two failure modes are opposite in character and require different detection strategies:
+
+- **Over-compression**: something important was dropped silently. The agent drifts, re-attempts things it already tried, or asks the user to repeat themselves. Only visible in downstream agent behaviour, not in the summary text itself.
+- **Under-compression**: the summary is verbose, barely reduces token count, and the auto-compact trigger fires again immediately. Detectable from `summaryLength` and the next turn's `estimatedTokens`.
+
+### The sequencing problem
+
+To evaluate compaction quality you need sessions long enough to trigger compaction. Those do not exist yet. Building a compaction eval harness before we have real data is premature — we would be optimizing against synthetic sessions that may not represent real usage patterns.
+
+### Proposed evaluation path
+
+**Phase 1 — V1 (now):** Structural unit tests only. Covers format, error-signal extraction, and threshold math. This is what the test strategy above specifies.
+
+**Phase 2 — post-V1 (after real sessions):** Manual inspection. Collect a handful of real session logs that were auto-compacted. Read the summary against the original head messages. This surfaces the first real failures cheaply and guides prompt tuning without requiring infrastructure.
+
+**Phase 3 — D1 integration (medium-term):** The D1 eval harness already runs full agent sessions against known scenarios. Extend it with one or two scenarios that produce enough history to cross the 75% token threshold — then compare solve rate before and after compaction is enabled. This is the most honest signal: if the agent still completes the task, the summary preserved enough. JetBrains and OpenHands both use this approach (arXiv:2508.21433; OpenHands SWE-bench results).
+
+**Phase 4 — fact recall scoring (if problems emerge):** If Phase 3 reveals quality regressions, add structured recall measurement. Approach: before compaction, extract "ground truth facts" from the head messages — every file path, every error message, every explicit decision. After compaction, check what fraction appear in the summary text. This is more objective than LLM-as-judge because it tests specific claims rather than fluency. Factory.ai's 6-dimension LLM-as-judge evaluation is an alternative if recall scoring proves too brittle.
+
+### What to instrument now to enable Phase 3
+
+The D1 harness runs `node dist/index.js run` as a subprocess and checks output. To measure compaction impact:
+
+1. Add a long scenario to the D1 scenario set — e.g., a multi-file refactor that requires 15+ tool calls, generating enough history to approach the context threshold.
+2. The agent already emits `compact` events; the CLI already prints `[auto-compacted: ...]`. The D1 runner can check for this string in the output to confirm compaction fired.
+3. Run the same scenario with `maxHistoryMessages=1000` (effectively disabling compaction) and with the default threshold. Compare solve rates across N runs.
+
+This does not need to happen in A5. Flagging it here so the D1 harness extension is a known follow-on task, not a surprise.
+
+---
+
 ## Deferred
 
 ### Auto-compact V2: observation masking

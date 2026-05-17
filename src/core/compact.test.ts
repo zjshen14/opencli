@@ -185,8 +185,8 @@ describe("compactHistory — tool message flattening", () => {
     expect(allText).toContain("[Tool result: bash →");
   });
 
-  it("truncates long tool results to 500 chars in flattened text", async () => {
-    const longOutput = "x".repeat(1000);
+  it("truncates a long tool result in the flattened text (cap is per-part)", async () => {
+    const longOutput = "x".repeat(5000);
     const ctx = new ContextManager();
     ctx.addMessage(userMsg("start"));
     ctx.addMessage({
@@ -204,7 +204,60 @@ describe("compactHistory — tool message flattening", () => {
 
     const allText = captured[0].map((m) => (m.parts[0] as { text: string }).text).join("\n");
     expect(allText).toContain("…");
-    expect(allText.length).toBeLessThan(longOutput.length + 200);
+    // The flattened result must be materially shorter than the original 5000 chars.
+    expect(allText.length).toBeLessThan(longOutput.length);
+  });
+
+  it("truncates long function_call args (symmetric with result truncation)", async () => {
+    const bigContent = "y".repeat(5000);
+    const ctx = new ContextManager();
+    ctx.addMessage(userMsg("write a file"));
+    ctx.addMessage({
+      role: "model",
+      parts: [
+        {
+          type: "function_call",
+          id: "c1",
+          name: "write",
+          args: { path: "x.ts", content: bigContent },
+        },
+      ],
+    });
+    ctx.addMessage({
+      role: "user",
+      parts: [{ type: "function_result", id: "c1", name: "write", result: "ok" }],
+    });
+    for (let i = 0; i < 17; i++) ctx.addMessage(userMsg(`pad ${i}`));
+
+    const { client, captured } = makeCapturingClient(FIXED_SUMMARY);
+    await compactHistory(ctx, client);
+
+    const allText = captured[0].map((m) => (m.parts[0] as { text: string }).text).join("\n");
+    expect(allText).toContain("[Tool call: write(");
+    // The 5000-char args payload must not appear verbatim in the flattened head.
+    expect(allText).not.toContain(bigContent);
+    expect(allText.length).toBeLessThan(bigContent.length);
+  });
+
+  it("uses a placeholder instead of dropping a message that would flatten to empty", async () => {
+    const ctx = new ContextManager();
+    ctx.addMessage(userMsg("start"));
+    // A model message whose only text part is whitespace — flattens to "" and
+    // would have been filtered out previously, collapsing two adjacent user
+    // messages and risking role-alternation errors on strict providers.
+    ctx.addMessage({ role: "model", parts: [{ type: "text", text: "   " }] });
+    ctx.addMessage(userMsg("continue"));
+    for (let i = 0; i < 17; i++) ctx.addMessage(userMsg(`pad ${i}`));
+
+    const { client, captured } = makeCapturingClient(FIXED_SUMMARY);
+    await compactHistory(ctx, client);
+
+    const roles = captured[0].map((m) => m.role);
+    // The model message should still be present (as a placeholder), preserving alternation.
+    expect(roles).toContain("model");
+    const modelMsgIdx = roles.indexOf("model");
+    const modelText = (captured[0][modelMsgIdx].parts[0] as { text: string }).text;
+    expect(modelText).toBe("[empty turn]");
   });
 });
 

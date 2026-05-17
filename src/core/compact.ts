@@ -67,28 +67,40 @@ function extractErrorResults(messages: Message[]): string[] {
   return errors;
 }
 
+// Cap per-part text length in the flattened head sent to the compaction model.
+// Bounds the request size against pathological cases (huge write payloads,
+// 10MB grep dumps) while leaving enough room for full error output / stack
+// traces. The verbatim-error block in compactHistory preserves the original
+// text for results containing "Error:", so this cap is the floor, not the
+// only signal the summarizer gets for failures.
+const PART_FLATTEN_CAP = 2_000;
+
+function truncate(s: string, cap = PART_FLATTEN_CAP): string {
+  return s.length > cap ? s.slice(0, cap) + "…" : s;
+}
+
 // Convert function_call and function_result parts to plain text so the
 // compaction model can process history without requiring tool declarations.
+// Empty messages get a placeholder rather than being filtered, so role
+// alternation (required by some providers) is preserved.
 function flattenMessages(messages: Message[]): Message[] {
-  return messages
-    .map((msg) => {
-      const lines: string[] = [];
-      for (const part of msg.parts) {
-        if (part.type === "text") {
-          lines.push(part.text);
-        } else if (part.type === "function_call") {
-          lines.push(`[Tool call: ${part.name}(${JSON.stringify(part.args)})]`);
-        } else if (part.type === "function_result") {
-          const out = part.result.length > 500 ? part.result.slice(0, 500) + "…" : part.result;
-          lines.push(`[Tool result: ${part.name} → ${out}]`);
-        }
+  return messages.map((msg) => {
+    const lines: string[] = [];
+    for (const part of msg.parts) {
+      if (part.type === "text") {
+        lines.push(part.text);
+      } else if (part.type === "function_call") {
+        lines.push(`[Tool call: ${part.name}(${truncate(JSON.stringify(part.args))})]`);
+      } else if (part.type === "function_result") {
+        lines.push(`[Tool result: ${part.name} → ${truncate(part.result)}]`);
       }
-      return {
-        role: msg.role,
-        parts: [{ type: "text" as const, text: lines.join("\n") }],
-      };
-    })
-    .filter((msg) => (msg.parts[0] as { text: string }).text.trim() !== "");
+    }
+    const text = lines.join("\n").trim();
+    return {
+      role: msg.role,
+      parts: [{ type: "text" as const, text: text || "[empty turn]" }],
+    };
+  });
 }
 
 async function streamToText(
@@ -126,6 +138,10 @@ export async function compactHistory(
     return { messagesRemoved: 0, summaryLength: 0 };
   }
 
+  // Order matters: extractErrorResults must run on the original messages,
+  // before streamToText flattens them. Flattening collapses function_result
+  // parts into bounded-length text, which would defeat verbatim error
+  // preservation for any error longer than PART_FLATTEN_CAP.
   const errors = extractErrorResults(head);
   const summary = await streamToText(compactionClient, head, SUMMARIZATION_PROMPT);
 

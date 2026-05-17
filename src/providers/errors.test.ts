@@ -32,10 +32,31 @@ describe("toFriendlyError", () => {
     expect(err.message).toContain("Gemini");
   });
 
-  it("maps 400 to bad request message", () => {
-    const err = toFriendlyError(makeStatusError(400), "Anthropic");
+  it("maps 400 to bad request message including original detail", () => {
+    const err = toFriendlyError(makeStatusError(400, "quota exceeded"), "Anthropic");
     expect(err.message).toContain("bad request (400)");
     expect(err.message).toContain("Anthropic");
+    expect(err.message).toContain("quota exceeded");
+  });
+
+  it("maps 404 to model not found message", () => {
+    const err = toFriendlyError(makeStatusError(404, "model not found"), "Gemini");
+    expect(err.message).toContain("model not found (404)");
+    expect(err.message).toContain("--model");
+  });
+
+  it("unwraps Gemini double-nested JSON in 400 message", () => {
+    const inner = JSON.stringify({
+      error: {
+        code: 400,
+        message: "API key expired. Please renew the API key.",
+        status: "INVALID_ARGUMENT",
+      },
+    });
+    const outer = JSON.stringify({ error: { message: inner, code: 400, status: "Bad Request" } });
+    const err = toFriendlyError(makeStatusError(400, outer), "Gemini");
+    expect(err.message).toContain("API key expired");
+    expect(err.message).not.toContain("{");
   });
 
   it("maps 403 to access denied message", () => {

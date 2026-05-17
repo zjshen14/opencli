@@ -17,10 +17,6 @@ Works with Google Gemini · Anthropic Claude · Any OpenAI-compatible provider
 
 ---
 
-<div align="center">
-  <img src="docs/assets/demo.gif" alt="OpenCLI demo" width="800">
-</div>
-
 ## Quick Start
 
 ```bash

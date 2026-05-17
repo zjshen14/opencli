@@ -30,8 +30,20 @@ function buildAutoProfile(cwd: string): string {
 (allow file-write* (subpath "/var/folders"))
 (allow file-write* (subpath "/private/var/folders"))
 
-; Network: deny all.
-(deny network*)
+; Network policy — intent: agent can run tests / dev servers that bind to
+; loopback, but cannot exfiltrate data to the public internet.
+; - Bind is harmless on any interface; allow it (the deny on outbound below
+;   prevents using a bound socket to reach external hosts).
+; - Inbound: accept connections on bound sockets (supertest, jest, etc.).
+; - Outbound: allow loopback only. The sandbox-exec address grammar only
+;   accepts "*" or "localhost" as the host literal — "localhost" matches both
+;   127.0.0.1 and ::1.
+(allow network-bind)
+(allow network-inbound)
+(allow network-outbound (remote ip "localhost:*"))
+; Unix domain sockets stay open (used by many local tools, e.g. PostgreSQL).
+(allow network* (remote unix-socket))
+(allow network* (local unix-socket))
 `;
 }
 

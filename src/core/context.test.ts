@@ -287,6 +287,43 @@ describe("ContextManager", () => {
     expect(ctx.getMessages().length).toBeGreaterThan(0);
   });
 
+  it("prune never returns a model-first window when fallback fires (fixes INVALID_ARGUMENT crash)", () => {
+    // Real crash scenario: one user message triggers many tool-call/result pairs,
+    // scrolling the original user text out of the maxHistoryMessages window.
+    // The fallback must NOT return a slice starting with a model message.
+    const ctx = new ContextManager(STUB, 4);
+    ctx.addMessage(userMsg("do the task")); // this will scroll out of the window
+    // 4 tool-call/result pairs → 8 messages; prune keeps last 4 = [results, model, results, model]
+    for (let i = 0; i < 4; i++) {
+      ctx.addMessage(modelWithCalls([{ id: `c${i}`, name: "bash" }]));
+      ctx.addMessage(userWithResults([{ id: `c${i}`, name: "bash" }]));
+    }
+    // add one more to trigger prune with 9 total
+    ctx.addMessage(modelWithCalls([{ id: "c4", name: "bash" }]));
+
+    const msgs = ctx.getMessages();
+    expect(msgs.length).toBeGreaterThan(0);
+    // First message must always be a user-role message (not model) to satisfy providers
+    expect(msgs[0].role).toBe("user");
+  });
+
+  it("prune uses tail-scan to recover last clean user message when head scan fails", () => {
+    // Window: [user_results, model_calls, user_text, model_calls]
+    // Head scan skips user_results (orphan) and model_calls — fails.
+    // Tail scan finds user_text and uses it as the start.
+    const ctx = new ContextManager(STUB, 4);
+    ctx.addMessage(userMsg("first"));
+    ctx.addMessage(modelWithCalls([{ id: "c1", name: "bash" }]));
+    ctx.addMessage(userWithResults([{ id: "c1", name: "bash" }]));
+    ctx.addMessage(userMsg("second")); // clean user message in the tail
+    ctx.addMessage(modelWithCalls([{ id: "c2", name: "bash" }]));
+    // 5th triggers prune → slice last 4 = [user_results, user_text("second"), model_calls, ...]
+    // Head scan: user_results → skip (orphan). user_text("second") → found!
+    const msgs = ctx.getMessages();
+    expect(msgs[0].role).toBe("user");
+    expect((msgs[0].parts[0] as { type: string; text: string }).text).toBe("second");
+  });
+
   it("prune retains the function_call/result pair when the boundary falls cleanly", () => {
     // maxHistoryMessages=4: slice starts exactly at a user text message — no skipping needed.
     const ctx = new ContextManager(STUB, 4);

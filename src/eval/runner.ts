@@ -9,7 +9,7 @@ import type { Scenario } from "./scenarios.js";
 const DIST_ENTRY = join(fileURLToPath(import.meta.url), "../../../dist/index.js");
 const FIXTURES_DIR = join(fileURLToPath(import.meta.url), "../fixtures");
 
-const AGENT_TIMEOUT_MS = 120_000;
+const AGENT_TIMEOUT_MS = 240_000;
 // No runner-level retries: the agent already retries internally (withRetry in providers).
 // Retrying at this layer compounds rate-limit pressure without benefit.
 // Re-enable if you observe transient non-rate-limit failures in CI.

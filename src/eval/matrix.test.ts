@@ -19,11 +19,24 @@ import { formatMatrix } from "./report.js";
 const DIST_ENTRY = join(fileURLToPath(import.meta.url), "../../../dist/index.js");
 const SCENARIOS_DIR = join(fileURLToPath(import.meta.url), "../scenarios");
 
+const CATEGORY_WEIGHT: Record<string, number> = {
+  "read-explain": 0,
+  "bug-fix": 1,
+  refactor: 2,
+  "feature-add": 3,
+  "multi-file": 4,
+};
+
 function loadScenariosSync(): Scenario[] {
   const files = readdirSync(SCENARIOS_DIR)
     .filter((f) => f.endsWith(".yaml"))
     .sort();
-  return files.map((f) => parse(readFileSync(join(SCENARIOS_DIR, f), "utf8")) as Scenario);
+  const scenarios = files.map(
+    (f) => parse(readFileSync(join(SCENARIOS_DIR, f), "utf8")) as Scenario,
+  );
+  return scenarios.sort(
+    (a, b) => (CATEGORY_WEIGHT[a.category] ?? 99) - (CATEGORY_WEIGHT[b.category] ?? 99),
+  );
 }
 
 function loadProvidersSync(): Provider[] {

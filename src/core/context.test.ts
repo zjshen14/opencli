@@ -303,6 +303,32 @@ describe("ContextManager", () => {
   });
 });
 
+describe("ContextManager — messageCount and maxMessages getters", () => {
+  it("messageCount is 0 initially", () => {
+    const ctx = new ContextManager(STUB);
+    expect(ctx.messageCount).toBe(0);
+  });
+
+  it("messageCount tracks addMessage calls", () => {
+    const ctx = new ContextManager(STUB);
+    ctx.addMessage(userMsg("a"));
+    ctx.addMessage(modelMsg("b"));
+    expect(ctx.messageCount).toBe(2);
+  });
+
+  it("messageCount reflects restoreMessages", () => {
+    const ctx = new ContextManager(STUB);
+    ctx.addMessage(userMsg("original"));
+    ctx.restoreMessages([userMsg("a"), modelMsg("b"), userMsg("c")]);
+    expect(ctx.messageCount).toBe(3);
+  });
+
+  it("maxMessages returns constructor value", () => {
+    const ctx = new ContextManager(STUB, 42);
+    expect(ctx.maxMessages).toBe(42);
+  });
+});
+
 describe("DEFAULT_SYSTEM_INSTRUCTION", () => {
   it("contains all required placeholders", () => {
     expect(DEFAULT_SYSTEM_INSTRUCTION).toContain("{CWD}");

@@ -169,6 +169,137 @@ describe("Agent plan mode", () => {
   });
 });
 
+describe("Agent environmental error guard", () => {
+  // Client that makes a different call each turn (varying args) so stuck-loop
+  // detection never fires — mirrors the real scenario where the agent edits
+  // different files each turn but the underlying OS error persists.
+  function makeVaryingClient(toolName: string): { client: LLMClient; getCallCount: () => number } {
+    let n = 0;
+    const client: LLMClient = {
+      async *stream() {
+        n++;
+        yield { type: "function_call", id: `c${n}`, name: toolName, args: { n } } as StreamEvent;
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+    return { client, getCallCount: () => n };
+  }
+
+  it("aborts after 3 consecutive turns with the same EPERM error", async () => {
+    const { client } = makeVaryingClient("bash");
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "bash",
+      description: "",
+      parameters: { type: "object", properties: { n: { type: "number" } } },
+      execute: async () => ({
+        success: false,
+        output: "",
+        error: "Error: listen EPERM: operation not permitted 0.0.0.0",
+      }),
+    });
+
+    const agent = new Agent(client, registry, new SkillRegistry(), undefined, undefined, 100);
+    const events = await collectEvents(agent, "run tests");
+    const error = events.find((e) => e.type === "error");
+    expect(error).toBeDefined();
+    expect((error as { type: "error"; message: string }).message).toMatch(/EPERM/i);
+    expect((error as { type: "error"; message: string }).message).toMatch(/environment/i);
+    // Should stop after exactly 3 turns
+    const toolCalls = events.filter((e) => e.type === "tool_call");
+    expect(toolCalls).toHaveLength(3);
+  });
+
+  it("aborts on EACCES pattern", async () => {
+    const { client } = makeVaryingClient("bash");
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "bash",
+      description: "",
+      parameters: { type: "object", properties: { n: { type: "number" } } },
+      execute: async () => ({
+        success: false,
+        output: "",
+        error: "Error: EACCES: permission denied, open '/etc/shadow'",
+      }),
+    });
+
+    const agent = new Agent(client, registry, new SkillRegistry(), undefined, undefined, 100);
+    const events = await collectEvents(agent, "read shadow");
+    const error = events.find((e) => e.type === "error");
+    expect(error).toBeDefined();
+    expect((error as { type: "error"; message: string }).message).toMatch(/EACCES/i);
+  });
+
+  it("resets env error counter when a turn produces no matching error", async () => {
+    // Two EPERM turns, then one clean turn, then two more EPERM turns.
+    // Counter resets at the clean turn so it never reaches ENV_ERROR_THRESHOLD (3).
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream() {
+        callCount++;
+        // Varying args so stuck-loop never fires
+        yield {
+          type: "function_call",
+          id: `c${callCount}`,
+          name: "bash",
+          args: { n: callCount },
+        } as StreamEvent;
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "bash",
+      description: "",
+      parameters: { type: "object", properties: { n: { type: "number" } } },
+      execute: async () => {
+        // turns 1+2 → EPERM, turn 3 → clean, turns 4+5 → EPERM again
+        if (callCount === 3) return { success: true, output: "ok" };
+        return { success: false, output: "", error: "EPERM: not permitted" };
+      },
+    });
+
+    const agent = new Agent(client, registry, new SkillRegistry(), undefined, undefined, 5);
+    const events = await collectEvents(agent, "go");
+    const error = events.find((e) => e.type === "error");
+    // Counter reset at turn 3, so env guard never fires — should hit maxTurns (5)
+    expect((error as { type: "error"; message: string }).message).toMatch(/maximum iterations/i);
+  });
+
+  it("does not trigger on a single isolated env error", async () => {
+    // Model calls tool once (returns EPERM), then stops. Count is 1 — below threshold.
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream() {
+        callCount++;
+        if (callCount === 1) {
+          yield {
+            type: "function_call",
+            id: "c1",
+            name: "bash",
+            args: { command: "x" },
+          } as StreamEvent;
+        }
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "bash",
+      description: "",
+      parameters: { type: "object", properties: { command: { type: "string" } } },
+      execute: async () => ({ success: false, output: "", error: "EPERM: not permitted" }),
+    });
+
+    const agent = new Agent(client, registry, new SkillRegistry(), undefined, undefined, 10);
+    const events = await collectEvents(agent, "go");
+    const error = events.find((e) => e.type === "error");
+    // No error — model stopped voluntarily after 1 turn
+    expect(error).toBeUndefined();
+  });
+});
+
 describe("Agent stuck-loop detection", () => {
   it("emits an error after 3 identical consecutive tool calls", async () => {
     const agent = new Agent(
@@ -222,7 +353,7 @@ describe("Agent stuck-loop detection", () => {
     expect(toolCalls).toHaveLength(3);
   });
 
-  it("resets stuck counter when args change", async () => {
+  it("resets stuck counter when tool args change between turns", async () => {
     let callCount = 0;
     // Alternate args every call so stuck detection never fires
     const client: LLMClient = {

@@ -22,6 +22,17 @@ export type AgentEvent =
 
 const DEFAULT_MAX_TURNS = 50;
 const STUCK_THRESHOLD = 3;
+const ENV_ERROR_THRESHOLD = 3;
+
+// OS-level errors that code changes cannot fix. If the same pattern appears in
+// tool results across ENV_ERROR_THRESHOLD consecutive turns, the loop aborts.
+const ENV_ERROR_PATTERNS = [
+  "EPERM",
+  "EACCES",
+  "permission denied",
+  "operation not permitted",
+  "access is denied",
+];
 
 export type AgentRunMode = "react" | "plan";
 
@@ -96,6 +107,8 @@ export class Agent {
     let turns = 0;
     let lastCallSig = "";
     let stuckCount = 0;
+    let envErrorPattern = "";
+    let envErrorCount = 0;
     const firedReminders = new Set<string>();
 
     while (true) {
@@ -207,6 +220,37 @@ export class Agent {
       const snapshotWarning = this.snapshotManager?.drainWarning();
       if (snapshotWarning) {
         yield { type: "error", message: `[snapshot] ${snapshotWarning}` };
+      }
+
+      // Environmental error guard: OS-level errors (EPERM, EACCES, etc.) cannot
+      // be fixed by editing code. If the same pattern recurs across consecutive
+      // turns, stop and surface a diagnosis instead of burning more turns.
+      const combinedResults = results.map((r) => r.result).join("\n");
+      const matchedPattern = ENV_ERROR_PATTERNS.find((p) =>
+        combinedResults.toLowerCase().includes(p.toLowerCase()),
+      );
+      if (matchedPattern) {
+        if (matchedPattern === envErrorPattern) {
+          envErrorCount++;
+        } else {
+          envErrorPattern = matchedPattern;
+          envErrorCount = 1;
+        }
+        if (envErrorCount >= ENV_ERROR_THRESHOLD) {
+          this.obs?.({
+            type: "guard_triggered",
+            guard: "env_error_loop",
+            reason: `"${matchedPattern}" in ${ENV_ERROR_THRESHOLD} consecutive turns`,
+          });
+          yield {
+            type: "error",
+            message: `Detected "${matchedPattern}" in ${ENV_ERROR_THRESHOLD} consecutive turns. This looks like an OS or environment restriction that code changes cannot fix — check permissions, network settings, or sandbox configuration.`,
+          };
+          return;
+        }
+      } else {
+        envErrorPattern = "";
+        envErrorCount = 0;
       }
 
       // Append an event-driven reminder to the last tool result based on what

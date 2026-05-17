@@ -24,7 +24,11 @@ export type ObservabilityEvent =
     }
   /** Emitted when a tool call is blocked without execution. */
   | { type: "tool_denied"; name: string; reason: "plan_mode" | "user_denied" | "non_interactive" }
-  /** Emitted when a safety guard aborts the loop (max-turns, stuck-loop). */
-  | { type: "guard_triggered"; guard: "max_turns" | "stuck_loop"; reason: string };
+  /** Emitted when a safety guard aborts the loop (max-turns, stuck-loop, env-error). */
+  | {
+      type: "guard_triggered";
+      guard: "max_turns" | "stuck_loop" | "env_error_loop";
+      reason: string;
+    };
 
 export type ObservabilityHandler = (event: ObservabilityEvent) => void;

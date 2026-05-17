@@ -67,13 +67,37 @@ function extractErrorResults(messages: Message[]): string[] {
   return errors;
 }
 
+// Convert function_call and function_result parts to plain text so the
+// compaction model can process history without requiring tool declarations.
+function flattenMessages(messages: Message[]): Message[] {
+  return messages
+    .map((msg) => {
+      const lines: string[] = [];
+      for (const part of msg.parts) {
+        if (part.type === "text") {
+          lines.push(part.text);
+        } else if (part.type === "function_call") {
+          lines.push(`[Tool call: ${part.name}(${JSON.stringify(part.args)})]`);
+        } else if (part.type === "function_result") {
+          const out = part.result.length > 500 ? part.result.slice(0, 500) + "…" : part.result;
+          lines.push(`[Tool result: ${part.name} → ${out}]`);
+        }
+      }
+      return {
+        role: msg.role,
+        parts: [{ type: "text" as const, text: lines.join("\n") }],
+      };
+    })
+    .filter((msg) => (msg.parts[0] as { text: string }).text.trim() !== "");
+}
+
 async function streamToText(
   client: LLMClient,
   messages: Message[],
   prompt: string,
 ): Promise<string> {
   const chunks: string[] = [];
-  for await (const event of client.stream(messages, prompt, [])) {
+  for await (const event of client.stream(flattenMessages(messages), prompt, [])) {
     if (event.type === "text") chunks.push(event.text);
   }
   return chunks.join("");

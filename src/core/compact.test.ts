@@ -18,6 +18,18 @@ function makeMockClient(summary: string): LLMClient {
   };
 }
 
+function makeCapturingClient(summary: string): { client: LLMClient; captured: Message[][] } {
+  const captured: Message[][] = [];
+  const client: LLMClient = {
+    async *stream(messages: Message[]): AsyncGenerator<StreamEvent> {
+      captured.push(messages);
+      if (summary.length > 0) yield { type: "text", text: summary };
+      yield { type: "done" };
+    },
+  };
+  return { client, captured };
+}
+
 function userMsg(text: string): Message {
   return { role: "user", parts: [{ type: "text", text }] };
 }
@@ -121,6 +133,78 @@ describe("compactHistory", () => {
     await compactHistory(ctx, makeMockClient(FIXED_SUMMARY));
     const summaryText = (ctx.getMessages()[0].parts[0] as { type: string; text: string }).text;
     expect(summaryText).not.toContain("Verbatim error outputs preserved");
+  });
+});
+
+describe("compactHistory — tool message flattening", () => {
+  it("sends only text parts to the compaction client even when head has function_call/result", async () => {
+    const ctx = new ContextManager();
+    // Build a history with tool calls in the head
+    ctx.addMessage(userMsg("run a command"));
+    ctx.addMessage({
+      role: "model",
+      parts: [{ type: "function_call", id: "c1", name: "bash", args: { command: "ls" } }],
+    });
+    ctx.addMessage({
+      role: "user",
+      parts: [{ type: "function_result", id: "c1", name: "bash", result: "file.ts\n" }],
+    });
+    // Pad to 20 so head is non-empty
+    for (let i = 0; i < 17; i++) ctx.addMessage(userMsg(`pad ${i}`));
+
+    const { client, captured } = makeCapturingClient(FIXED_SUMMARY);
+    await compactHistory(ctx, client);
+
+    expect(captured.length).toBe(1);
+    const sentMessages = captured[0];
+    for (const msg of sentMessages) {
+      for (const part of msg.parts) {
+        expect(part.type).toBe("text");
+      }
+    }
+  });
+
+  it("includes tool call name and args in flattened text", async () => {
+    const ctx = new ContextManager();
+    ctx.addMessage(userMsg("do something"));
+    ctx.addMessage({
+      role: "model",
+      parts: [{ type: "function_call", id: "c1", name: "bash", args: { command: "echo hi" } }],
+    });
+    ctx.addMessage({
+      role: "user",
+      parts: [{ type: "function_result", id: "c1", name: "bash", result: "hi\n" }],
+    });
+    for (let i = 0; i < 17; i++) ctx.addMessage(userMsg(`pad ${i}`));
+
+    const { client, captured } = makeCapturingClient(FIXED_SUMMARY);
+    await compactHistory(ctx, client);
+
+    const allText = captured[0].map((m) => (m.parts[0] as { text: string }).text).join("\n");
+    expect(allText).toContain("[Tool call: bash(");
+    expect(allText).toContain("[Tool result: bash →");
+  });
+
+  it("truncates long tool results to 500 chars in flattened text", async () => {
+    const longOutput = "x".repeat(1000);
+    const ctx = new ContextManager();
+    ctx.addMessage(userMsg("start"));
+    ctx.addMessage({
+      role: "model",
+      parts: [{ type: "function_call", id: "c1", name: "bash", args: { command: "cat big" } }],
+    });
+    ctx.addMessage({
+      role: "user",
+      parts: [{ type: "function_result", id: "c1", name: "bash", result: longOutput }],
+    });
+    for (let i = 0; i < 17; i++) ctx.addMessage(userMsg(`pad ${i}`));
+
+    const { client, captured } = makeCapturingClient(FIXED_SUMMARY);
+    await compactHistory(ctx, client);
+
+    const allText = captured[0].map((m) => (m.parts[0] as { text: string }).text).join("\n");
+    expect(allText).toContain("…");
+    expect(allText.length).toBeLessThan(longOutput.length + 200);
   });
 });
 

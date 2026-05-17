@@ -29,9 +29,14 @@ const ENV_ERROR_THRESHOLD = 3;
 const ENV_ERROR_PATTERNS = [
   "EPERM",
   "EACCES",
+  "ENOSPC",
+  "EMFILE",
+  "ENOMEM",
   "permission denied",
   "operation not permitted",
   "access is denied",
+  "no space left on device",
+  "too many open files",
 ];
 
 export type AgentRunMode = "react" | "plan";

@@ -298,6 +298,27 @@ describe("Agent environmental error guard", () => {
     // No error — model stopped voluntarily after 1 turn
     expect(error).toBeUndefined();
   });
+
+  it("fires the env_error_loop guard_triggered observability event", async () => {
+    const { client } = makeVaryingClient("bash");
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "bash",
+      description: "",
+      parameters: { type: "object", properties: { n: { type: "number" } } },
+      execute: async () => ({ success: false, output: "", error: "EPERM: not permitted" }),
+    });
+
+    const guardEvents: string[] = [];
+    const agent = new Agent(client, registry, new SkillRegistry(), undefined, undefined, 100, {
+      onObservability: (e) => {
+        if (e.type === "guard_triggered") guardEvents.push(e.guard);
+      },
+    });
+
+    await collectEvents(agent, "go");
+    expect(guardEvents).toContain("env_error_loop");
+  });
 });
 
 describe("Agent stuck-loop detection", () => {

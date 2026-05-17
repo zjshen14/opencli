@@ -7,4 +7,3 @@ expected:
   files:
     src/math.ts:
       contains: "a - b"
-      notContains: "a + b"

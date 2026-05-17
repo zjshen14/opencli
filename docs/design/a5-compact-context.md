@@ -321,15 +321,11 @@ export function contextWindowFor(model: string): number;
 
 ## Changes to `src/core/context.ts`
 
-Three additions, no behaviour changes to existing methods:
+Two additions (getters), no behaviour changes to existing methods:
+
+**Note on `replaceHistory()` vs `restoreMessages()`:** The design doc originally specified adding a new `replaceHistory()` method. The implementation pragmatically reuses the existing `restoreMessages()` method, which does exactly the same thing (direct history assignment without calling `prune()`). Both approaches are functionally equivalent; the existing method is preferred to avoid duplication.
 
 ```typescript
-// Used by compactHistory() to install the compacted state.
-// Does NOT call prune() — the caller has already sized the history correctly.
-replaceHistory(messages: Message[]): void {
-  this.history = messages;
-}
-
 get messageCount(): number {
   return this.history.length;
 }
@@ -337,6 +333,11 @@ get messageCount(): number {
 get maxMessages(): number {
   return this.maxHistoryMessages;
 }
+```
+
+Used by compaction:
+```typescript
+context.restoreMessages([summaryMessage, ...tail]);
 ```
 
 ---

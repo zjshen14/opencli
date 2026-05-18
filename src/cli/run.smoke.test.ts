@@ -78,6 +78,46 @@ describe.skipIf(!CLI_BUILT)("CLI subprocess smoke (requires npm run build)", () 
     });
   });
 
+  it("run --max-turns with non-numeric value exits 1 with a clear error", async () => {
+    await expect(
+      execFileAsync("node", [DIST_ENTRY, "run", "--max-turns", "abc", "echo hi"], {
+        timeout: 10_000,
+      }),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("--max-turns must be a positive integer"),
+    });
+  });
+
+  it("run --max-turns with zero exits 1 with a clear error", async () => {
+    await expect(
+      execFileAsync("node", [DIST_ENTRY, "run", "--max-turns", "0", "echo hi"], {
+        timeout: 10_000,
+      }),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("--max-turns must be a positive integer"),
+    });
+  });
+
+  it("run --temperature with non-numeric value exits 1 with a clear error", async () => {
+    await expect(
+      execFileAsync("node", [DIST_ENTRY, "run", "--temperature", "notanumber", "echo hi"], {
+        timeout: 10_000,
+      }),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("--temperature must be between 0 and 2"),
+    });
+  });
+
+  it("run --temperature with out-of-range value exits 1 with a clear error", async () => {
+    await expect(
+      execFileAsync("node", [DIST_ENTRY, "run", "--temperature", "-1", "echo hi"], {
+        timeout: 10_000,
+      }),
+    ).rejects.toMatchObject({
+      stderr: expect.stringContaining("--temperature must be between 0 and 2"),
+    });
+  });
+
   it("OPENCLI_SANDBOX with invalid value exits 1 with a clear error", async () => {
     await expect(
       execFileAsync("node", [DIST_ENTRY, "run", "echo hi"], {

@@ -1,5 +1,9 @@
 import { Command } from "commander";
+import { createRequire } from "node:module";
 import { createClient, createCompactionClient, detectProvider } from "../providers/factory.js";
+
+const require = createRequire(import.meta.url);
+const pkg = require("../../package.json") as { version: string };
 import { Agent } from "../core/agent.js";
 import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
@@ -23,8 +27,8 @@ const program = new Command();
 
 program
   .name("opencli")
-  .description("An open-source AI agent CLI — supports Gemini and Claude models")
-  .version("0.1.0");
+  .description("An open-source AI agent CLI — supports Gemini, Claude, and OpenAI models")
+  .version(pkg.version);
 
 program
   .command("chat", { isDefault: true })

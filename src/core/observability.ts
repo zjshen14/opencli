@@ -29,6 +29,8 @@ export type ObservabilityEvent =
       type: "guard_triggered";
       guard: "max_turns" | "stuck_loop" | "env_error_loop";
       reason: string;
-    };
+    }
+  /** Emitted when the agent retries after an empty LLM response (no text, no tool calls). */
+  | { type: "empty_response_retry" };
 
 export type ObservabilityHandler = (event: ObservabilityEvent) => void;

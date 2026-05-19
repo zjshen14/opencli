@@ -321,6 +321,123 @@ describe("Agent environmental error guard", () => {
   });
 });
 
+describe("Agent empty-response retry", () => {
+  it("retries once when the LLM returns no text and no function calls", async () => {
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream() {
+        callCount++;
+        if (callCount === 1) {
+          yield { type: "done" } as StreamEvent; // empty — no text, no calls
+        } else {
+          yield { type: "text", text: "now I have something to say" } as StreamEvent;
+          yield { type: "done" } as StreamEvent;
+        }
+      },
+    };
+
+    const agent = new Agent(client, makeNoopRegistry(), new SkillRegistry());
+    const events = await collectEvents(agent, "hi");
+
+    expect(callCount).toBe(2);
+    const texts = events
+      .filter((e) => e.type === "text")
+      .map((e) => (e as { type: "text"; text: string }).text);
+    expect(texts.join("")).toBe("now I have something to say");
+    expect(events.find((e) => e.type === "error")).toBeUndefined();
+    expect(events.find((e) => e.type === "done")).toBeDefined();
+  });
+
+  it("terminates cleanly when the retry also returns empty", async () => {
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream() {
+        callCount++;
+        yield { type: "done" } as StreamEvent; // always empty
+      },
+    };
+
+    const agent = new Agent(client, makeNoopRegistry(), new SkillRegistry());
+    const events = await collectEvents(agent, "hi");
+
+    expect(callCount).toBe(2);
+    expect(events.find((e) => e.type === "done")).toBeDefined();
+    expect(events.find((e) => e.type === "error")).toBeUndefined();
+  });
+
+  it("emits the empty_response_retry observability event on first empty response", async () => {
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream() {
+        callCount++;
+        if (callCount === 1) {
+          yield { type: "done" } as StreamEvent;
+        } else {
+          yield { type: "text", text: "ok" } as StreamEvent;
+          yield { type: "done" } as StreamEvent;
+        }
+      },
+    };
+
+    const obsEvents: string[] = [];
+    const agent = new Agent(
+      client,
+      makeNoopRegistry(),
+      new SkillRegistry(),
+      undefined,
+      undefined,
+      50,
+      {
+        onObservability: (e) => obsEvents.push(e.type),
+      },
+    );
+    await collectEvents(agent, "hi");
+
+    expect(obsEvents).toContain("empty_response_retry");
+  });
+
+  it("does not retry when the response has text but no tool calls", async () => {
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream() {
+        callCount++;
+        yield { type: "text", text: "I'm done" } as StreamEvent;
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+
+    const agent = new Agent(client, makeNoopRegistry(), new SkillRegistry());
+    await collectEvents(agent, "hi");
+
+    expect(callCount).toBe(1);
+  });
+
+  it("resets the retry flag between user turns", async () => {
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream() {
+        callCount++;
+        if (callCount % 2 === 1) {
+          yield { type: "done" } as StreamEvent; // first call of each turn is empty
+        } else {
+          yield { type: "text", text: "response" } as StreamEvent;
+          yield { type: "done" } as StreamEvent;
+        }
+      },
+    };
+
+    const agent = new Agent(client, makeNoopRegistry(), new SkillRegistry());
+    // First turn: call 1 (empty) → retry → call 2 (text)
+    const events1 = await collectEvents(agent, "first");
+    expect(events1.find((e) => e.type === "done")).toBeDefined();
+
+    // Second turn: the retry flag should be reset — call 3 (empty) → retry → call 4 (text)
+    const events2 = await collectEvents(agent, "second");
+    expect(events2.find((e) => e.type === "done")).toBeDefined();
+    expect(callCount).toBe(4);
+  });
+});
+
 describe("Agent stuck-loop detection", () => {
   it("emits an error after 3 identical consecutive tool calls", async () => {
     const agent = new Agent(

@@ -148,6 +148,10 @@ describe("Agent observability — LLM call events", () => {
             name: "noop",
             args: {},
           } as StreamEvent;
+        } else {
+          // Final turn: yield text so the agent exits cleanly without triggering
+          // the empty-response retry (which would add an extra LLM call).
+          yield { type: "text", text: "done" } as StreamEvent;
         }
         yield { type: "done" } as StreamEvent;
       },

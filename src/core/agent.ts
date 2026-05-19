@@ -114,6 +114,7 @@ export class Agent {
     let stuckCount = 0;
     let envErrorPattern = "";
     let envErrorCount = 0;
+    let emptyRetried = false;
     const firedReminders = new Set<string>();
 
     while (true) {
@@ -168,9 +169,19 @@ export class Agent {
       }
 
       if (pendingCalls.length === 0) {
+        if (responseText.trim() === "" && !emptyRetried) {
+          // Empty stream (no text, no tool calls) is likely a transient provider issue
+          // (safety filter, output truncation, parse failure). Retry once before
+          // treating as intentional done — nothing was added to context, so the
+          // retry sees the same conversation state.
+          emptyRetried = true;
+          this.obs?.({ type: "empty_response_retry" });
+          continue;
+        }
         yield { type: "done" };
         return;
       }
+      emptyRetried = false;
 
       // Max turns guard
       turns++;

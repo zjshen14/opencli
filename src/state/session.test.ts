@@ -81,6 +81,16 @@ describe("Session.list", () => {
 });
 
 describe("Session.loadMessages", () => {
+  it("throws a user-friendly error for a nonexistent session id", async () => {
+    await expect(Session.loadMessages("nonexistent-id", CWD)).rejects.toThrow(
+      /Session 'nonexistent-id' not found/,
+    );
+  });
+
+  it("error for nonexistent session does not leak internal file paths", async () => {
+    await expect(Session.loadMessages("some-id", CWD)).rejects.toThrow(/opencli sessions/);
+  });
+
   it("throws when no sessions exist for 'latest'", async () => {
     await expect(Session.loadMessages("latest", CWD)).rejects.toThrow(/No sessions/);
   });

@@ -266,7 +266,18 @@ export class Session {
     }
 
     const logPath = join(dir, `${sessionId}.jsonl`);
-    const raw = await readFile(logPath, "utf8");
+    let raw: string;
+    try {
+      raw = await readFile(logPath, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error(
+          `Session '${sessionId}' not found for this directory. Run 'opencli sessions' to list available sessions.`,
+          { cause: err },
+        );
+      }
+      throw err;
+    }
     const entries: SessionEntry[] = raw
       .split("\n")
       .filter(Boolean)

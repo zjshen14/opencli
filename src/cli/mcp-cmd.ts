@@ -1,4 +1,4 @@
-import type { Command } from "commander";
+import { type Command, InvalidArgumentError } from "commander";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -8,6 +8,15 @@ import { AGENT_DIR } from "../state/config.js";
 import { McpClient } from "../mcp/client.js";
 import { loadMcpConfig } from "../mcp/config.js";
 import type { McpConfig, McpServerConfig } from "../mcp/types.js";
+
+// ── CLI coercers ──────────────────────────────────────────────────────────────
+
+export function parseTransport(val: string): "stdio" | "http" {
+  if (val !== "stdio" && val !== "http") {
+    throw new InvalidArgumentError("--transport must be 'stdio' or 'http'");
+  }
+  return val;
+}
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -60,7 +69,7 @@ async function mcpAdd(
   nameArg: string | undefined,
   rest: string[],
   opts: {
-    transport?: string;
+    transport?: "stdio" | "http";
     url?: string;
     header?: string[];
     force?: boolean;
@@ -75,7 +84,7 @@ async function mcpAdd(
   if (nameArg && rest.length > 0) {
     // One-shot form: opencli mcp add <name> -- <command> [args...]
     name = nameArg;
-    const transport = (opts.transport as "stdio" | "http" | undefined) ?? "stdio";
+    const transport = opts.transport ?? "stdio";
     if (transport === "http") {
       const url = opts.url ?? rest[0];
       serverConfig = { transport: "http", url };
@@ -97,6 +106,12 @@ async function mcpAdd(
       headers: Object.keys(headers).length > 0 ? headers : undefined,
     };
   } else {
+    if (!process.stdin.isTTY) {
+      process.stderr.write(
+        "Error: interactive mode required but stdin is not a TTY. Pass all flags explicitly, or run from a terminal.\n",
+      );
+      process.exit(1);
+    }
     // Interactive form
     process.stdout.write("\n");
     const _name = await clack.text({ message: "Server name", placeholder: "filesystem" });
@@ -161,6 +176,10 @@ async function mcpAdd(
     );
   } else {
     process.stdout.write(chalk.yellow(`[mcp] ✗ connection failed: ${probe.error}\n`));
+    if (!process.stdin.isTTY) {
+      process.stdout.write("Aborted (connection failed; use --force to save without a probe).\n");
+      return;
+    }
     const _saveAnyway = await clack.confirm({
       message: "Save anyway?",
       initialValue: false,
@@ -275,6 +294,12 @@ async function mcpRemove(name: string, opts: { yes?: boolean }): Promise<void> {
   }
 
   if (!opts.yes) {
+    if (!process.stdin.isTTY) {
+      process.stderr.write(
+        "Error: interactive mode required but stdin is not a TTY. Use -y/--yes to skip confirmation.\n",
+      );
+      process.exit(1);
+    }
     const confirm = await clack.confirm({
       message: `Remove '${name}' from ${join(AGENT_DIR, "mcp.json")}?`,
       initialValue: false,
@@ -299,7 +324,11 @@ export function registerMcpCommand(program: Command): void {
   mcp
     .command("add [name] [rest...]")
     .description("Add an MCP server to ~/.opencli/mcp.json")
-    .option("--transport <transport>", "Transport type: stdio | http (default: stdio)")
+    .option(
+      "--transport <transport>",
+      "Transport type: stdio | http (default: stdio)",
+      parseTransport,
+    )
     .option("--url <url>", "Server URL (http transport)")
     .option("--header <header...>", 'Header in "Key: Value" format (http transport)')
     .option("--force", "Overwrite existing entry")
@@ -307,7 +336,7 @@ export function registerMcpCommand(program: Command): void {
       await mcpAdd(
         name,
         rest,
-        opts as { transport?: string; url?: string; header?: string[]; force?: boolean },
+        opts as { transport?: "stdio" | "http"; url?: string; header?: string[]; force?: boolean },
       );
     });
 

@@ -66,3 +66,11 @@ async function editPlanInEditor(plan: string): Promise<string | null> {
     await rm(tmpPath).catch(() => {});
   }
 }
+
+export function looksLikeActionablePlan(text: string): boolean {
+  // Numbered steps (1. ...) or plan/steps section headers indicate an executable plan.
+  // A direct informational answer — prose with no step structure — is already complete.
+  return (
+    /^\s*\d+\./m.test(text) || /^##?\s*(plan|steps)\b/im.test(text) || /^step\s+\d+/im.test(text)
+  );
+}

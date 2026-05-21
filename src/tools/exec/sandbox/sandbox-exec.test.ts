@@ -14,12 +14,22 @@ describe.skipIf(!isMacOS)("SandboxExecRunner (macOS only)", () => {
     expect(result.stdout).toContain("hello");
   });
 
-  it("blocks external network access (curl to example.com)", async () => {
+  it("does not block external HTTPS via sandbox policy (npm install, gh, curl must work)", async () => {
     const result = await runner.exec("curl -s --max-time 5 https://example.com", {
       cwd: process.cwd(),
       timeout: 10_000,
     });
-    expect(result.exitCode).not.toBe(0);
+    // EPERM means the sandbox policy blocked the connection (the old, too-restrictive behaviour).
+    // A network timeout or DNS failure is fine — those aren't a sandbox policy rejection.
+    expect(result.stderr).not.toContain("EPERM");
+  });
+
+  it("allows writes to package-manager dot-dirs in HOME (~/.npm, ~/.cache, etc.)", async () => {
+    const result = await runner.exec(
+      "mkdir -p ~/.npm/.sandbox-test && rmdir ~/.npm/.sandbox-test",
+      { cwd: process.cwd() },
+    );
+    expect(result.exitCode).toBe(0);
   });
 
   it("allows binding to loopback (needed for tests and dev servers)", async () => {

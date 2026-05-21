@@ -2,12 +2,13 @@ import { spawn } from "node:child_process";
 import { writeFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { PassthroughRunner, spawnAndCollect } from "./passthrough.js";
 import type { SandboxExecOptions, SandboxExecResult, SandboxMode, SandboxRunner } from "./types.js";
 
 const SANDBOX_EXEC_BIN = "/usr/bin/sandbox-exec";
 
-function buildAutoProfile(cwd: string): string {
+function buildAutoProfile(cwd: string, homeDir: string): string {
   return `(version 1)
 
 ; Deny everything not explicitly allowed below.
@@ -15,6 +16,7 @@ function buildAutoProfile(cwd: string): string {
 
 ; Process lifecycle — needed for almost all programs.
 (allow process*)
+(allow process-info*)
 (allow signal)
 (allow sysctl-read)
 (allow mach*)
@@ -30,20 +32,31 @@ function buildAutoProfile(cwd: string): string {
 (allow file-write* (subpath "/var/folders"))
 (allow file-write* (subpath "/private/var/folders"))
 
-; Network policy — intent: agent can run tests / dev servers that bind to
-; loopback, but cannot exfiltrate data to the public internet.
-; - Bind is harmless on any interface; allow it (the deny on outbound below
-;   prevents using a bound socket to reach external hosts).
-; - Inbound: accept connections on bound sockets (supertest, jest, etc.).
-; - Outbound: allow loopback only. The sandbox-exec address grammar only
-;   accepts "*" or "localhost" as the host literal — "localhost" matches both
-;   127.0.0.1 and ::1.
+; Package-manager caches — allow npm, pip, cargo, yarn, pnpm, gem, etc. to write
+; to their standard locations so 'npm install' / 'pip install' / 'cargo build' work.
+(allow file-write* (subpath "${homeDir}/.npm"))
+(allow file-write* (subpath "${homeDir}/.cache"))
+(allow file-write* (subpath "${homeDir}/.cargo"))
+(allow file-write* (subpath "${homeDir}/.local"))
+(allow file-write* (subpath "${homeDir}/.yarn"))
+(allow file-write* (subpath "${homeDir}/.gem"))
+(allow file-write* (subpath "${homeDir}/.config"))
+
+; Network policy: allow loopback for local dev servers plus external HTTPS/HTTP
+; and DNS so package registries (npm, PyPI, crates.io), gh, and curl work.
+; 'auto' mode is "prevent obvious accidents", not a real security boundary —
+; use --sandbox off or wait for 'strict' mode for true isolation.
 (allow network-bind)
 (allow network-inbound)
 (allow network-outbound (remote ip "localhost:*"))
 ; Unix domain sockets stay open (used by many local tools, e.g. PostgreSQL).
 (allow network* (remote unix-socket))
 (allow network* (local unix-socket))
+; External HTTPS/HTTP for npm install, pip install, cargo build, gh, curl, etc.
+(allow network-outbound (remote ip "*:443"))
+(allow network-outbound (remote ip "*:80"))
+; DNS — needed for any external hostname resolution.
+(allow network-outbound (remote ip "*:53"))
 `;
 }
 
@@ -62,7 +75,7 @@ export class SandboxExecRunner implements SandboxRunner {
 
     this.profilePath = join("/tmp", `opencli-sandbox-${randomUUID()}.sb`);
 
-    this.ready = writeFile(this.profilePath, buildAutoProfile(cwd), { mode: 0o600 })
+    this.ready = writeFile(this.profilePath, buildAutoProfile(cwd, homedir()), { mode: 0o600 })
       .then(() => {
         // Only emit the strict-mode warning when the runner will actually execute.
         if (mode === "strict") {

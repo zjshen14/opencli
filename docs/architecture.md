@@ -324,6 +324,14 @@ interface SandboxRunner {
 | Linux | `BwrapRunner` (bwrap) | `PassthroughRunner` |
 | Other | `PassthroughRunner` + warning | `PassthroughRunner` |
 
+**Mode semantics** (see [docs/design/a7-sandbox-loosen-auto.md](design/a7-sandbox-loosen-auto.md)):
+
+| Mode | Purpose | Trust model |
+|------|---------|-------------|
+| `auto` | Prevent obvious accidents — writes to system & credential paths denied; reads and network unrestricted; writes allowed to CWD, `/tmp`, and common dev dot-dirs (`~/.npm`, `~/.cache`, etc.). | Convenience first. **Not a security boundary.** |
+| `strict` | Real isolation — no external network, writes only to CWD + tmp, reads restricted to CWD + system binaries. Currently stubbed; falls back to `auto`. | Untrusted code; expect friction. |
+| `off` | No isolation. | Trusted local environment. |
+
 **Startup warning**: `runner.warning` is emitted exactly once to `stderr` at CLI startup if isolation was downgraded (e.g. bwrap missing, namespaces disabled, unsupported platform).
 
 #### Tool interface

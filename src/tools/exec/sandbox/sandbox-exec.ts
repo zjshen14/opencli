@@ -1,49 +1,73 @@
 import { spawn } from "node:child_process";
 import { writeFile, unlink } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { PassthroughRunner, spawnAndCollect } from "./passthrough.js";
 import type { SandboxExecOptions, SandboxExecResult, SandboxMode, SandboxRunner } from "./types.js";
 
 const SANDBOX_EXEC_BIN = "/usr/bin/sandbox-exec";
 
-function buildAutoProfile(cwd: string): string {
+// auto mode is intentionally NOT a security boundary — see
+// docs/design/a7-sandbox-loosen-auto.md. The goal is to prevent obvious
+// accidents (writes to /etc, ~/.ssh, etc.) while letting normal coding
+// workflows (npm install, pip install, gh, curl) work.
+function buildAutoProfile(cwd: string, home: string): string {
   return `(version 1)
 
-; Deny everything not explicitly allowed below.
 (deny default)
 
-; Process lifecycle — needed for almost all programs.
+; Process lifecycle
 (allow process*)
 (allow signal)
 (allow sysctl-read)
 (allow mach*)
 (allow ipc*)
 
-; Reads: allow everywhere (auto mode).
+; Process introspection — needed for /bin/ps, /usr/bin/top, etc.
+(allow process-info* (target others))
+
+; Reads: allow everywhere.
 (allow file-read*)
 
-; Writes: allow only inside the project root and system temp dirs.
+; Writes: project root + system temp + common dev-tooling locations.
 (allow file-write* (subpath "${cwd}"))
 (allow file-write* (subpath "/private/tmp"))
-; /var/folders is a symlink to /private/var/folders on macOS — allow both forms.
 (allow file-write* (subpath "/var/folders"))
 (allow file-write* (subpath "/private/var/folders"))
 
-; Network policy — intent: agent can run tests / dev servers that bind to
-; loopback, but cannot exfiltrate data to the public internet.
-; - Bind is harmless on any interface; allow it (the deny on outbound below
-;   prevents using a bound socket to reach external hosts).
-; - Inbound: accept connections on bound sockets (supertest, jest, etc.).
-; - Outbound: allow loopback only. The sandbox-exec address grammar only
-;   accepts "*" or "localhost" as the host literal — "localhost" matches both
-;   127.0.0.1 and ::1.
-(allow network-bind)
-(allow network-inbound)
-(allow network-outbound (remote ip "localhost:*"))
-; Unix domain sockets stay open (used by many local tools, e.g. PostgreSQL).
-(allow network* (remote unix-socket))
-(allow network* (local unix-socket))
+; Standard device nodes — explicit literals rather than (subpath "/dev") to
+; keep the allow surface narrow. Needed for curl -o /dev/null, shell
+; redirects, /dev/tty prompts, etc.
+(allow file-write*
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (literal "/dev/tty")
+  (literal "/dev/urandom")
+  (literal "/dev/random"))
+
+; XDG base directories
+(allow file-write* (subpath "${home}/.cache"))
+(allow file-write* (subpath "${home}/.config"))
+(allow file-write* (subpath "${home}/.local"))
+
+; Package-manager dot-dirs
+(allow file-write* (subpath "${home}/.npm"))
+(allow file-write* (subpath "${home}/.cargo"))
+(allow file-write* (subpath "${home}/.yarn"))
+(allow file-write* (subpath "${home}/.pnpm-store"))
+(allow file-write* (subpath "${home}/.gem"))
+(allow file-write* (subpath "${home}/.gradle"))
+(allow file-write* (subpath "${home}/.m2"))
+(allow file-write* (subpath "${home}/.rustup"))
+
+; macOS app caches (pip, brew log cache, Ruby gems, etc.)
+(allow file-write* (subpath "${home}/Library/Caches"))
+
+; Network: allow all. auto is convenience-first; use strict for isolation.
+(allow network*)
 `;
 }
 
@@ -60,9 +84,10 @@ export class SandboxExecRunner implements SandboxRunner {
     this.mode = mode === "strict" ? "auto" : mode;
     const effectiveMode = this.mode;
 
+    const home = process.env.HOME ?? homedir();
     this.profilePath = join("/tmp", `opencli-sandbox-${randomUUID()}.sb`);
 
-    this.ready = writeFile(this.profilePath, buildAutoProfile(cwd), { mode: 0o600 })
+    this.ready = writeFile(this.profilePath, buildAutoProfile(cwd, home), { mode: 0o600 })
       .then(() => {
         // Only emit the strict-mode warning when the runner will actually execute.
         if (mode === "strict") {

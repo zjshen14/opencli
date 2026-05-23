@@ -1,9 +1,29 @@
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { PassthroughRunner, spawnAndCollect } from "./passthrough.js";
 import type { SandboxExecOptions, SandboxExecResult, SandboxMode, SandboxRunner } from "./types.js";
 
 const BWRAP_CANDIDATES = ["/usr/bin/bwrap", "/usr/local/bin/bwrap"];
+
+// Common dev-tooling dot-dirs bound writable in auto mode. Pre-created at
+// runner construction so bwrap's --bind doesn't fail when a path is absent.
+// See docs/design/a7-sandbox-loosen-auto.md.
+const AUTO_HOME_DIRS = [
+  ".cache",
+  ".config",
+  ".local",
+  ".npm",
+  ".cargo",
+  ".yarn",
+  ".pnpm-store",
+  ".gem",
+  ".gradle",
+  ".m2",
+  ".rustup",
+];
 
 function detectBwrap(): string | null {
   for (const candidate of BWRAP_CANDIDATES) {
@@ -38,6 +58,7 @@ export class BwrapRunner implements SandboxRunner {
 
   private bwrapBin: string;
   private cwd: string;
+  private autoBinds: string[] = [];
   private fallback: PassthroughRunner | null = null;
 
   constructor(mode: SandboxMode, cwd: string) {
@@ -70,6 +91,17 @@ export class BwrapRunner implements SandboxRunner {
 
     this.bwrapBin = bin;
     this.warning = null;
+
+    const home = process.env.HOME ?? homedir();
+    for (const sub of AUTO_HOME_DIRS) {
+      const path = join(home, sub);
+      try {
+        mkdirSync(path, { recursive: true });
+        this.autoBinds.push("--bind", path, path);
+      } catch {
+        // best-effort: skip dirs we can't create (read-only home, etc.)
+      }
+    }
   }
 
   async exec(command: string, opts: SandboxExecOptions): Promise<SandboxExecResult> {
@@ -80,7 +112,6 @@ export class BwrapRunner implements SandboxRunner {
     const proc = spawn(
       this.bwrapBin,
       [
-        "--unshare-net",
         "--ro-bind",
         "/",
         "/",
@@ -93,6 +124,7 @@ export class BwrapRunner implements SandboxRunner {
         "/dev",
         "--proc",
         "/proc",
+        ...this.autoBinds,
         "--",
         "/bin/sh",
         "-c",

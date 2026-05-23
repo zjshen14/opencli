@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { BwrapRunner } from "./bwrap.js";
 
 const isLinux = process.platform === "linux";
+const HOME = process.env.HOME ?? homedir();
 
 describe.skipIf(!isLinux)("BwrapRunner (Linux only)", () => {
   const runner = new BwrapRunner("auto", process.cwd());
@@ -18,13 +19,14 @@ describe.skipIf(!isLinux)("BwrapRunner (Linux only)", () => {
     expect(result.stdout).toContain("hello");
   });
 
-  it("blocks network access (curl to example.com)", async () => {
+  it("allows external network access (curl to example.com)", async () => {
     if (runner.warning) return;
-    const result = await runner.exec("curl -s --max-time 5 https://example.com", {
-      cwd: process.cwd(),
-      timeout: 10_000,
-    });
-    expect(result.exitCode).not.toBe(0);
+    const result = await runner.exec(
+      "curl -s --max-time 5 -o /dev/null -w '%{http_code}' https://example.com",
+      { cwd: process.cwd(), timeout: 10_000 },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe("200");
   });
 
   it("allows writes inside CWD", async () => {
@@ -47,6 +49,24 @@ describe.skipIf(!isLinux)("BwrapRunner (Linux only)", () => {
   it("allows writes to /tmp", async () => {
     if (runner.warning) return;
     const testFile = join(tmpdir(), `.sandbox-test-${Date.now()}`);
+    const result = await runner.exec(`touch "${testFile}" && rm "${testFile}"`, {
+      cwd: process.cwd(),
+    });
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("allows writes to ~/.npm (npm package cache)", async () => {
+    if (runner.warning) return;
+    const testFile = join(HOME, ".npm", `.sandbox-test-${Date.now()}`);
+    const result = await runner.exec(`touch "${testFile}" && rm "${testFile}"`, {
+      cwd: process.cwd(),
+    });
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("allows writes to ~/.cache (XDG cache dir)", async () => {
+    if (runner.warning) return;
+    const testFile = join(HOME, ".cache", `.sandbox-test-${Date.now()}`);
     const result = await runner.exec(`touch "${testFile}" && rm "${testFile}"`, {
       cwd: process.cwd(),
     });

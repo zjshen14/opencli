@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { SandboxExecRunner } from "./sandbox-exec.js";
 
 const isMacOS = process.platform === "darwin";
+const HOME = process.env.HOME ?? homedir();
 
 describe.skipIf(!isMacOS)("SandboxExecRunner (macOS only)", () => {
   const runner = new SandboxExecRunner("auto", process.cwd());
@@ -12,14 +13,6 @@ describe.skipIf(!isMacOS)("SandboxExecRunner (macOS only)", () => {
     const result = await runner.exec("echo hello", { cwd: process.cwd() });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("hello");
-  });
-
-  it("blocks external network access (curl to example.com)", async () => {
-    const result = await runner.exec("curl -s --max-time 5 https://example.com", {
-      cwd: process.cwd(),
-      timeout: 10_000,
-    });
-    expect(result.exitCode).not.toBe(0);
   });
 
   it("allows binding to loopback (needed for tests and dev servers)", async () => {
@@ -74,5 +67,70 @@ describe.skipIf(!isMacOS)("SandboxExecRunner (macOS only)", () => {
       cwd: process.cwd(),
     });
     expect(result.exitCode).toBe(0);
+  });
+
+  it("allows writes to ~/.npm (npm package cache)", async () => {
+    const testFile = join(HOME, ".npm", `.sandbox-test-${Date.now()}`);
+    const result = await runner.exec(`mkdir -p ~/.npm && touch "${testFile}" && rm "${testFile}"`, {
+      cwd: process.cwd(),
+    });
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("allows writes to ~/.cache (XDG cache dir)", async () => {
+    const testFile = join(HOME, ".cache", `.sandbox-test-${Date.now()}`);
+    const result = await runner.exec(
+      `mkdir -p ~/.cache && touch "${testFile}" && rm "${testFile}"`,
+      { cwd: process.cwd() },
+    );
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("allows writes to ~/Library/Caches (macOS app caches)", async () => {
+    const testFile = join(HOME, "Library", "Caches", `.sandbox-test-${Date.now()}`);
+    const result = await runner.exec(
+      `mkdir -p ~/Library/Caches && touch "${testFile}" && rm "${testFile}"`,
+      { cwd: process.cwd() },
+    );
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("blocks writes to ~/.ssh (credential path)", async () => {
+    const testFile = join(HOME, ".ssh", `.sandbox-test-${Date.now()}`);
+    const result = await runner.exec(
+      `mkdir -p ~/.ssh && touch "${testFile}" 2>&1; rm -f "${testFile}" 2>/dev/null; exit $?`,
+      { cwd: process.cwd() },
+    );
+    // touch should fail with permission denied
+    expect(result.stderr + result.stdout).toMatch(/permitted|denied/i);
+  });
+
+  it("blocks writes to ~/.aws (credential path)", async () => {
+    const testFile = join(HOME, ".aws", `.sandbox-test-${Date.now()}`);
+    const result = await runner.exec(
+      `mkdir -p ~/.aws && touch "${testFile}" 2>&1; rm -f "${testFile}" 2>/dev/null; exit $?`,
+      { cwd: process.cwd() },
+    );
+    expect(result.stderr + result.stdout).toMatch(/permitted|denied/i);
+  });
+
+  // /bin/ps and /usr/bin/top are setuid binaries — macOS sandbox refuses to
+  // exec them regardless of profile. pgrep is non-setuid and serves to verify
+  // that process introspection (which the profile allows) works in principle.
+  it("allows process introspection via pgrep (non-setuid)", async () => {
+    const result = await runner.exec("/usr/bin/pgrep -l sh | head -1", {
+      cwd: process.cwd(),
+    });
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("allows external network access (curl to example.com)", async () => {
+    const result = await runner.exec(
+      "curl -s --max-time 5 -o /dev/null -w '%{http_code}' https://example.com",
+      { cwd: process.cwd(), timeout: 10_000 },
+    );
+    // curl returns the HTTP status; 200 means the request succeeded end-to-end
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe("200");
   });
 });

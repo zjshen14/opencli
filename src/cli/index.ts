@@ -1,9 +1,5 @@
 import { Command } from "commander";
-import { createRequire } from "node:module";
 import { createClient, createCompactionClient, detectProvider } from "../providers/factory.js";
-
-const require = createRequire(import.meta.url);
-const pkg = require("../../package.json") as { version: string };
 import { Agent } from "../core/agent.js";
 import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
@@ -22,6 +18,7 @@ import { loadMcpConfig } from "../mcp/config.js";
 import { McpManager } from "../mcp/manager.js";
 import { registerMcpCommand } from "./mcp-cmd.js";
 import { SnapshotManager } from "../state/snapshot.js";
+import pkg from "../../package.json";
 
 const program = new Command();
 

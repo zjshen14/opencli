@@ -67,11 +67,10 @@ File: [src/tools/exec/sandbox/sandbox-exec.ts](../../src/tools/exec/sandbox/sand
 (allow process*)
 (allow signal)
 (allow sysctl-read)
-(allow sysctl-write)
 (allow mach*)
 (allow ipc*)
 
-; NEW: process introspection (fixes /bin/ps block)
+; NEW: process introspection (enables non-setuid tools like pgrep)
 (allow process-info* (target others))
 
 ; Reads: allow everywhere (unchanged)
@@ -82,9 +81,16 @@ File: [src/tools/exec/sandbox/sandbox-exec.ts](../../src/tools/exec/sandbox/sand
 (allow file-write* (subpath "/private/tmp"))
 (allow file-write* (subpath "/private/var/folders"))
 
-; NEW: standard device nodes (/dev/null, /dev/stdout, /dev/tty, etc.)
-; Required for `curl -o /dev/null`, shell redirects, many other tools.
-(allow file-write* (subpath "/dev"))
+; NEW: standard device nodes (explicit literals to keep allow surface narrow)
+; Required for curl -o /dev/null, shell redirects, /dev/tty prompts.
+(allow file-write*
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (literal "/dev/tty")
+  (literal "/dev/urandom")
+  (literal "/dev/random"))
 
 ; NEW: XDG base directories
 (allow file-write* (subpath "${HOME}/.cache"))
@@ -405,6 +411,6 @@ No changes to `core/`, `providers/`, `cli/`, `state/`, or `tools/` outside the s
 
 - [Issue #127](https://github.com/zjshen14/opencli/issues/127) — original report with concrete repros
 - [A1 design doc](a1-sandbox.md) — original sandbox design; Q2 explicitly deferred real `strict`
-- [Apple sandbox-exec profile language](https://reverse.put.as/wp-content/uploads/2011/09/Apple-Sandbox-Guide-v1.0.pdf) — `process-info*`, `file-write*`, `network*` operations
+- [Apple Sandbox Guide v1.0 (community-maintained, reverse-engineered — not an official Apple document)](https://reverse.put.as/wp-content/uploads/2011/09/Apple-Sandbox-Guide-v1.0.pdf) — most complete public reference for the `sandbox-exec` profile language (`process-info*`, `file-write*`, `network*` operations). Apple's official `sandbox-exec(1)` man page exists but is sparse.
 - [bubblewrap docs](https://github.com/containers/bubblewrap) — `--bind`, `--ro-bind`, `--unshare-net`, namespace requirements
 - Industry comparison: [Cursor](https://docs.cursor.com/), [Cline](https://github.com/cline/cline), [Claude Code](https://docs.claude.com/en/docs/claude-code) all default to "loose with opt-in isolation" rather than "deny-default."

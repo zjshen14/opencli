@@ -21,7 +21,6 @@ function buildAutoProfile(cwd: string, home: string): string {
 (allow process*)
 (allow signal)
 (allow sysctl-read)
-(allow sysctl-write)
 (allow mach*)
 (allow ipc*)
 
@@ -37,9 +36,17 @@ function buildAutoProfile(cwd: string, home: string): string {
 (allow file-write* (subpath "/var/folders"))
 (allow file-write* (subpath "/private/var/folders"))
 
-; Standard device nodes — /dev/null, /dev/stdout, /dev/tty, etc.
-; Many tools (curl -o /dev/null, shell redirects) need this.
-(allow file-write* (subpath "/dev"))
+; Standard device nodes — explicit literals rather than (subpath "/dev") to
+; keep the allow surface narrow. Needed for curl -o /dev/null, shell
+; redirects, /dev/tty prompts, etc.
+(allow file-write*
+  (literal "/dev/null")
+  (literal "/dev/zero")
+  (literal "/dev/stdout")
+  (literal "/dev/stderr")
+  (literal "/dev/tty")
+  (literal "/dev/urandom")
+  (literal "/dev/random"))
 
 ; XDG base directories
 (allow file-write* (subpath "${home}/.cache"))

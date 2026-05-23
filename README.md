@@ -190,8 +190,10 @@ The `bash` tool runs inside an OS-level sandbox by default (`--sandbox auto`):
 | Mode | Behaviour |
 |------|-----------|
 | `auto` (default) | Prevents accidental writes to system & credential paths (`/etc`, `~/.ssh`, `~/.aws`, etc.). Reads and network unrestricted. Writes allowed inside CWD, `/tmp`, and common dev dirs (`~/.npm`, `~/.cache`, `~/.cargo`, `~/Library/Caches`, …). **Not a security boundary** — use `strict` for real isolation. |
-| `strict` | Real isolation: no external network, writes only to CWD + tmp, reads restricted to CWD + system binaries. **Currently stubbed — falls back to `auto` with a warning.** Tracked in [#127](https://github.com/zjshen14/opencli/issues/127). |
+| `strict` | Real isolation: no external network, writes only to CWD + tmp, reads restricted to CWD + system binaries. **Currently stubbed — falls back to `auto` with a warning.** Tracked in [#149](https://github.com/zjshen14/opencli/issues/149). |
 | `off` | No sandbox |
+
+> **⚠ Behavior change (May 2026):** Prior to this release, `--sandbox auto` denied all external network access. As of [#127](https://github.com/zjshen14/opencli/issues/127), `auto` allows external network by default — every real coding workflow (`npm install`, `gh`, `git clone`, `curl`) was blocked otherwise. If you relied on the previous network-deny behavior, use `--sandbox strict` (once [#149](https://github.com/zjshen14/opencli/issues/149) lands) or `--sandbox off` plus an external firewall.
 
 ```bash
 # CLI flag

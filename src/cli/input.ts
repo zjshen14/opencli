@@ -165,8 +165,10 @@ export function renderSelectOptions(options: SelectOption[], selectedIdx: number
  */
 export async function selectKey(prompt: string, options: SelectOption[]): Promise<string | null> {
   emitKeypressEvents(stdin);
-  stdin.ref();
-  if (stdin.isTTY) stdin.setRawMode(true);
+  if (stdin.isTTY) {
+    stdin.ref();
+    stdin.setRawMode(true);
+  }
 
   // 1 prompt line + 1 blank line + N option lines; strip newlines from prompt
   // to prevent LINES cursor-math drift on wrapping terminals.
@@ -191,9 +193,11 @@ export async function selectKey(prompt: string, options: SelectOption[]): Promis
 
     const done = (result: string | null) => {
       stdout.write(A.up(LINES) + A.clearDown);
-      if (stdin.isTTY) stdin.setRawMode(false);
+      if (stdin.isTTY) {
+        stdin.setRawMode(false);
+        stdin.unref();
+      }
       stdin.removeListener("keypress", onKey);
-      stdin.unref();
       resolve(result);
     };
 
@@ -265,8 +269,10 @@ export async function readLine(
   opts?: ReadLineOpts,
 ): Promise<string | null> {
   emitKeypressEvents(stdin);
-  stdin.ref(); // ensure the event loop stays alive while waiting for input
-  if (stdin.isTTY) stdin.setRawMode(true);
+  if (stdin.isTTY) {
+    stdin.ref(); // keep the event loop alive while waiting for interactive input
+    stdin.setRawMode(true);
+  }
 
   return new Promise((resolve) => {
     let input = "";
@@ -305,9 +311,11 @@ export async function readLine(
     const done = (result: string | null) => {
       // Cursor is on the prompt line; clear any popup below and finalise
       stdout.write(A.clearLine + A.clearDown + PROMPT + input + "\n");
-      if (stdin.isTTY) stdin.setRawMode(false);
+      if (stdin.isTTY) {
+        stdin.setRawMode(false);
+        stdin.unref(); // release the event loop after the REPL exits
+      }
       stdin.removeListener("keypress", onKey);
-      stdin.unref(); // don't keep the event loop alive after the REPL exits
       resolve(result);
     };
 

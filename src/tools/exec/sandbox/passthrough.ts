@@ -33,12 +33,15 @@ export async function spawnAndCollect(
     proc.stdout?.on("data", (chunk: Buffer) => stdout.push(chunk));
     proc.stderr?.on("data", (chunk: Buffer) => stderr.push(chunk));
 
+    let killTimer: NodeJS.Timeout | undefined;
+    let forceTimer: NodeJS.Timeout | undefined;
+
     const finish = (exitCode: number): void => {
       if (resolved) return;
       resolved = true;
       clearTimeout(timer);
-      clearTimeout(killTimer);
-      clearTimeout(forceTimer);
+      if (killTimer) clearTimeout(killTimer);
+      if (forceTimer) clearTimeout(forceTimer);
       // Detach stdio so a stuck grandchild can't keep this Promise alive
       // through the Node event loop after we've already given up.
       try {
@@ -59,7 +62,9 @@ export async function spawnAndCollect(
     };
 
     const killGroup = (signal: NodeJS.Signals): void => {
-      if (proc.pid === undefined) return;
+      // Guard against undefined (spawn failed) and 0/negative (would kill
+      // the calling process's group via process.kill(-0, ...) — catastrophic).
+      if (proc.pid === undefined || proc.pid <= 0) return;
       try {
         // Negative PID targets the process group — works only when the proc
         // was spawned with detached: true. Falls back to direct child kill.
@@ -72,11 +77,6 @@ export async function spawnAndCollect(
         }
       }
     };
-
-    let killTimer: NodeJS.Timeout = setTimeout(() => {}, 0);
-    let forceTimer: NodeJS.Timeout = setTimeout(() => {}, 0);
-    clearTimeout(killTimer);
-    clearTimeout(forceTimer);
 
     const timer = setTimeout(() => {
       timedOut = true;

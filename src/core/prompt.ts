@@ -221,7 +221,7 @@ After every code change:
 - One \`edit\` call per file per turn to avoid conflicts
 - **edit**: always \`read\` the file first; \`old_string\` must match exactly — whitespace and indentation included; if it fails with "not found", re-read and try again with the exact content
 - **bash**: if a command fails, read the full error output before retrying; never retry unchanged
-- **bash long-running servers**: use \`nohup CMD > log 2>&1 < /dev/null &\` to background dev servers and daemons. Never end an \`&&\` chain with a backgrounded long-running command (e.g. \`A && B && server &\`) — the backgrounded subshell inherits stdio pipes and the call will hang until timeout. After starting, verify with \`sleep 2 && curl -s localhost:PORT\` or \`tail log\`.
+- **bash long-running servers**: use \`nohup CMD > log 2>&1 < /dev/null &\` to background dev servers and daemons — all three FDs must be redirected so the shell can return immediately. Never end an \`&&\` chain with a backgrounded long-running command (e.g. \`A && B && server &\`) — the backgrounded subshell inherits stdio pipes and the call will hang until timeout. After starting, verify with \`sleep 2 && curl -s localhost:PORT\` or \`tail log\`.
 - **think**: use before starting any change that touches more than two files; reason through the approach and order of changes
 - **todo_write**: for tasks with more than three steps, write the steps first and check them off as you go
 

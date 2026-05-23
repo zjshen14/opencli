@@ -45,4 +45,42 @@ describe("todoWriteTool / todoReadTool", () => {
     expect(readResult.output).not.toContain("Old");
     expect(readResult.output).toContain("New");
   });
+
+  it("appends a pending-items footer when items remain pending", async () => {
+    const items = [
+      { id: "1", text: "Card detail page", status: "done" },
+      { id: "2", text: "Shopping cart", status: "done" },
+      { id: "3", text: "External API integration", status: "pending" },
+      { id: "4", text: "Authentication", status: "pending" },
+    ];
+    const result = await todoWriteTool.execute({ items });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("2 pending item(s) remaining");
+    expect(result.output).toContain("- [3] External API integration");
+    expect(result.output).toContain("- [4] Authentication");
+    expect(result.output).toContain("Continue with the next pending item");
+  });
+
+  it("omits the pending footer when no items are pending", async () => {
+    const items = [
+      { id: "1", text: "First", status: "done" },
+      { id: "2", text: "Second", status: "done" },
+    ];
+    const result = await todoWriteTool.execute({ items });
+    expect(result.output).not.toContain("pending item(s) remaining");
+    expect(result.output).not.toContain("Continue with the next pending item");
+  });
+
+  it("counts in_progress items as still active (not pending) in the footer", async () => {
+    const items = [
+      { id: "1", text: "Currently working", status: "in_progress" },
+      { id: "2", text: "Up next", status: "pending" },
+    ];
+    const result = await todoWriteTool.execute({ items });
+    // Only "pending" status items count toward the footer reminder. in_progress
+    // items are visible in the main list; the model already knows it's working on them.
+    expect(result.output).toContain("1 pending item(s) remaining");
+    expect(result.output).toContain("- [2] Up next");
+    expect(result.output).not.toContain("- [1] Currently working");
+  });
 });

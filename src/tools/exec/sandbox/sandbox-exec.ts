@@ -118,6 +118,10 @@ export class SandboxExecRunner implements SandboxRunner {
       cwd: opts.cwd,
       env: opts.env ?? process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      // sandbox-exec becomes its own process group leader so spawnAndCollect
+      // can kill the whole group (including any backgrounded grandchildren
+      // like `npm run dev &`) on timeout via process.kill(-proc.pid, ...).
+      detached: true,
     });
 
     return spawnAndCollect(proc, opts.timeout ?? 30_000);

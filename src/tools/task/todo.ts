@@ -43,16 +43,31 @@ export const todoWriteTool: Tool = {
     try {
       await mkdir(dirname(TODO_PATH), { recursive: true });
       await writeFile(TODO_PATH, JSON.stringify(items, null, 2), "utf8");
-      const list = (items as TodoItem[])
-        .map((it) => `[${statusIcon(it.status)}] ${it.id}. ${it.text}`)
-        .join("\n");
-      return { success: true, output: list || "(empty list)" };
+      const typed = items as TodoItem[];
+      const list = typed.map((it) => `[${statusIcon(it.status)}] ${it.id}. ${it.text}`).join("\n");
+      // Why: agents often emit a summary and stop after marking 1-2 items done,
+      // leaving the rest of a multi-step task incomplete. The pending footer is
+      // appended to the tool result so the model sees the unfinished work on
+      // its next turn and either continues or explicitly states why it's stopping.
+      const pending = typed.filter((it) => it.status === "pending");
+      const footer = pending.length > 0 ? pendingFooter(pending) : "";
+      return { success: true, output: (list || "(empty list)") + footer };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { success: false, output: "", error: message };
     }
   },
 };
+
+function pendingFooter(pending: TodoItem[]): string {
+  const lines = pending.map((it) => `  - [${it.id}] ${it.text}`).join("\n");
+  return (
+    `\n\n${pending.length} pending item(s) remaining:\n${lines}\n\n` +
+    `Continue with the next pending item. Only stop if the user has redirected you, ` +
+    `a pending item is blocked on input you need, or all remaining items are out of scope — ` +
+    `and in those cases, say so explicitly before stopping.`
+  );
+}
 
 export const todoReadTool: Tool = {
   name: "todo_read",

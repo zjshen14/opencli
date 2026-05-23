@@ -285,8 +285,11 @@ npm run typecheck    # TypeScript type check
 npm run lint         # ESLint
 npm run lint:fix     # ESLint with auto-fix
 npm run format       # Prettier
-npm test             # Vitest
+npm test             # Vitest (offline unit tests)
+npm run eval         # Cross-provider eval matrix (requires npm run build first)
 ```
+
+`npm run eval` makes real API calls and costs money (~$1–5 per full run). It requires a **billing-enabled** API key — free-tier quotas are insufficient for preview models.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 

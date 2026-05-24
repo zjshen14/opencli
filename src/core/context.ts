@@ -53,7 +53,26 @@ export class ContextManager {
   }
 
   addMessage(message: Message): void {
-    this.history.push(message);
+    // Merge into the previous message when both are text-only `user` turns.
+    // This happens after restoring a session that ended on a user message (e.g.
+    // the agent crashed mid-turn, or a REPL-only slash command was logged):
+    // the user types again, producing two consecutive `user` messages, which
+    // providers reject with INVALID_ARGUMENT (role alternation violation).
+    // Carrying-`function_result` user messages are NOT merged — they pair with
+    // a prior tool call and must stay distinct.
+    const last = this.history[this.history.length - 1];
+    if (last && isUserTextOnly(last) && isUserTextOnly(message)) {
+      const mergedText =
+        last.parts.map((p) => (p as { type: "text"; text: string }).text).join("\n\n") +
+        "\n\n" +
+        message.parts.map((p) => (p as { type: "text"; text: string }).text).join("\n\n");
+      this.history[this.history.length - 1] = {
+        role: "user",
+        parts: [{ type: "text", text: mergedText }],
+      };
+    } else {
+      this.history.push(message);
+    }
     this.prune();
   }
 
@@ -166,6 +185,33 @@ export class ContextManager {
       }
     }
 
-    this.history = anchor ? [anchor, ...pruned] : pruned;
+    // If anchor and pruned[0] are both text-only user messages, prepending the
+    // anchor verbatim creates two consecutive `role: "user"` turns — providers
+    // reject this with INVALID_ARGUMENT. Merge the texts so the boundary stays
+    // a single user turn (separator marks the elided middle for the model).
+    if (anchor && pruned.length > 0 && isUserTextOnly(pruned[0])) {
+      const anchorText = anchor.parts
+        .map((p) => (p as { type: "text"; text: string }).text)
+        .join("\n\n");
+      const headText = pruned[0].parts
+        .map((p) => (p as { type: "text"; text: string }).text)
+        .join("\n\n");
+      const merged: Message = {
+        role: "user",
+        parts: [
+          {
+            type: "text",
+            text: `${anchorText}\n\n[earlier conversation pruned]\n\n${headText}`,
+          },
+        ],
+      };
+      this.history = [merged, ...pruned.slice(1)];
+    } else {
+      this.history = anchor ? [anchor, ...pruned] : pruned;
+    }
   }
+}
+
+function isUserTextOnly(msg: Message): boolean {
+  return msg.role === "user" && msg.parts.length > 0 && msg.parts.every((p) => p.type === "text");
 }

@@ -119,7 +119,8 @@ describe("compactHistory", () => {
     // Put the error message first so it ends up in the head (head = total - KEEP_RECENT messages).
     // With 20 total messages, head = first 10, so the error at index 0 is always in the head.
     ctx.addMessage(errorResultMsg("bash", "Error: command not found: foo"));
-    for (let i = 0; i < 19; i++) ctx.addMessage(userMsg(`msg ${i}`));
+    for (let i = 0; i < 19; i++)
+      ctx.addMessage(i % 2 === 0 ? userMsg(`msg ${i}`) : modelMsg(`msg ${i}`));
     const result = await compactHistory(ctx, makeMockClient(FIXED_SUMMARY));
     expect(result.messagesRemoved).toBeGreaterThan(0);
     const summaryText = (ctx.getMessages()[0].parts[0] as { type: string; text: string }).text;
@@ -150,7 +151,8 @@ describe("compactHistory — tool message flattening", () => {
       parts: [{ type: "function_result", id: "c1", name: "bash", result: "file.ts\n" }],
     });
     // Pad to 20 so head is non-empty
-    for (let i = 0; i < 17; i++) ctx.addMessage(userMsg(`pad ${i}`));
+    for (let i = 0; i < 17; i++)
+      ctx.addMessage(i % 2 === 0 ? userMsg(`pad ${i}`) : modelMsg(`pad ${i}`));
 
     const { client, captured } = makeCapturingClient(FIXED_SUMMARY);
     await compactHistory(ctx, client);
@@ -175,7 +177,8 @@ describe("compactHistory — tool message flattening", () => {
       role: "user",
       parts: [{ type: "function_result", id: "c1", name: "bash", result: "hi\n" }],
     });
-    for (let i = 0; i < 17; i++) ctx.addMessage(userMsg(`pad ${i}`));
+    for (let i = 0; i < 17; i++)
+      ctx.addMessage(i % 2 === 0 ? userMsg(`pad ${i}`) : modelMsg(`pad ${i}`));
 
     const { client, captured } = makeCapturingClient(FIXED_SUMMARY);
     await compactHistory(ctx, client);
@@ -197,7 +200,8 @@ describe("compactHistory — tool message flattening", () => {
       role: "user",
       parts: [{ type: "function_result", id: "c1", name: "bash", result: longOutput }],
     });
-    for (let i = 0; i < 17; i++) ctx.addMessage(userMsg(`pad ${i}`));
+    for (let i = 0; i < 17; i++)
+      ctx.addMessage(i % 2 === 0 ? userMsg(`pad ${i}`) : modelMsg(`pad ${i}`));
 
     const { client, captured } = makeCapturingClient(FIXED_SUMMARY);
     await compactHistory(ctx, client);
@@ -227,7 +231,8 @@ describe("compactHistory — tool message flattening", () => {
       role: "user",
       parts: [{ type: "function_result", id: "c1", name: "write", result: "ok" }],
     });
-    for (let i = 0; i < 17; i++) ctx.addMessage(userMsg(`pad ${i}`));
+    for (let i = 0; i < 17; i++)
+      ctx.addMessage(i % 2 === 0 ? userMsg(`pad ${i}`) : modelMsg(`pad ${i}`));
 
     const { client, captured } = makeCapturingClient(FIXED_SUMMARY);
     await compactHistory(ctx, client);
@@ -247,7 +252,8 @@ describe("compactHistory — tool message flattening", () => {
     // messages and risking role-alternation errors on strict providers.
     ctx.addMessage({ role: "model", parts: [{ type: "text", text: "   " }] });
     ctx.addMessage(userMsg("continue"));
-    for (let i = 0; i < 17; i++) ctx.addMessage(userMsg(`pad ${i}`));
+    for (let i = 0; i < 17; i++)
+      ctx.addMessage(i % 2 === 0 ? userMsg(`pad ${i}`) : modelMsg(`pad ${i}`));
 
     const { client, captured } = makeCapturingClient(FIXED_SUMMARY);
     await compactHistory(ctx, client);

@@ -335,6 +335,42 @@ describe("Session.loadMessages — orphaned tool_result resilience", () => {
   });
 });
 
+describe("Session.loadMessages — consecutive user-text collapse", () => {
+  it("merges back-to-back user text entries so provider role alternation holds", async () => {
+    const session = await Session.create(CWD);
+    await session.log({ type: "user", content: "First task" });
+    await session.log({ type: "assistant", content: "Working..." });
+    // Simulates the wedge: REPL-only slash command logged, then a follow-up
+    // prompt with no assistant response in between (e.g. agent crashed).
+    await session.log({ type: "user", content: "/exit" });
+    await session.log({ type: "user", content: "continue" });
+
+    const { messages } = await Session.loadMessages(session.id, CWD);
+
+    // user → model → (merged user) — three messages, never two user in a row.
+    expect(messages).toHaveLength(3);
+    expect(messages[0]).toMatchObject({ role: "user", parts: [{ text: "First task" }] });
+    expect(messages[1]).toMatchObject({ role: "model" });
+    expect(messages[2]).toMatchObject({
+      role: "user",
+      parts: [{ type: "text", text: "/exit\n\ncontinue" }],
+    });
+  });
+
+  it("does not merge a function_result user message with a preceding text user message", async () => {
+    const session = await Session.create(CWD);
+    await session.log({ type: "user", content: "Run ls" });
+    await session.log({ type: "tool_call", name: "bash", args: { command: "ls" } });
+    await session.log({ type: "tool_result", name: "bash", result: "a.txt" });
+    await session.log({ type: "assistant", content: "Done." });
+
+    const { messages } = await Session.loadMessages(session.id, CWD);
+    // The user(text) at index 0 must remain distinct from user(function_result) at index 2.
+    expect(messages[0]).toMatchObject({ role: "user", parts: [{ type: "text" }] });
+    expect(messages[2]).toMatchObject({ role: "user", parts: [{ type: "function_result" }] });
+  });
+});
+
 describe("Session.loadMessages — malformed JSONL resilience", () => {
   it("skips malformed lines and still returns valid messages", async () => {
     const { writeFile, mkdir } = await import("node:fs/promises");

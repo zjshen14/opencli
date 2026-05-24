@@ -134,6 +134,10 @@ export class BwrapRunner implements SandboxRunner {
         cwd: opts.cwd,
         env: opts.env ?? process.env,
         stdio: ["ignore", "pipe", "pipe"],
+        // bwrap becomes its own process group leader so spawnAndCollect
+        // can kill the whole group (including backgrounded grandchildren)
+        // on timeout via process.kill(-proc.pid, ...).
+        detached: true,
       },
     );
 

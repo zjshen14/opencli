@@ -221,6 +221,7 @@ After every code change:
 - One \`edit\` call per file per turn to avoid conflicts
 - **edit**: always \`read\` the file first; \`old_string\` must match exactly — whitespace and indentation included; if it fails with "not found", re-read and try again with the exact content
 - **bash**: if a command fails, read the full error output before retrying; never retry unchanged
+- **bash (background servers)**: use \`nohup CMD > log 2>&1 < /dev/null &\` to start long-running processes; never end an \`&&\` chain with a backgrounded server — the subshell inherits pipe file descriptors and the tool call will hang until the server exits
 - **think**: use before starting any change that touches more than two files; reason through the approach and order of changes
 - **todo_write**: for tasks with more than three steps, write the steps first and check them off as you go
 

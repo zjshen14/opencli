@@ -25,6 +25,16 @@ describe("PassthroughRunner", () => {
     expect(result.exitCode).toBe(-1);
   });
 
+  it("resolves after timeout when a backgrounded child holds pipes open", async () => {
+    // Reproduces: bash runs `sleep 60 &` — shell exits immediately but sleep
+    // inherits the pipe FDs, so close() never fires without a group kill.
+    const start = Date.now();
+    const result = await runner.exec("sleep 60 &", { cwd: process.cwd(), timeout: 300 });
+    expect(result.exitCode).toBe(-1);
+    // Must resolve well within timeout + 2 s grace, not hang indefinitely.
+    expect(Date.now() - start).toBeLessThan(5_000);
+  });
+
   it("exposes mode and null warning", () => {
     expect(runner.mode).toBe("off");
     expect(runner.warning).toBeNull();

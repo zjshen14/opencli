@@ -118,6 +118,7 @@ export class SandboxExecRunner implements SandboxRunner {
       cwd: opts.cwd,
       env: opts.env ?? process.env,
       stdio: ["ignore", "pipe", "pipe"],
+      detached: true,
     });
 
     return spawnAndCollect(proc, opts.timeout ?? 30_000);

@@ -307,25 +307,31 @@ describe("ContextManager", () => {
     expect(msgs[0].role).toBe("user");
   });
 
-  it("prune uses tail-scan to recover last clean user message when head scan fails", () => {
-    // Window: [user_results, model_calls, user_text, model_calls]
-    // Head scan skips user_results (orphan) and model_calls — fails.
-    // Tail scan finds user_text and uses it as the start.
+  it("prune head-scan finds a clean user message in the middle of the slice", () => {
+    // Window: [user_results, user_text, model_calls]  (last 3 of history)
+    // Head scan skips user_results (orphan) and lands on user_text("second").
+    // Anchor preservation prepends "first" → final: [first, second, model_calls].
     const ctx = new ContextManager(STUB, 4);
     ctx.addMessage(userMsg("first"));
     ctx.addMessage(modelWithCalls([{ id: "c1", name: "bash" }]));
     ctx.addMessage(userWithResults([{ id: "c1", name: "bash" }]));
-    ctx.addMessage(userMsg("second")); // clean user message in the tail
+    ctx.addMessage(userMsg("second")); // clean user message after the orphan
     ctx.addMessage(modelWithCalls([{ id: "c2", name: "bash" }]));
-    // 5th triggers prune → slice last 4 = [user_results, user_text("second"), model_calls, ...]
-    // Head scan: user_results → skip (orphan). user_text("second") → found!
+    // 5th triggers prune → slice last 3 = [user_results, user_text("second"), model_calls]
+    // Head scan: user_results → skip (orphan). user_text("second") → found.
+    // Anchor preservation prepends "first" at index 0. Orphan user_results is gone.
     const msgs = ctx.getMessages();
     expect(msgs[0].role).toBe("user");
-    expect((msgs[0].parts[0] as { type: string; text: string }).text).toBe("second");
+    expect((msgs[0].parts[0] as { type: string; text: string }).text).toBe("first");
+    // The first non-anchor message should be the clean "second" user message —
+    // proves the orphan user_results was trimmed by the head scan.
+    expect((msgs[1].parts[0] as { type: string; text: string }).text).toBe("second");
   });
 
   it("prune retains the function_call/result pair when the boundary falls cleanly", () => {
-    // maxHistoryMessages=4: slice starts exactly at a user text message — no skipping needed.
+    // maxHistoryMessages=4: slice last 3 = [user_results, user_text("b"), model_calls].
+    // Head scan skips user_results and lands on "b".
+    // Anchor preservation prepends "a" (the original task).
     const ctx = new ContextManager(STUB, 4);
     ctx.addMessage(userMsg("a"));
     ctx.addMessage(modelWithCalls([{ id: "c1", name: "read" }]));
@@ -334,9 +340,67 @@ describe("ContextManager", () => {
     ctx.addMessage(modelWithCalls([{ id: "c2", name: "edit" }])); // 5th → prune
 
     const msgs = ctx.getMessages();
-    // Slice of 4 starts at userWithResults — skipped; next clean start is userMsg("b")
+    // First message is the preserved anchor "a"; second is "b" (head-scan target).
+    expect((msgs[0].parts[0] as { type: string; text: string }).text).toBe("a");
+    expect((msgs[1].parts[0] as { type: string; text: string }).text).toBe("b");
+  });
+
+  it("prune preserves the first user text message as anchor when pruning a long history", () => {
+    // The bug this guards against: a long session (or a resumed session whose
+    // history exceeds the per-turn window) silently dropped the original task
+    // message, leaving the LLM with no context for follow-ups like "continue".
+    const ctx = new ContextManager(STUB, 10);
+    ctx.addMessage(userMsg("build a card trading website with Next.js"));
+    for (let i = 0; i < 50; i++) {
+      ctx.addMessage(userMsg(`follow-up ${i}`));
+    }
+
+    const msgs = ctx.getMessages();
+    // Length capped by window
+    expect(msgs.length).toBeLessThanOrEqual(10);
+    // Anchor: the original task is at the head
+    expect((msgs[0].parts[0] as { type: string; text: string }).text).toBe(
+      "build a card trading website with Next.js",
+    );
+    // Tail: most recent follow-up is preserved
+    expect((msgs[msgs.length - 1].parts[0] as { type: string; text: string }).text).toBe(
+      "follow-up 49",
+    );
+  });
+
+  it("prune skips anchor preservation when maxHistoryMessages is 1 (no budget for anchor)", () => {
+    // With only 1 slot, there's no room to keep an anchor AND any recent state.
+    // Behavior falls back to the original prune (last 1 message).
+    const ctx = new ContextManager(STUB, 1);
+    ctx.addMessage(userMsg("original task"));
+    ctx.addMessage(userMsg("most recent"));
+
+    const msgs = ctx.getMessages();
+    expect(msgs).toHaveLength(1);
+    expect((msgs[0].parts[0] as { type: string; text: string }).text).toBe("most recent");
+  });
+
+  it("prune skips anchor preservation when first message is not a clean user text", () => {
+    // If the first message is a tool result (e.g., from a re-imported partial
+    // session log), it's not a useful anchor — fall back to the original behavior.
+    const ctx = new ContextManager(STUB, 4);
+    ctx.restoreMessages([
+      // Synthetic first message: a user message containing only a function_result
+      // (not a usable anchor). Real sessions don't usually start like this, but
+      // a corrupt or partial log could.
+      userWithResults([{ id: "c0", name: "init" }]),
+    ]);
+    ctx.addMessage(modelMsg("model response"));
+    ctx.addMessage(userMsg("real task"));
+    ctx.addMessage(modelWithCalls([{ id: "c1", name: "read" }]));
+    ctx.addMessage(userWithResults([{ id: "c1", name: "read" }])); // 5th → prune
+
+    const msgs = ctx.getMessages();
+    // The first message must still be a clean user text message (provider invariant)
     expect(msgs[0].role).toBe("user");
-    expect((msgs[0].parts[0] as { type: string; text: string }).text).toBe("b");
+    expect(msgs[0].parts.every((p) => p.type !== "function_result")).toBe(true);
+    // It should NOT be the corrupted first message
+    expect((msgs[0].parts[0] as { type: string; text: string }).text).toBe("real task");
   });
 });
 

@@ -79,3 +79,49 @@ describe.skipIf(!isLinux)("BwrapRunner (Linux only)", () => {
     expect(runner.warning).toBeTruthy();
   });
 });
+
+describe.skipIf(!isLinux)("BwrapRunner strict mode (Linux only)", () => {
+  const strict = new BwrapRunner("strict", process.cwd());
+
+  it("blocks external network access", async () => {
+    if (strict.warning) return;
+    const result = await strict.exec("curl -s --max-time 5 -o /dev/null https://example.com", {
+      cwd: process.cwd(),
+      timeout: 10_000,
+    });
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  it("blocks writes to HOME (user dotfiles are not mounted)", async () => {
+    if (strict.warning) return;
+    const testFile = join(HOME, `.sandbox-strict-test-${Date.now()}`);
+    const result = await strict.exec(`touch "${testFile}" 2>&1`, { cwd: process.cwd() });
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  it("blocks reads from ~/.ssh (not present in namespace)", async () => {
+    if (strict.warning) return;
+    const result = await strict.exec(`ls "${HOME}/.ssh" 2>&1`, { cwd: process.cwd() });
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  it("allows writes inside CWD", async () => {
+    if (strict.warning) return;
+    const testFile = join(process.cwd(), `.sandbox-strict-test-${Date.now()}`);
+    const result = await strict.exec(`touch "${testFile}" && rm "${testFile}"`, {
+      cwd: process.cwd(),
+    });
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("allows localhost network (loopback interface present in net namespace)", async () => {
+    if (strict.warning) return;
+    const script =
+      "node -e \"const s=require('net').createServer();" +
+      "s.listen(0,'127.0.0.1',()=>{console.log('ok');s.close()});" +
+      "s.on('error',e=>{console.error(e.message);process.exit(1)})\"";
+    const result = await strict.exec(script, { cwd: process.cwd(), timeout: 10_000 });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("ok");
+  });
+});

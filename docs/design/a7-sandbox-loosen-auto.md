@@ -1,6 +1,6 @@
 # Design: A7 — Loosen `auto` sandbox, implement real `strict`
 
-_Status: Ready for implementation. Tracking issue: [#127](https://github.com/zjshen14/opencli/issues/127). Phase: [Roadmap A7](../roadmap.md)._
+_Status: Phase 1 Implemented — merged in PR [#148](https://github.com/zjshen14/opencli/pull/148) (2026-05-23). Phase 2 Implemented — merged via [#149](https://github.com/zjshen14/opencli/issues/149) (2026-05-24)._
 
 ---
 

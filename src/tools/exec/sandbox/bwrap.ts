@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PassthroughRunner, spawnAndCollect } from "./passthrough.js";
@@ -24,6 +24,22 @@ const AUTO_HOME_DIRS = [
   ".m2",
   ".rustup",
 ];
+
+// Minimum system paths exposed read-only in strict mode. Only paths that
+// exist on this host are bound — avoids bwrap failure on paths absent in
+// some distros (e.g. /lib64 on Alpine, /sbin on Debian merged-usr systems).
+const STRICT_SYSTEM_PATHS = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"];
+
+function buildStrictArgs(cwd: string): string[] {
+  const args: string[] = ["--unshare-net"];
+  for (const p of STRICT_SYSTEM_PATHS) {
+    if (existsSync(p)) {
+      args.push("--ro-bind", p, p);
+    }
+  }
+  args.push("--bind", cwd, cwd, "--tmpfs", "/tmp", "--dev", "/dev", "--proc", "/proc");
+  return args;
+}
 
 function detectBwrap(): string | null {
   for (const candidate of BWRAP_CANDIDATES) {
@@ -62,8 +78,7 @@ export class BwrapRunner implements SandboxRunner {
   private fallback: PassthroughRunner | null = null;
 
   constructor(mode: SandboxMode, cwd: string) {
-    // strict is stubbed — fall back to auto
-    this.mode = mode === "strict" ? "auto" : mode;
+    this.mode = mode;
     this.cwd = cwd;
 
     const bin = detectBwrap();
@@ -82,24 +97,19 @@ export class BwrapRunner implements SandboxRunner {
       return;
     }
 
-    // Emit the strict-mode warning only when the runner will actually execute.
-    if (mode === "strict") {
-      process.stderr.write(
-        "[opencli] warn: strict mode not yet implemented; falling back to auto\n",
-      );
-    }
-
     this.bwrapBin = bin;
     this.warning = null;
 
-    const home = process.env.HOME ?? homedir();
-    for (const sub of AUTO_HOME_DIRS) {
-      const path = join(home, sub);
-      try {
-        mkdirSync(path, { recursive: true });
-        this.autoBinds.push("--bind", path, path);
-      } catch {
-        // best-effort: skip dirs we can't create (read-only home, etc.)
+    if (mode !== "strict") {
+      const home = process.env.HOME ?? homedir();
+      for (const sub of AUTO_HOME_DIRS) {
+        const path = join(home, sub);
+        try {
+          mkdirSync(path, { recursive: true });
+          this.autoBinds.push("--bind", path, path);
+        } catch {
+          // best-effort: skip dirs we can't create (read-only home, etc.)
+        }
       }
     }
   }
@@ -109,37 +119,34 @@ export class BwrapRunner implements SandboxRunner {
       return this.fallback.exec(command, opts);
     }
 
-    const proc = spawn(
-      this.bwrapBin,
-      [
-        "--ro-bind",
-        "/",
-        "/",
-        "--bind",
-        this.cwd,
-        this.cwd,
-        "--tmpfs",
-        "/tmp",
-        "--dev",
-        "/dev",
-        "--proc",
-        "/proc",
-        ...this.autoBinds,
-        "--",
-        "/bin/sh",
-        "-c",
-        command,
-      ],
-      {
-        cwd: opts.cwd,
-        env: opts.env ?? process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-        // bwrap becomes its own process group leader so spawnAndCollect
-        // can kill the whole group (including backgrounded grandchildren)
-        // on timeout via process.kill(-proc.pid, ...).
-        detached: true,
-      },
-    );
+    const bwrapArgs =
+      this.mode === "strict"
+        ? buildStrictArgs(this.cwd)
+        : [
+            "--ro-bind",
+            "/",
+            "/",
+            "--bind",
+            this.cwd,
+            this.cwd,
+            "--tmpfs",
+            "/tmp",
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            ...this.autoBinds,
+          ];
+
+    const proc = spawn(this.bwrapBin, [...bwrapArgs, "--", "/bin/sh", "-c", command], {
+      cwd: opts.cwd,
+      env: opts.env ?? process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      // bwrap becomes its own process group leader so spawnAndCollect
+      // can kill the whole group (including backgrounded grandchildren)
+      // on timeout via process.kill(-proc.pid, ...).
+      detached: true,
+    });
 
     return spawnAndCollect(proc, opts.timeout ?? 30_000);
   }

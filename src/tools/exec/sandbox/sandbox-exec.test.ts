@@ -134,3 +134,50 @@ describe.skipIf(!isMacOS)("SandboxExecRunner (macOS only)", () => {
     expect(result.stdout.trim()).toBe("200");
   });
 });
+
+describe.skipIf(!isMacOS)("SandboxExecRunner strict mode (macOS only)", () => {
+  const strict = new SandboxExecRunner("strict", process.cwd());
+
+  it("blocks external network access", async () => {
+    const result = await strict.exec("curl -s --max-time 5 -o /dev/null https://example.com", {
+      cwd: process.cwd(),
+      timeout: 10_000,
+    });
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  it("blocks writes to ~/.npm (user dotfiles not allowed)", async () => {
+    const testFile = join(HOME, ".npm", `.sandbox-strict-test-${Date.now()}`);
+    const result = await strict.exec(`touch "${testFile}" 2>&1`, { cwd: process.cwd() });
+    expect(result.exitCode).not.toBe(0);
+  });
+
+  it("blocks reads from ~/.ssh", async () => {
+    const testFile = join(HOME, ".ssh", `.sandbox-strict-test-${Date.now()}`);
+    const result = await strict.exec(`mkdir -p "${HOME}/.ssh" && touch "${testFile}" 2>&1`, {
+      cwd: process.cwd(),
+    });
+    expect(result.stderr + result.stdout).toMatch(/permitted|denied/i);
+  });
+
+  it("allows writes inside CWD", async () => {
+    const testFile = join(process.cwd(), `.sandbox-strict-test-${Date.now()}`);
+    const result = await strict.exec(`touch "${testFile}" && rm "${testFile}"`, {
+      cwd: process.cwd(),
+    });
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("allows localhost network connections", async () => {
+    const script =
+      "const s=require('http').createServer();" +
+      "s.listen(0,'127.0.0.1',()=>{console.log('ok',s.address().port>0);s.close()});" +
+      "s.on('error',e=>{console.error('err',e.message);process.exit(1)});";
+    const result = await strict.exec(`node -e "${script}"`, {
+      cwd: process.cwd(),
+      timeout: 10_000,
+    });
+    expect(result.stdout).toContain("ok true");
+    expect(result.exitCode).toBe(0);
+  });
+});

@@ -73,8 +73,11 @@ export async function runRepl(
     for (const w of warnings) printInfo(w);
     const input = expanded;
 
-    // Log expanded content so resumed sessions restore the same context the agent saw
-    void session.log({ type: "user", content: input });
+    // NOTE: user messages are logged at the point they actually reach the agent
+    // (just before runPlanFlow / runAgentTurn below). Logging here would persist
+    // REPL-only commands like /exit, /help, /clear as user content — resumed
+    // sessions would then replay them as consecutive user messages and the
+    // provider would reject with INVALID_ARGUMENT (role alternation violated).
 
     // Built-in commands
     if (input === "/help") {
@@ -97,6 +100,7 @@ export async function runRepl(
         printError("Usage: /plan <task description>");
         continue;
       }
+      void session.log({ type: "user", content: planPrompt });
       await runPlanFlow(agent, session, planPrompt);
       continue;
     }
@@ -224,6 +228,7 @@ export async function runRepl(
       userMessage = args || `Please follow the ${entry.name} skill instructions.`;
     }
 
+    void session.log({ type: "user", content: userMessage });
     await runAgentTurn(agent, session, userMessage);
   }
 

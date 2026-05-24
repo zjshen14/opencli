@@ -181,7 +181,45 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
   flushCalls();
   flushResults();
 
-  return messages;
+  return collapseConsecutiveUserText(messages);
+}
+
+/**
+ * Merge consecutive `role: "user"` text-only messages into one.
+ *
+ * Older JSONL logs may contain back-to-back `user` entries — typically because
+ * a REPL-only slash command like `/exit` was persisted before being intercepted,
+ * or because the agent crashed mid-turn so no `assistant` event followed the
+ * user input. Replaying them as separate messages violates provider role
+ * alternation (Gemini/Anthropic both 400 on consecutive same-role contents).
+ * Merging the text preserves the user's words without breaking the wire format.
+ *
+ * Only collapses *text-only* user messages — user messages carrying
+ * `function_result` parts must remain distinct (they pair with prior tool
+ * calls and merging would orphan them).
+ */
+function collapseConsecutiveUserText(messages: Message[]): Message[] {
+  const result: Message[] = [];
+  for (const msg of messages) {
+    const last = result[result.length - 1];
+    if (last && isUserTextOnly(last) && isUserTextOnly(msg)) {
+      const mergedText =
+        last.parts.map((p) => (p as { type: "text"; text: string }).text).join("\n\n") +
+        "\n\n" +
+        msg.parts.map((p) => (p as { type: "text"; text: string }).text).join("\n\n");
+      result[result.length - 1] = {
+        role: "user",
+        parts: [{ type: "text", text: mergedText }],
+      };
+    } else {
+      result.push(msg);
+    }
+  }
+  return result;
+}
+
+function isUserTextOnly(msg: Message): boolean {
+  return msg.role === "user" && msg.parts.length > 0 && msg.parts.every((p) => p.type === "text");
 }
 
 export type SessionEntry =

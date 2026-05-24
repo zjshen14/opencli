@@ -53,7 +53,26 @@ export class ContextManager {
   }
 
   addMessage(message: Message): void {
-    this.history.push(message);
+    // Merge into the previous message when both are text-only `user` turns.
+    // This happens after restoring a session that ended on a user message (e.g.
+    // the agent crashed mid-turn, or a REPL-only slash command was logged):
+    // the user types again, producing two consecutive `user` messages, which
+    // providers reject with INVALID_ARGUMENT (role alternation violation).
+    // Carrying-`function_result` user messages are NOT merged — they pair with
+    // a prior tool call and must stay distinct.
+    const last = this.history[this.history.length - 1];
+    if (last && isUserTextOnly(last) && isUserTextOnly(message)) {
+      const mergedText =
+        last.parts.map((p) => (p as { type: "text"; text: string }).text).join("\n\n") +
+        "\n\n" +
+        message.parts.map((p) => (p as { type: "text"; text: string }).text).join("\n\n");
+      this.history[this.history.length - 1] = {
+        role: "user",
+        parts: [{ type: "text", text: mergedText }],
+      };
+    } else {
+      this.history.push(message);
+    }
     this.prune();
   }
 
@@ -102,7 +121,23 @@ export class ContextManager {
   private prune(): void {
     if (this.history.length <= this.maxHistoryMessages) return;
 
-    const sliced = this.history.slice(-this.maxHistoryMessages);
+    // Reserve a slot to preserve the very first user text message — typically
+    // the original task that anchors the whole session. Without this, prune
+    // silently drops the goal once history exceeds the window, regardless of
+    // whether the session is resumed or grew organically. A5b's planned
+    // auto-compact will replace this with a real LLM summary; this is the
+    // cheap interim that prevents the agent saying "I have no context".
+    const first = this.history[0];
+    const anchor =
+      this.maxHistoryMessages > 1 &&
+      first?.role === "user" &&
+      first.parts.length > 0 &&
+      first.parts.every((p) => p.type === "text")
+        ? first
+        : null;
+
+    const windowSize = this.maxHistoryMessages - (anchor ? 1 : 0);
+    const sliced = this.history.slice(-windowSize);
 
     // Advance past any orphaned messages at the head of the slice so we never
     // send a function_result without its matching function_call (Gemini returns
@@ -116,39 +151,67 @@ export class ContextManager {
       startIdx++;
     }
 
+    let pruned: Message[];
     if (startIdx < sliced.length) {
-      this.history = sliced.slice(startIdx);
-      return;
-    }
-
-    // No clean user message found from the head — scan from the tail so we
-    // don't return a model-first window (providers reject with INVALID_ARGUMENT).
-    // This happens when a single user turn triggers so many tool-call/result
-    // pairs that the original user message scrolls out of the window.
-    let tailIdx = sliced.length - 1;
-    while (tailIdx >= 0) {
-      const msg = sliced[tailIdx];
-      if (msg.role === "user" && !msg.parts.some((p) => p.type === "function_result")) {
-        break;
+      pruned = sliced.slice(startIdx);
+    } else {
+      // No clean user message found from the head — scan from the tail so we
+      // don't return a model-first window (providers reject with INVALID_ARGUMENT).
+      // This happens when a single user turn triggers so many tool-call/result
+      // pairs that the original user message scrolls out of the window.
+      let tailIdx = sliced.length - 1;
+      while (tailIdx >= 0) {
+        const msg = sliced[tailIdx];
+        if (msg.role === "user" && !msg.parts.some((p) => p.type === "function_result")) {
+          break;
+        }
+        tailIdx--;
       }
-      tailIdx--;
+
+      if (tailIdx >= 0) {
+        pruned = sliced.slice(tailIdx);
+      } else {
+        // Truly pathological: no clean user text message anywhere in the window
+        // (e.g. maxHistoryMessages is so small the window is pure tool-call/result
+        // pairs). Prepend a synthetic anchor so history never starts with a model
+        // turn — providers require the first message to be a user text message.
+        pruned = [
+          {
+            role: "user",
+            parts: [{ type: "text", text: "(earlier context unavailable — history was pruned)" }],
+          },
+          ...sliced,
+        ];
+      }
     }
 
-    if (tailIdx >= 0) {
-      this.history = sliced.slice(tailIdx);
-      return;
-    }
-
-    // Truly pathological: no clean user text message anywhere in the window
-    // (e.g. maxHistoryMessages is so small the window is pure tool-call/result
-    // pairs). Prepend a synthetic anchor so history never starts with a model
-    // turn — providers require the first message to be a user text message.
-    this.history = [
-      {
+    // If anchor and pruned[0] are both text-only user messages, prepending the
+    // anchor verbatim creates two consecutive `role: "user"` turns — providers
+    // reject this with INVALID_ARGUMENT. Merge the texts so the boundary stays
+    // a single user turn (separator marks the elided middle for the model).
+    if (anchor && pruned.length > 0 && isUserTextOnly(pruned[0])) {
+      const anchorText = anchor.parts
+        .map((p) => (p as { type: "text"; text: string }).text)
+        .join("\n\n");
+      const headText = pruned[0].parts
+        .map((p) => (p as { type: "text"; text: string }).text)
+        .join("\n\n");
+      const merged: Message = {
         role: "user",
-        parts: [{ type: "text", text: "(earlier context unavailable — history was pruned)" }],
-      },
-      ...sliced,
-    ];
+        parts: [
+          {
+            type: "text",
+            text: `${anchorText}\n\n[earlier conversation pruned]\n\n${headText}`,
+          },
+        ],
+      };
+      this.history = [merged, ...pruned.slice(1)];
+    } else {
+      this.history = anchor ? [anchor, ...pruned] : pruned;
+    }
   }
+}
+
+function isUserTextOnly(msg: Message): boolean {
+  return msg.role === "user" && msg.parts.length > 0 && msg.parts.every((p) => p.type === "text");
 }

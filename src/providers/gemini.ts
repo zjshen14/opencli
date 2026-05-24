@@ -102,6 +102,7 @@ export class GeminiClient implements LLMClient {
     yield { type: "done" };
   }
   private messagesToContents(messages: Message[]): Content[] {
+    const requiresSignature = isThinkingModel(this.model);
     return messages.map((msg) => ({
       role: msg.role,
       parts: msg.parts.map((part) => {
@@ -110,13 +111,25 @@ export class GeminiClient implements LLMClient {
         }
         if (part.type === "function_call") {
           const sig = this.thoughtSignatures.get(part.id);
+          if (!sig && requiresSignature) {
+            // Thinking models (gemini-3.x, *-thinking variants) reject any
+            // functionCall without a thoughtSignature. After resume the
+            // in-memory map is empty — JSONL doesn't persist signatures — so a
+            // tool turn from a prior process would 400. Flatten to text so the
+            // model still sees what happened, just without structured pairing.
+            return { text: `[Tool call: ${part.name}(${JSON.stringify(part.args)})]` };
+          }
           return {
             functionCall: { id: part.id, name: part.name, args: part.args },
             ...(sig ? { thoughtSignature: sig } : {}),
           };
         }
-        // function_result — echo thoughtSignature back as required by Gemini thinking models
+        // function_result — must echo its function_call's thoughtSignature.
         const sig = this.thoughtSignatures.get(part.id);
+        if (!sig && requiresSignature) {
+          // Paired call was flattened above; serialize the result as text too.
+          return { text: `[Tool result: ${part.name} → ${part.result}]` };
+        }
         return {
           functionResponse: {
             id: part.id,
@@ -128,6 +141,13 @@ export class GeminiClient implements LLMClient {
       }),
     }));
   }
+}
+
+// Models that always emit (and require echoing) thoughtSignature on functionCall/Response.
+// On resume the signature is lost — the JSONL doesn't carry it — so calls to these models
+// would 400 unless we flatten unsignatured tool parts to text.
+function isThinkingModel(model: string): boolean {
+  return model.startsWith("gemini-3") || model.includes("thinking");
 }
 
 function definitionToFunctionDeclaration(def: ToolDefinition): FunctionDeclaration {

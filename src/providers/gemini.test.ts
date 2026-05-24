@@ -259,13 +259,15 @@ describe("GeminiClient thoughtSignature handling", () => {
     expect(userMsg.parts[0].thoughtSignature).toBe("sig-abc");
   });
 
-  it("omits thoughtSignature on functionResponse when no signature was captured", async () => {
-    // Stream a function_call without a thoughtSignature (non-thinking model)
+  it("omits thoughtSignature on functionResponse when no signature was captured (non-thinking model)", async () => {
+    // Non-thinking model: signature is naturally absent and that's fine.
+    const nonThinking = new GeminiClient("fake-key", "gemini-2.0-flash");
+
     mockGenerateContentStream.mockReturnValueOnce(
       makeStream([{ functionCall: { id: "call-2", name: "read", args: { file_path: "f.ts" } } }]),
     );
 
-    for await (const event of client.stream([], "sys", [])) void event;
+    for await (const event of nonThinking.stream([], "sys", [])) void event;
 
     mockGenerateContentStream.mockReturnValueOnce(makeStream([{ text: "ok" }]));
 
@@ -289,13 +291,56 @@ describe("GeminiClient thoughtSignature handling", () => {
       },
     ];
 
-    for await (const event of client.stream(messagesWithResult, "sys", [])) void event;
+    for await (const event of nonThinking.stream(messagesWithResult, "sys", [])) void event;
 
     const secondCallContents = mockGenerateContentStream.mock.calls[1][0].contents;
     const modelMsg = secondCallContents[0];
     const userMsg = secondCallContents[1];
 
+    // Structured form preserved (no flatten); signature absent because non-thinking model.
+    expect(modelMsg.parts[0]).toHaveProperty("functionCall");
+    expect(userMsg.parts[0]).toHaveProperty("functionResponse");
     expect(modelMsg.parts[0]).not.toHaveProperty("thoughtSignature");
     expect(userMsg.parts[0]).not.toHaveProperty("thoughtSignature");
+  });
+
+  it("flattens unsignatured function_call/result to text for thinking models (fixes resume 400)", async () => {
+    // Default model is gemini-3-flash-preview (a thinking model). Without a
+    // captured signature, sending the call/response as structured parts would
+    // trip Gemini's 400 INVALID_ARGUMENT. The provider must downgrade to text.
+    mockGenerateContentStream.mockReturnValueOnce(makeStream([{ text: "ack" }]));
+
+    const messagesWithStaleTool = [
+      {
+        role: "user" as const,
+        parts: [{ type: "text" as const, text: "do the thing" }],
+      },
+      {
+        role: "model" as const,
+        parts: [
+          { type: "function_call" as const, id: "resume-1", name: "bash", args: { command: "ls" } },
+        ],
+      },
+      {
+        role: "user" as const,
+        parts: [{ type: "function_result" as const, id: "resume-1", name: "bash", result: "ok" }],
+      },
+      {
+        role: "user" as const,
+        parts: [{ type: "text" as const, text: "continue" }],
+      },
+    ];
+
+    for await (const event of client.stream(messagesWithStaleTool, "sys", [])) void event;
+
+    const sent = mockGenerateContentStream.mock.calls[0][0].contents;
+    const modelTurn = sent[1];
+    const userTurn = sent[2];
+
+    // Tool parts flattened to text — no functionCall / functionResponse anywhere.
+    expect(modelTurn.parts[0]).not.toHaveProperty("functionCall");
+    expect(userTurn.parts[0]).not.toHaveProperty("functionResponse");
+    expect(modelTurn.parts[0].text).toContain("[Tool call: bash(");
+    expect(userTurn.parts[0].text).toContain("[Tool result: bash →");
   });
 });

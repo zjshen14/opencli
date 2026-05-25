@@ -18,13 +18,14 @@ import { loadMcpConfig } from "../mcp/config.js";
 import { McpManager } from "../mcp/manager.js";
 import { registerMcpCommand } from "./mcp-cmd.js";
 import { SnapshotManager } from "../state/snapshot.js";
+import pkg from "../../package.json";
 
 const program = new Command();
 
 program
   .name("opencli")
-  .description("An open-source AI agent CLI — supports Gemini and Claude models")
-  .version("0.1.0");
+  .description("An open-source AI agent CLI — supports Gemini, Claude, and OpenAI models")
+  .version(pkg.version);
 
 program
   .command("chat", { isDefault: true })

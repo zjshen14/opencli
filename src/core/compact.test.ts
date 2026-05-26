@@ -281,8 +281,19 @@ describe("contextWindowFor", () => {
     expect(contextWindowFor("gemini-2.0-flash-lite")).toBe(1_048_576);
   });
 
+  it("returns 1_048_576 for gemini-3.x models (default model family)", () => {
+    expect(contextWindowFor("gemini-3.1-flash-lite-preview")).toBe(1_048_576);
+    expect(contextWindowFor("gemini-3.0-flash")).toBe(1_048_576);
+  });
+
   it("returns 128_000 for gpt-4o prefix", () => {
     expect(contextWindowFor("gpt-4o-mini")).toBe(128_000);
+  });
+
+  it("returns 128_000 for gpt-4.1 prefix", () => {
+    expect(contextWindowFor("gpt-4.1-mini")).toBe(128_000);
+    expect(contextWindowFor("gpt-4.1-nano")).toBe(128_000);
+    expect(contextWindowFor("gpt-4.1")).toBe(128_000);
   });
 
   it("returns 100_000 for unknown model", () => {

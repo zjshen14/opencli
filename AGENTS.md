@@ -60,9 +60,18 @@ src/
     registry.ts     # Discover SKILL.md files across 4 scoped directories
     loader.ts       # Parse SKILL.md frontmatter, !{cmd} preprocessing, $ARGUMENTS substitution
     builtin/        # review, commit, explain, debug, test, gh-issue, gh-pr, branch, run-tests, typecheck, lint, new-skill
+  mcp/            # MCP integration — bridges external tool servers into ToolRegistry
+    types.ts        # McpStdioServer, McpHttpServer, McpServerConfig, McpConfig, McpToolInfo
+    config.ts       # loadMcpConfig(agentDir) — reads ~/.opencli/mcp.json; expands ${VAR} refs
+    client.ts       # McpClient — connects via stdio or HTTP, enforces per-server callTimeout
+    adapter.ts      # mcpToolToTool() — wraps one MCP tool as a Tool (name: mcp__server__tool)
+    manager.ts      # McpManager — connects all servers in parallel, registers adapters
+    index.ts        # Re-exports all public types and classes
   state/
     config.ts       # ~/.opencli/config.json load/save; exports AGENT_DIR, Config (incl. anthropicApiKey)
     session.ts      # JSONL session logs at ~/.opencli/projects/<cwd>/; create, list, resume
+    settings.ts     # .opencli/settings.json load/save; holds project-level Permissions (HITL allow/deny list)
+    snapshot.ts     # SnapshotManager — git stash create/restore for per-session working-tree snapshots
 ```
 
 ## Architecture

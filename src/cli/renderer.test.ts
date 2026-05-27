@@ -413,9 +413,17 @@ describe("print functions write to stderr/stdout", () => {
     expect(output).toContain("bash");
   });
 
-  it("printToolResult skips edit tool", () => {
+  it("printToolResult skips edit tool (success and error are routed via runner.ts)", () => {
     printToolResult("edit", "anything");
     expect(stderrSpy).not.toHaveBeenCalled();
+  });
+
+  it("printToolResultExpanded shows ✗ for failed edit (runner calls this on edit error)", () => {
+    printToolResultExpanded("edit", "Error: old_string not found in file");
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✗");
+    expect(output).toContain("old_string not found in file");
+    expect(output).not.toContain("✓");
   });
 
   it("printToolResult writes compact summary for short bash output (≤5 lines)", () => {

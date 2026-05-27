@@ -8,6 +8,7 @@ import {
   printToolCallCompact,
   printToolResult,
   printToolResultCompact,
+  printToolResultExpanded,
   printEditDiff,
   printSkillActivated,
   printError,
@@ -75,8 +76,12 @@ export async function runAgentTurn(
           if (COMPACT_TOOLS.has(event.name)) {
             printToolResultCompact(event.name, event.result);
           } else if (event.name === "edit") {
-            const edit = pendingEdits.shift();
-            if (edit) printEditDiff(edit.old_string, edit.new_string, edit.file_path);
+            const edit = pendingEdits.shift(); // always shift to keep array in sync
+            if (event.result.startsWith("Error:")) {
+              printToolResultExpanded("edit", event.result);
+            } else if (edit) {
+              printEditDiff(edit.old_string, edit.new_string, edit.file_path);
+            }
           } else {
             printToolResult(event.name, event.result);
           }

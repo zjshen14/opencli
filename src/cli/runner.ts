@@ -51,6 +51,7 @@ export async function runAgentTurn(
             type: "tool_call",
             name: event.name,
             args: event.args,
+            ...(event.thoughtSignature ? { thoughtSignature: event.thoughtSignature } : {}),
           });
           if (COMPACT_TOOLS.has(event.name)) {
             printToolCallCompact(event.name, event.args);

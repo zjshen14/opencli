@@ -335,6 +335,56 @@ describe("Session.loadMessages — orphaned tool_result resilience", () => {
   });
 });
 
+describe("Session.loadMessages — thoughtSignature persistence", () => {
+  it("restores thoughtSignature onto FunctionCallPart from the tool_call entry", async () => {
+    const session = await Session.create(CWD);
+    await session.log({ type: "user", content: "Run" });
+    await session.log({
+      type: "tool_call",
+      name: "bash",
+      args: { command: "ls" },
+      thoughtSignature: "sig-abc",
+    });
+    await session.log({ type: "tool_result", name: "bash", result: "ok" });
+    await session.log({ type: "assistant", content: "Done." });
+
+    const { messages } = await Session.loadMessages(session.id, CWD);
+    const callPart = messages[1].parts[0] as { type: string; thoughtSignature?: string };
+    expect(callPart.type).toBe("function_call");
+    expect(callPart.thoughtSignature).toBe("sig-abc");
+  });
+
+  it("propagates the call's thoughtSignature onto the matching FunctionResultPart", async () => {
+    const session = await Session.create(CWD);
+    await session.log({ type: "user", content: "Run" });
+    await session.log({
+      type: "tool_call",
+      name: "bash",
+      args: { command: "ls" },
+      thoughtSignature: "sig-xyz",
+    });
+    await session.log({ type: "tool_result", name: "bash", result: "ok" });
+
+    const { messages } = await Session.loadMessages(session.id, CWD);
+    const resultPart = messages[2].parts[0] as { type: string; thoughtSignature?: string };
+    expect(resultPart.type).toBe("function_result");
+    expect(resultPart.thoughtSignature).toBe("sig-xyz");
+  });
+
+  it("omits thoughtSignature when the tool_call entry didn't carry one (legacy JSONL)", async () => {
+    const session = await Session.create(CWD);
+    await session.log({ type: "user", content: "Run" });
+    await session.log({ type: "tool_call", name: "bash", args: { command: "ls" } });
+    await session.log({ type: "tool_result", name: "bash", result: "ok" });
+
+    const { messages } = await Session.loadMessages(session.id, CWD);
+    const callPart = messages[1].parts[0] as unknown as Record<string, unknown>;
+    const resultPart = messages[2].parts[0] as unknown as Record<string, unknown>;
+    expect(callPart).not.toHaveProperty("thoughtSignature");
+    expect(resultPart).not.toHaveProperty("thoughtSignature");
+  });
+});
+
 describe("Session.loadMessages — consecutive user-text collapse", () => {
   it("merges back-to-back user text entries so provider role alternation holds", async () => {
     const session = await Session.create(CWD);

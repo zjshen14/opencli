@@ -198,7 +198,7 @@ describe("GeminiClient thoughtSignature handling", () => {
     };
   }
 
-  it("does not include thoughtSignature in yielded StreamEvent", async () => {
+  it("includes thoughtSignature on the yielded StreamEvent so callers can persist it", async () => {
     mockGenerateContentStream.mockReturnValue(
       makeStream([
         {
@@ -213,9 +213,12 @@ describe("GeminiClient thoughtSignature handling", () => {
       events.push(event);
     }
 
-    const callEvent = events.find((e) => e.type === "function_call");
+    const callEvent = events.find((e) => e.type === "function_call") as {
+      type: string;
+      thoughtSignature?: string;
+    };
     expect(callEvent).toBeDefined();
-    expect(callEvent).not.toHaveProperty("thoughtSignature");
+    expect(callEvent.thoughtSignature).toBe("sig-abc");
   });
 
   it("echoes thoughtSignature on functionResponse when the call ID is known", async () => {
@@ -302,6 +305,55 @@ describe("GeminiClient thoughtSignature handling", () => {
     expect(userMsg.parts[0]).toHaveProperty("functionResponse");
     expect(modelMsg.parts[0]).not.toHaveProperty("thoughtSignature");
     expect(userMsg.parts[0]).not.toHaveProperty("thoughtSignature");
+  });
+
+  it("uses part-level thoughtSignature when the in-memory map is empty (resumed session)", async () => {
+    // Simulates resume: GeminiClient has never streamed, so thoughtSignatures
+    // is empty. The signature must come from the part itself (persisted in
+    // session JSONL and propagated by reconstructMessages) so the structured
+    // functionCall/functionResponse payload matches what a live session sends.
+    mockGenerateContentStream.mockReturnValueOnce(makeStream([{ text: "ok" }]));
+
+    const restoredHistory = [
+      { role: "user" as const, parts: [{ type: "text" as const, text: "task" }] },
+      {
+        role: "model" as const,
+        parts: [
+          {
+            type: "function_call" as const,
+            id: "resume-1",
+            name: "bash",
+            args: { command: "ls" },
+            thoughtSignature: "sig-from-jsonl",
+          },
+        ],
+      },
+      {
+        role: "user" as const,
+        parts: [
+          {
+            type: "function_result" as const,
+            id: "resume-1",
+            name: "bash",
+            result: "ok",
+            thoughtSignature: "sig-from-jsonl",
+          },
+        ],
+      },
+      { role: "user" as const, parts: [{ type: "text" as const, text: "continue" }] },
+    ];
+
+    for await (const event of client.stream(restoredHistory, "sys", [])) void event;
+
+    const sent = mockGenerateContentStream.mock.calls[0][0].contents;
+    const modelPart = sent[1].parts[0];
+    const userResultPart = sent[2].parts[0];
+
+    // Structured form preserved — no flatten — and signature carried through.
+    expect(modelPart).toHaveProperty("functionCall");
+    expect(modelPart.thoughtSignature).toBe("sig-from-jsonl");
+    expect(userResultPart).toHaveProperty("functionResponse");
+    expect(userResultPart.thoughtSignature).toBe("sig-from-jsonl");
   });
 
   it("flattens unsignatured function_call/result to text for thinking models (fixes resume 400)", async () => {

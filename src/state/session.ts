@@ -118,22 +118,23 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
   // Pending batches accumulate until we know where they belong
   let pendingCalls: FunctionCallPart[] = [];
   let pendingResults: FunctionResultPart[] = [];
-  // Queue of call IDs waiting for their matching results; ensures each
-  // function_result references the same ID as its function_call (required by the Anthropic API).
-  let pendingCallIds: string[] = [];
+  // Queue of pending calls' (id, signature) pairs waiting for their matching
+  // results. The id pair is required by Anthropic's tool_use_id contract; the
+  // signature is needed so Gemini thinking-model functionResponse can echo it.
+  let pendingCallMeta: { id: string; thoughtSignature?: string }[] = [];
 
   function flushCalls(): void {
     if (pendingCalls.length === 0) return;
     messages.push({ role: "model", parts: pendingCalls });
     pendingCalls = [];
-    // pendingCallIds intentionally kept — results still need them
+    // pendingCallMeta intentionally kept — results still need it
   }
 
   function flushResults(): void {
     if (pendingResults.length === 0) return;
     messages.push({ role: "user", parts: pendingResults });
     pendingResults = [];
-    pendingCallIds = [];
+    pendingCallMeta = [];
   }
 
   for (const entry of entries) {
@@ -146,28 +147,32 @@ function reconstructMessages(entries: SessionEntry[]): Message[] {
       // New tool_call batch: if there were results from a previous round, flush them first
       flushResults();
       const id = `resume-call-${++idCounter}`;
-      pendingCallIds.push(id);
+      pendingCallMeta.push({ id, thoughtSignature: entry.thoughtSignature });
       pendingCalls.push({
         type: "function_call",
         id,
         name: entry.name,
         args: entry.args,
+        ...(entry.thoughtSignature ? { thoughtSignature: entry.thoughtSignature } : {}),
       });
     } else if (entry.type === "tool_result") {
       // Results follow their calls — flush the pending call batch into a model message
       flushCalls();
-      if (pendingCallIds.length === 0) {
+      if (pendingCallMeta.length === 0) {
         process.stderr.write(
           `[opencli] warn: orphaned tool_result for "${entry.name}" (no matching tool_call) — skipping\n`,
         );
         continue;
       }
-      const id = pendingCallIds.shift()!;
+      const meta = pendingCallMeta.shift()!;
       pendingResults.push({
         type: "function_result",
-        id,
+        id: meta.id,
         name: entry.name,
         result: entry.result,
+        // Echo the paired call's signature so Gemini thinking-model
+        // functionResponse can carry it on the next request.
+        ...(meta.thoughtSignature ? { thoughtSignature: meta.thoughtSignature } : {}),
       });
     } else if (entry.type === "assistant" && entry.content) {
       flushCalls();
@@ -226,7 +231,17 @@ export type SessionEntry =
   | { type: "session_start"; timestamp: string; cwd: string }
   | { type: "user"; timestamp: string; content: string }
   | { type: "assistant"; timestamp: string; content: string }
-  | { type: "tool_call"; timestamp: string; name: string; args: Record<string, unknown> }
+  | {
+      type: "tool_call";
+      timestamp: string;
+      name: string;
+      args: Record<string, unknown>;
+      // Gemini thinking-model signature for the originating functionCall.
+      // Persisted so a resumed session sends the same structured payload as an
+      // unbroken one; reconstructMessages propagates it onto the FunctionCallPart
+      // and the matching FunctionResultPart.
+      thoughtSignature?: string;
+    }
   | { type: "tool_result"; timestamp: string; name: string; result: string };
 
 type WithoutTimestamp<T> = T extends unknown ? Omit<T, "timestamp"> : never;

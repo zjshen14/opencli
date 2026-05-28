@@ -67,6 +67,9 @@ async function executeOneCall(
   deps: ExecutorDeps,
 ): Promise<FunctionResultPart> {
   const tool = deps.tools.get(call.name);
+  // Propagate the call's thoughtSignature onto every result we return — Gemini
+  // thinking models require the same signature echoed back on functionResponse.
+  const sig = call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {};
 
   if (deps.readOnly && !tool?.readonly) {
     deps.obs?.({ type: "tool_denied", name: call.name, reason: "plan_mode" });
@@ -75,6 +78,7 @@ async function executeOneCall(
       id: call.id,
       name: call.name,
       result: `Error: '${call.name}' is blocked in plan mode. Use read, glob, or grep to explore the codebase.`,
+      ...sig,
     };
   }
   if (tool?.requiresConfirmation?.(call.args as Record<string, unknown>)) {
@@ -94,6 +98,7 @@ async function executeOneCall(
         result: deps.confirmFn
           ? `Blocked: user denied '${call.name}' tool call.`
           : `Blocked: '${call.name}' requires confirmation but is running non-interactively. Pass --yes to auto-approve.`,
+        ...sig,
       };
     }
   }
@@ -123,6 +128,7 @@ async function executeOneCall(
     id: call.id,
     name: call.name,
     result: output,
+    ...sig,
   };
 }
 

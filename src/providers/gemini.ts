@@ -86,6 +86,7 @@ export class GeminiClient implements LLMClient {
               id,
               name: part.functionCall.name ?? "",
               args: (part.functionCall.args ?? {}) as Record<string, unknown>,
+              ...(sig ? { thoughtSignature: sig } : {}),
             };
           }
         }
@@ -110,13 +111,15 @@ export class GeminiClient implements LLMClient {
           return { text: part.text };
         }
         if (part.type === "function_call") {
-          const sig = this.thoughtSignatures.get(part.id);
+          // Prefer the signature carried on the part itself — populated either
+          // from this stream's emit or restored from the session JSONL. Fall
+          // back to the in-memory map for backward compatibility with parts
+          // built before signatures were threaded through.
+          const sig = part.thoughtSignature ?? this.thoughtSignatures.get(part.id);
           if (!sig && requiresSignature) {
-            // Thinking models (gemini-3.x, *-thinking variants) reject any
-            // functionCall without a thoughtSignature. After resume the
-            // in-memory map is empty — JSONL doesn't persist signatures — so a
-            // tool turn from a prior process would 400. Flatten to text so the
-            // model still sees what happened, just without structured pairing.
+            // No signature available (old JSONL recorded before sig persistence
+            // landed). Thinking models reject unsignatured functionCall — fall
+            // back to a text representation so the conversation still streams.
             return { text: `[Tool call: ${part.name}(${JSON.stringify(part.args)})]` };
           }
           return {
@@ -125,9 +128,8 @@ export class GeminiClient implements LLMClient {
           };
         }
         // function_result — must echo its function_call's thoughtSignature.
-        const sig = this.thoughtSignatures.get(part.id);
+        const sig = part.thoughtSignature ?? this.thoughtSignatures.get(part.id);
         if (!sig && requiresSignature) {
-          // Paired call was flattened above; serialize the result as text too.
           return { text: `[Tool result: ${part.name} → ${part.result}]` };
         }
         return {

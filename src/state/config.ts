@@ -6,6 +6,7 @@ const CONFIG_FILE = join(AGENT_DIR, "config.json");
 
 export interface Permissions {
   allow?: string[];
+  deny?: string[];
 }
 
 export interface Config {

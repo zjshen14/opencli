@@ -4,14 +4,57 @@ import { loadConfig, saveConfig } from "../state/config.js";
 import { loadSettings, saveSettings } from "../state/settings.js";
 import { selectKey } from "./input.js";
 
+// Pattern format for deny rules: "toolName(argGlob)" where * matches any chars.
+// bash → matches args.command; write/edit → args.file_path; others → JSON(args).
+// Example: "bash(rm -rf *)" or "write(src/cli/*)" or "bash(*)" (all bash).
+
+export function globMatch(pattern: string, str: string): boolean {
+  const re = new RegExp(
+    "^" + pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$",
+  );
+  return re.test(str);
+}
+
+export function matchesDenyPattern(
+  patterns: string[],
+  toolName: string,
+  args: Record<string, unknown>,
+): boolean {
+  const primaryArg =
+    toolName === "bash"
+      ? String(args.command ?? "")
+      : toolName === "write" || toolName === "edit"
+        ? String(args.file_path ?? "")
+        : JSON.stringify(args);
+
+  for (const pattern of patterns) {
+    const parenOpen = pattern.indexOf("(");
+    if (parenOpen === -1 || !pattern.endsWith(")")) continue;
+
+    const patTool = pattern.slice(0, parenOpen);
+    const patArg = pattern.slice(parenOpen + 1, -1);
+
+    if (patTool === toolName && globMatch(patArg, primaryArg)) return true;
+  }
+  return false;
+}
+
 export async function createConfirmFn(): Promise<ConfirmFn> {
   const [config, settings] = await Promise.all([loadConfig(), loadSettings()]);
 
   const globalAllowSet = new Set<string>(config.permissions?.allow ?? []);
   const projectAllowSet = new Set<string>(settings.permissions?.allow ?? []);
+  const denyPatterns: string[] = [
+    ...(config.permissions?.deny ?? []),
+    ...(settings.permissions?.deny ?? []),
+  ];
 
   return async (toolName, args) => {
     if (!process.stdin.isTTY) return "deny";
+
+    if (denyPatterns.length > 0 && matchesDenyPattern(denyPatterns, toolName, args)) {
+      return "deny";
+    }
 
     const exactKey = `${toolName}:${JSON.stringify(args)}`;
     const toolWildcard = `${toolName}:*`;

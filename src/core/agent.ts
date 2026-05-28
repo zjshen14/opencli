@@ -326,6 +326,10 @@ export class Agent {
     };
   }
 
+  undoLastTurn(): number {
+    return this.context.popTurn();
+  }
+
   clearHistory(): void {
     this.context.clear();
   }

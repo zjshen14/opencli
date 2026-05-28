@@ -110,6 +110,18 @@ export class ContextManager {
     return this.maxHistoryMessages;
   }
 
+  popTurn(): number {
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      const msg = this.history[i];
+      if (msg.role === "user" && !msg.parts.some((p) => p.type === "function_result")) {
+        const removed = this.history.length - i;
+        this.history = this.history.slice(0, i);
+        return removed;
+      }
+    }
+    return 0;
+  }
+
   clear(): void {
     this.history = [];
     this.skillContent = [];

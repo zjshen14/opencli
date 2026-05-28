@@ -12,6 +12,13 @@ import { toFriendlyError } from "./errors.js";
 
 const DEFAULT_MODEL = "gemini-3-flash-preview";
 
+// Gemini thinking models occasionally emit these control tokens as plain text
+// when function calling falls back to text-mode output. Strip them defensively
+// so they never appear in user-visible streamed text.
+// <end_of_turn> is a standalone tag; <start_of_turn> is followed by the role
+// name as a separate text token (model or user), so both are stripped together.
+const GEMINI_CONTROL_RE = /<end_of_turn>|<start_of_turn>(?:model|user)?/g;
+
 export class GeminiClient implements LLMClient {
   private client: GoogleGenAI;
   private model: string;
@@ -76,7 +83,8 @@ export class GeminiClient implements LLMClient {
       if (candidate?.content?.parts) {
         for (const part of candidate.content.parts) {
           if (part.text) {
-            yield { type: "text", text: part.text };
+            const filtered = part.text.replace(GEMINI_CONTROL_RE, "");
+            if (filtered) yield { type: "text", text: filtered };
           } else if (part.functionCall) {
             const id = part.functionCall.id ?? crypto.randomUUID();
             const sig = (part as unknown as { thoughtSignature?: string }).thoughtSignature;

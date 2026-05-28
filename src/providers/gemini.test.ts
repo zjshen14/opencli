@@ -396,3 +396,82 @@ describe("GeminiClient thoughtSignature handling", () => {
     expect(userTurn.parts[0].text).toContain("[Tool result: bash →");
   });
 });
+
+describe("GeminiClient control token filtering", () => {
+  let mockGenerateContentStream: ReturnType<typeof vi.fn>;
+  let client: GeminiClient;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockGenerateContentStream = vi.fn();
+    vi.mocked(GoogleGenAI).mockImplementation(
+      () =>
+        ({
+          models: { generateContentStream: mockGenerateContentStream },
+        }) as unknown as InstanceType<typeof GoogleGenAI>,
+    );
+    client = new GeminiClient("fake-key");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function* makeStream(parts: unknown[]) {
+    yield { candidates: [{ content: { parts } }] };
+  }
+
+  async function collectTextEvents(gen: AsyncGenerator<unknown>): Promise<string[]> {
+    const texts: string[] = [];
+    for await (const e of gen) {
+      if ((e as { type: string }).type === "text") texts.push((e as { text: string }).text);
+    }
+    return texts;
+  }
+
+  it("strips <end_of_turn> from a text-only chunk", async () => {
+    mockGenerateContentStream.mockReturnValue(makeStream([{ text: "<end_of_turn>" }]));
+    const texts = await collectTextEvents(client.stream([], "sys", []));
+    expect(texts).toHaveLength(0);
+  });
+
+  it("strips <end_of_turn> embedded in a larger text chunk", async () => {
+    mockGenerateContentStream.mockReturnValue(makeStream([{ text: "Hello<end_of_turn> world" }]));
+    const texts = await collectTextEvents(client.stream([], "sys", []));
+    expect(texts).toEqual(["Hello world"]);
+  });
+
+  it("strips <start_of_turn>model control token", async () => {
+    mockGenerateContentStream.mockReturnValue(
+      makeStream([{ text: "<start_of_turn>model\nSome response" }]),
+    );
+    const texts = await collectTextEvents(client.stream([], "sys", []));
+    expect(texts).toEqual(["\nSome response"]);
+  });
+
+  it("strips <start_of_turn>user control token", async () => {
+    mockGenerateContentStream.mockReturnValue(makeStream([{ text: "<start_of_turn>user\nHi" }]));
+    const texts = await collectTextEvents(client.stream([], "sys", []));
+    expect(texts).toEqual(["\nHi"]);
+  });
+
+  it("strips bare <start_of_turn> control token", async () => {
+    mockGenerateContentStream.mockReturnValue(makeStream([{ text: "<start_of_turn>answer" }]));
+    const texts = await collectTextEvents(client.stream([], "sys", []));
+    expect(texts).toEqual(["answer"]);
+  });
+
+  it("passes normal text through unchanged", async () => {
+    mockGenerateContentStream.mockReturnValue(makeStream([{ text: "Hello, world!" }]));
+    const texts = await collectTextEvents(client.stream([], "sys", []));
+    expect(texts).toEqual(["Hello, world!"]);
+  });
+
+  it("does not emit a text event when the filtered chunk is empty", async () => {
+    mockGenerateContentStream.mockReturnValue(
+      makeStream([{ text: "<end_of_turn><start_of_turn>model" }]),
+    );
+    const texts = await collectTextEvents(client.stream([], "sys", []));
+    expect(texts).toHaveLength(0);
+  });
+});

@@ -22,6 +22,7 @@ const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: "compact", description: "summarize older conversation history to free context" },
   { name: "context", description: "show current token usage vs. context window" },
   { name: "rewind", description: "undo agent file changes since last snapshot" },
+  { name: "undo", description: "remove the last user message and agent response from history" },
   { name: "clear", description: "clear conversation history" },
   { name: "exit", description: "exit the agent" },
 ];
@@ -87,6 +88,15 @@ export async function runRepl(
     if (input === "/clear") {
       agent.clearHistory();
       printInfo("History cleared.");
+      continue;
+    }
+    if (input === "/undo") {
+      const removed = agent.undoLastTurn();
+      if (removed === 0) {
+        printInfo("Nothing to undo — conversation is empty.");
+      } else {
+        printInfo(`Undid last turn (${removed} message${removed === 1 ? "" : "s"} removed).`);
+      }
       continue;
     }
     if (input === "/exit" || input === "/quit") {

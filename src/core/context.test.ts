@@ -472,6 +472,65 @@ describe("ContextManager", () => {
   });
 });
 
+describe("ContextManager — popTurn", () => {
+  it("returns 0 and leaves history empty when called on empty context", () => {
+    const ctx = new ContextManager(STUB);
+    expect(ctx.popTurn()).toBe(0);
+    expect(ctx.getMessages()).toEqual([]);
+  });
+
+  it("removes a single user message when there is no model response yet", () => {
+    const ctx = new ContextManager(STUB);
+    ctx.addMessage(userMsg("hello"));
+    expect(ctx.popTurn()).toBe(1);
+    expect(ctx.getMessages()).toEqual([]);
+  });
+
+  it("removes the last user message and its model response", () => {
+    const ctx = new ContextManager(STUB);
+    ctx.addMessage(userMsg("first"));
+    ctx.addMessage(modelMsg("first reply"));
+    ctx.addMessage(userMsg("second"));
+    ctx.addMessage(modelMsg("second reply"));
+    expect(ctx.popTurn()).toBe(2);
+    expect(ctx.getMessages()).toEqual([userMsg("first"), modelMsg("first reply")]);
+  });
+
+  it("removes a full tool-call round-trip with the triggering user message", () => {
+    const ctx = new ContextManager(STUB);
+    ctx.addMessage(userMsg("run a tool"));
+    ctx.addMessage(modelWithCalls([{ id: "c1", name: "bash" }]));
+    ctx.addMessage(userWithResults([{ id: "c1", name: "bash" }]));
+    ctx.addMessage(modelMsg("done"));
+    expect(ctx.popTurn()).toBe(4);
+    expect(ctx.getMessages()).toEqual([]);
+  });
+
+  it("preserves earlier turns when undoing the last one", () => {
+    const ctx = new ContextManager(STUB);
+    ctx.addMessage(userMsg("turn 1"));
+    ctx.addMessage(modelMsg("reply 1"));
+    ctx.addMessage(userMsg("turn 2"));
+    ctx.addMessage(modelWithCalls([{ id: "c1", name: "read" }]));
+    ctx.addMessage(userWithResults([{ id: "c1", name: "read" }]));
+    ctx.addMessage(modelMsg("reply 2"));
+    expect(ctx.popTurn()).toBe(4);
+    expect(ctx.getMessages()).toEqual([userMsg("turn 1"), modelMsg("reply 1")]);
+  });
+
+  it("can be called multiple times to undo successive turns", () => {
+    const ctx = new ContextManager(STUB);
+    ctx.addMessage(userMsg("a"));
+    ctx.addMessage(modelMsg("a reply"));
+    ctx.addMessage(userMsg("b"));
+    ctx.addMessage(modelMsg("b reply"));
+    ctx.popTurn();
+    ctx.popTurn();
+    expect(ctx.getMessages()).toEqual([]);
+    expect(ctx.popTurn()).toBe(0);
+  });
+});
+
 describe("ContextManager — messageCount and maxMessages getters", () => {
   it("messageCount is 0 initially", () => {
     const ctx = new ContextManager(STUB);

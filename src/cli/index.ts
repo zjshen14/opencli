@@ -19,6 +19,7 @@ import { McpManager } from "../mcp/manager.js";
 import { registerMcpCommand } from "./mcp-cmd.js";
 import { SnapshotManager } from "../state/snapshot.js";
 import pkg from "../../package.json";
+import { looksLikeActionablePlan } from "./plan.js";
 
 function parseTurns(raw: string): number {
   const n = parseInt(raw, 10);
@@ -264,7 +265,7 @@ async function runSingle(
   try {
     if (planMode) {
       const planText = await stream(prompt, "plan");
-      if (planText.trim()) {
+      if (planText.trim() && looksLikeActionablePlan(planText)) {
         process.stderr.write("\nExecuting plan…\n");
         await stream(
           `I have approved the following plan. Execute it step by step:\n\n${planText}`,

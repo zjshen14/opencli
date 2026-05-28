@@ -475,6 +475,75 @@ describe("executeCalls — confirmation", () => {
     expect(confirmFn).toHaveBeenCalledWith("risky", { command: "rm -rf /" });
     expect(results[0].result).toBe("done");
   });
+
+  it("calls confirmFn when forcesConfirmation returns true even if requiresConfirmation is false", async () => {
+    const confirmFn = vi.fn(async () => "allow" as const);
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "safe",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ success: true, output: "ok" }),
+      requiresConfirmation: () => false,
+    });
+
+    const { results } = await executeCalls([makeToolCall("safe", { command: "git push" })], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      confirmFn,
+      forcesConfirmation: (_toolName, args) => (args.command as string) === "git push",
+    });
+
+    expect(confirmFn).toHaveBeenCalledWith("safe", { command: "git push" });
+    expect(results[0].result).toBe("ok");
+  });
+
+  it("denies when forcesConfirmation returns true and confirmFn denies", async () => {
+    const executeMock = vi.fn(async () => ({ success: true, output: "ran" }));
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "safe",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: executeMock,
+      requiresConfirmation: () => false,
+    });
+    const confirmFn = vi.fn(async () => "deny" as const);
+
+    const { results } = await executeCalls([makeToolCall("safe", { command: "git push" })], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      confirmFn,
+      forcesConfirmation: () => true,
+    });
+
+    expect(executeMock).not.toHaveBeenCalled();
+    expect(results[0].result).toContain("denied");
+  });
+
+  it("skips confirmFn when forcesConfirmation returns false and requiresConfirmation returns false", async () => {
+    const confirmFn = vi.fn(async () => "allow" as const);
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "safe",
+      description: "",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ success: true, output: "ok" }),
+      requiresConfirmation: () => false,
+    });
+
+    await executeCalls([makeToolCall("safe")], {
+      tools: registry,
+      skills: makeSkillRegistry({}),
+      context: new ContextManager(),
+      confirmFn,
+      forcesConfirmation: () => false,
+    });
+
+    expect(confirmFn).not.toHaveBeenCalled();
+  });
 });
 
 describe("truncateOutput", () => {

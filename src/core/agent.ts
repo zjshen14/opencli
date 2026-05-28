@@ -49,6 +49,7 @@ export type AgentRunMode = "react" | "plan";
 export class Agent {
   private context: ContextManager;
   private confirmFn?: ConfirmFn;
+  private forcesConfirmationFn?: (toolName: string, args: Record<string, unknown>) => boolean;
   private model: string;
   private obs?: ObservabilityHandler;
   private snapshotManager?: SnapshotManager;
@@ -78,6 +79,10 @@ export class Agent {
 
   setConfirmFn(fn: ConfirmFn): void {
     this.confirmFn = fn;
+  }
+
+  setForcesConfirmationFn(fn: (toolName: string, args: Record<string, unknown>) => boolean): void {
+    this.forcesConfirmationFn = fn;
   }
 
   setSessionTmpDir(dir: string): void {
@@ -233,6 +238,7 @@ export class Agent {
         tmpDir: this.context.getSessionTmpDir(),
         readOnly: mode === "plan",
         confirmFn: this.confirmFn,
+        forcesConfirmation: this.forcesConfirmationFn,
         obs: this.obs,
         snapshot: this.snapshotManager,
         cwd: process.cwd(),

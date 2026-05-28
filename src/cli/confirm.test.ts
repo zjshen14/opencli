@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { globMatch, matchesDenyPattern } from "./confirm.js";
+import { globMatch, matchesDenyPattern, createForcesConfirmationFn } from "./confirm.js";
 
 describe("globMatch", () => {
   it("matches an exact string with no wildcards", () => {
@@ -81,5 +81,38 @@ describe("matchesDenyPattern", () => {
     const patterns = ['read({"file_path":"secret.txt"})'];
     expect(matchesDenyPattern(patterns, "read", { file_path: "secret.txt" })).toBe(true);
     expect(matchesDenyPattern(patterns, "read", { file_path: "other.txt" })).toBe(false);
+  });
+});
+
+describe("createForcesConfirmationFn", () => {
+  it("returns false for all calls when ask patterns list is empty", () => {
+    const fn = createForcesConfirmationFn([]);
+    expect(fn("bash", { command: "git status" })).toBe(false);
+    expect(fn("write", { file_path: "src/foo.ts" })).toBe(false);
+  });
+
+  it("returns true when bash command matches an ask pattern", () => {
+    const fn = createForcesConfirmationFn(["bash(git push*)"]);
+    expect(fn("bash", { command: "git push origin main" })).toBe(true);
+    expect(fn("bash", { command: "git status" })).toBe(false);
+  });
+
+  it("returns true when write path matches an ask pattern", () => {
+    const fn = createForcesConfirmationFn(["write(src/*)"]);
+    expect(fn("write", { file_path: "src/index.ts" })).toBe(true);
+    expect(fn("write", { file_path: "test/index.ts" })).toBe(false);
+  });
+
+  it("returns false for a non-matching tool name", () => {
+    const fn = createForcesConfirmationFn(["bash(git push*)"]);
+    expect(fn("write", { command: "git push origin main" })).toBe(false);
+  });
+
+  it("matches across multiple patterns", () => {
+    const fn = createForcesConfirmationFn(["bash(git push*)", "write(src/*)"]);
+    expect(fn("bash", { command: "git push origin main" })).toBe(true);
+    expect(fn("write", { file_path: "src/index.ts" })).toBe(true);
+    expect(fn("bash", { command: "git status" })).toBe(false);
+    expect(fn("write", { file_path: "test/index.ts" })).toBe(false);
   });
 });

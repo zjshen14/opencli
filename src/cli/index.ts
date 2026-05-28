@@ -237,7 +237,9 @@ async function runSingle(
   if (autoApprove) {
     agent.setConfirmFn(async () => "allow");
   } else if (process.stdin.isTTY) {
-    agent.setConfirmFn(await createConfirmFn());
+    const { confirmFn, forcesConfirmation } = await createConfirmFn();
+    agent.setConfirmFn(confirmFn);
+    agent.setForcesConfirmationFn(forcesConfirmation);
   }
   // no confirmFn → executor auto-denies tools that require confirmation
 

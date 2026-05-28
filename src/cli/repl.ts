@@ -34,7 +34,9 @@ export async function runRepl(
   onExit?: () => Promise<void>,
   snapshotManager?: SnapshotManager,
 ): Promise<void> {
-  agent.setConfirmFn(await createConfirmFn());
+  const { confirmFn, forcesConfirmation } = await createConfirmFn();
+  agent.setConfirmFn(confirmFn);
+  agent.setForcesConfirmationFn(forcesConfirmation);
   printInfo(`OpenCLI — type /help for commands, Ctrl+C to exit\n`);
 
   let session: Session;

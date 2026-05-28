@@ -1,4 +1,4 @@
-import { Command } from "commander";
+import { Command, InvalidArgumentError } from "commander";
 import { createClient, createCompactionClient, detectProvider } from "../providers/factory.js";
 import { Agent } from "../core/agent.js";
 import { createDefaultRegistry } from "../tools/index.js";
@@ -20,6 +20,20 @@ import { registerMcpCommand } from "./mcp-cmd.js";
 import { SnapshotManager } from "../state/snapshot.js";
 import pkg from "../../package.json";
 
+function parseTurns(raw: string): number {
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1)
+    throw new InvalidArgumentError("--max-turns must be a positive integer");
+  return n;
+}
+
+function parseTemperature(raw: string): number {
+  const n = parseFloat(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 2)
+    throw new InvalidArgumentError("--temperature must be between 0 and 2");
+  return n;
+}
+
 const program = new Command();
 
 program
@@ -36,7 +50,7 @@ program
   )
   .option("-r, --resume", "Resume the most recent session")
   .option("-s, --session <id>", "Resume a specific session by ID")
-  .option("--max-turns <n>", "Maximum agent iterations per prompt (default: 50)", parseInt)
+  .option("--max-turns <n>", "Maximum agent iterations per prompt (default: 50)", parseTurns)
   .option("--debug", "Emit structured observability events to stderr as JSON")
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
   .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
@@ -74,14 +88,14 @@ program
   .command("run <prompt>")
   .description("Run a single prompt and exit")
   .option("-m, --model <model>", "Model to use")
-  .option("--max-turns <n>", "Maximum agent iterations (default: 50)", parseInt)
+  .option("--max-turns <n>", "Maximum agent iterations (default: 50)", parseTurns)
   .option("--plan", "Run a read-only planning pass first, then auto-execute the plan")
   .option("--yes", "Auto-approve all tool confirmations (skip interactive prompts)")
   .option("--debug", "Emit structured observability events to stderr as JSON")
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
   .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
   .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
-  .option("--temperature <float>", "LLM temperature (use 0 for determinism)", parseFloat)
+  .option("--temperature <float>", "LLM temperature (use 0 for determinism)", parseTemperature)
   .action(async (prompt: string, opts) => {
     await runSingle(
       prompt,

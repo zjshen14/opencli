@@ -27,6 +27,9 @@ export interface ExecutorDeps {
   tmpDir?: string;
   readOnly?: boolean;
   confirmFn?: ConfirmFn;
+  /** Returns true when a tool call matches an `ask` permission pattern and must be
+   *  confirmed even though the tool's own requiresConfirmation returns false. */
+  forcesConfirmation?: (toolName: string, args: Record<string, unknown>) => boolean;
   obs?: ObservabilityHandler;
   snapshot?: SnapshotManager;
   cwd?: string;
@@ -81,7 +84,10 @@ async function executeOneCall(
       ...sig,
     };
   }
-  if (tool?.requiresConfirmation?.(call.args as Record<string, unknown>)) {
+  const needsConfirm =
+    tool?.requiresConfirmation?.(call.args as Record<string, unknown>) ||
+    deps.forcesConfirmation?.(call.name, call.args as Record<string, unknown>);
+  if (needsConfirm) {
     const decision = deps.confirmFn
       ? await deps.confirmFn(call.name, call.args as Record<string, unknown>)
       : "deny";

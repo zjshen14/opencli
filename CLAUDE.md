@@ -71,7 +71,7 @@ src/
   state/
     config.ts       # ~/.opencli/config.json load/save; exports AGENT_DIR, Config (incl. anthropicApiKey)
     session.ts      # JSONL session logs at ~/.opencli/projects/<cwd>/; create, list, resume
-    settings.ts     # .opencli/settings.json load/save; holds project-level Permissions (HITL allow/deny list)
+    settings.ts     # .opencli/settings.json load/save; holds project-level Permissions (HITL allow/ask/deny list)
     snapshot.ts     # SnapshotManager — git stash create/restore for per-session working-tree snapshots
 ```
 

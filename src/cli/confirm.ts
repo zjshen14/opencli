@@ -39,7 +39,26 @@ export function matchesDenyPattern(
   return false;
 }
 
-export async function createConfirmFn(): Promise<ConfirmFn> {
+/** Builds a sync function that returns true when a tool call matches one of the
+ *  given ask patterns and must therefore be confirmed even if the tool's own
+ *  requiresConfirmation would return false. */
+export function createForcesConfirmationFn(
+  askPatterns: string[],
+): (toolName: string, args: Record<string, unknown>) => boolean {
+  return (toolName, args) => {
+    if (askPatterns.length === 0) return false;
+    return matchesDenyPattern(askPatterns, toolName, args);
+  };
+}
+
+export interface ConfirmBundle {
+  confirmFn: ConfirmFn;
+  /** Returns true if the tool call matches an `ask` pattern and must be confirmed
+   *  even when the tool itself does not set requiresConfirmation. */
+  forcesConfirmation: (toolName: string, args: Record<string, unknown>) => boolean;
+}
+
+export async function createConfirmFn(): Promise<ConfirmBundle> {
   const [config, settings] = await Promise.all([loadConfig(), loadSettings()]);
 
   const globalAllowSet = new Set<string>(config.permissions?.allow ?? []);
@@ -48,8 +67,14 @@ export async function createConfirmFn(): Promise<ConfirmFn> {
     ...(config.permissions?.deny ?? []),
     ...(settings.permissions?.deny ?? []),
   ];
+  const askPatterns: string[] = [
+    ...(config.permissions?.ask ?? []),
+    ...(settings.permissions?.ask ?? []),
+  ];
 
-  return async (toolName, args) => {
+  const forcesConfirmation = createForcesConfirmationFn(askPatterns);
+
+  const confirmFn: ConfirmFn = async (toolName, args) => {
     if (!process.stdin.isTTY) return "deny";
 
     if (denyPatterns.length > 0 && matchesDenyPattern(denyPatterns, toolName, args)) {
@@ -120,4 +145,6 @@ export async function createConfirmFn(): Promise<ConfirmFn> {
 
     return "allow";
   };
+
+  return { confirmFn, forcesConfirmation };
 }

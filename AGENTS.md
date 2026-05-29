@@ -37,25 +37,38 @@ src/
     repl.ts         # Interactive REPL, /slash command interception, skill loading, session logging
     renderer.ts     # MarkdownStreamRenderer (paragraph-level streaming), tool call display
     input.ts        # Raw-mode readline, /slash popup with arrow-key navigation
+    confirm.ts      # ConfirmFn implementation: allow/ask/deny HITL gate with glob-pattern matching
+    keys.ts         # resolveApiKey(provider, config) — picks API key from env or persisted config
+    mcp-cmd.ts      # /mcp slash command handlers: add, remove, list, test MCP servers
+    mentions.ts     # expandMentions() — @path and @glob token expansion in user input
+    plan.ts         # runPlanFlow() — plan pass followed by Approve / Edit / Cancel prompt
+    runner.ts       # runAgentTurn() — renders streaming Agent events to the terminal
   core/           # Pure library — no process.env reads, no CLI/state imports
     agent.ts        # Agentic loop: stream → collect function calls → execute → feed back
     executor.ts     # Parallel tool execution, skill activation dispatch, HITL confirmation gate
     context.ts      # Conversation history, skill content injection, context pruning
     prompt.ts       # DEFAULT_SYSTEM_INSTRUCTION template + loadSystemInstruction() (OPENCLI_SYSTEM_MD)
+    compact.ts      # compactContext() — LLM-based history summarisation for /compact command
+    observability.ts # ObservabilityEvent union + ObservabilityHandler; token/latency metrics
   providers/      # LLM clients — no CLI/state imports
     types.ts        # Shared types: Message, StreamEvent, ToolDefinition, ToolResult, thoughtSignature
     client.ts       # LLMClient interface — the provider plug point
     gemini.ts       # GeminiClient implements LLMClient; Gemini-specific schema conversion internal
     anthropic.ts    # AnthropicClient implements LLMClient; translates role/tool formats internally
-    factory.ts      # createClient(model, apiKey) — picks provider by model name prefix
+    openai.ts       # OpenAIClient implements LLMClient; translates role/tool formats for Chat Completions
+    factory.ts      # createClient(model, apiKey) — picks provider by model name prefix (claude- → Anthropic, gpt-/o- → OpenAI, else Gemini)
     schema.ts       # Generic toolToDefinition() + activateSkillDefinition (plain JSONSchema, no provider deps)
+    errors.ts       # normaliseProviderError() — extracts human-readable messages from SDK error payloads
+    retry.ts        # withRetry() async-generator wrapper; shared exponential-backoff retry logic
   tools/
     base.ts         # Tool interface + JSONSchema type
     registry.ts     # ToolRegistry: register, execute, list
-    file/           # read, write, edit, glob, grep
-    exec/           # bash (with requiresConfirmation for non-safe commands)
+    file/           # read, write, edit, glob, grep, ls
+    exec/           # bash (with requiresConfirmation for non-safe commands); sandbox/ for bwrap/sandbox-exec runners
+    web/            # web_fetch — fetches a URL and returns plain text; HTML stripped
+    task/           # todo_write, todo_read — per-session task list stored in tmpdir
     think.ts        # think tool — private scratchpad; skipped for native-thinking models
-    index.ts        # createDefaultRegistry(model?) factory — omits think for native-thinking models
+    index.ts        # createDefaultRegistry(model?, runner?) factory — omits think for native-thinking models
   skills/
     registry.ts     # Discover SKILL.md files across 4 scoped directories
     loader.ts       # Parse SKILL.md frontmatter, !{cmd} preprocessing, $ARGUMENTS substitution

@@ -38,25 +38,38 @@ src/
     repl.ts         # Interactive REPL, /slash command interception, skill loading, session logging
     renderer.ts     # MarkdownStreamRenderer (paragraph-level streaming), tool call display
     input.ts        # Raw-mode readline, /slash popup with arrow-key navigation
+    confirm.ts      # HITL confirmation dialog (y/n/always); reads and writes settings
+    keys.ts         # API key resolution — env var → config file lookup
+    mcp-cmd.ts      # /mcp slash command handler (list, add, remove, test)
+    mentions.ts     # @-mention expansion — resolves @file references before the agent sees them
+    plan.ts         # /plan slash command handler — plan pass → approval → react execution
+    runner.ts       # runAgentTurn() helper extracted from repl.ts
   core/           # Pure library — no process.env reads, no CLI/state imports
     agent.ts        # Agentic loop: stream → collect function calls → execute → feed back
     executor.ts     # Parallel tool execution, skill activation dispatch, HITL confirmation gate
     context.ts      # Conversation history, skill content injection, context pruning
     prompt.ts       # DEFAULT_SYSTEM_INSTRUCTION template + loadSystemInstruction() (OPENCLI_SYSTEM_MD)
+    compact.ts      # compactContext() — LLM-based context compaction for /compact command
+    observability.ts # ObservabilityEvent types; token + turn metrics emitted by the agent loop
   providers/      # LLM clients — no CLI/state imports
     types.ts        # Shared types: Message, StreamEvent, ToolDefinition, ToolResult, thoughtSignature
     client.ts       # LLMClient interface — the provider plug point
     gemini.ts       # GeminiClient implements LLMClient; Gemini-specific schema conversion internal
     anthropic.ts    # AnthropicClient implements LLMClient; translates role/tool formats internally
+    openai.ts       # OpenAIClient implements LLMClient; translates role/tool formats internally
     factory.ts      # createClient(model, apiKey) — picks provider by model name prefix
     schema.ts       # Generic toolToDefinition() + activateSkillDefinition (plain JSONSchema, no provider deps)
+    retry.ts        # withRetry() — shared exponential-backoff retry wrapper for provider streams
+    errors.ts       # toFriendlyError() — normalises provider errors to human-readable messages
   tools/
     base.ts         # Tool interface + JSONSchema type
     registry.ts     # ToolRegistry: register, execute, list
-    file/           # read, write, edit, glob, grep
-    exec/           # bash (with requiresConfirmation for non-safe commands)
+    file/           # read, write, edit, glob, grep, ls
+    exec/           # bash (with requiresConfirmation for non-safe commands); sandbox/ (bwrap, sandbox-exec, passthrough)
+    web/            # web_fetch tool
+    task/           # todo_write and todo_read tools
     think.ts        # think tool — private scratchpad; skipped for native-thinking models
-    index.ts        # createDefaultRegistry(model?) factory — omits think for native-thinking models
+    index.ts        # createDefaultRegistry(model?, runner?) factory — omits think for native-thinking models
   skills/
     registry.ts     # Discover SKILL.md files across 4 scoped directories
     loader.ts       # Parse SKILL.md frontmatter, !{cmd} preprocessing, $ARGUMENTS substitution
@@ -124,7 +137,7 @@ npm run typecheck && npm run lint && npm run format:check && npm test
 
 - **Always check for a related GitHub issue.** If your work addresses an issue, format your commit message to include `Closes #<issue_number>` (if fully resolved) or `Part of #<issue_number>` (if partial).
 - **If you forget to link an issue in the commit message**, use the GitHub CLI to comment on the issue with the commit hash.
-- **After completing each phase of a multi-phase issue**, post a comment on the issue summarising what landed (commit hash, what changed, what remains open). Don't wait until the issue is fully closed — intermediate updates keep the issue as the canonical record of progress.
+- **After completing each phase of a multi-phase issue**, post a comment on the GitHub issue summarising what landed (commit hash, what changed, what remains open). Don't wait until the issue is fully closed — intermediate updates keep the issue as the canonical record of progress.
 - **Before starting a complex or risky task**, explicitly ask the user if they would prefer you to create a feature branch (`git checkout -b feature/issue-123`) instead of committing directly to `main`. Small, well-scoped fixes should be committed directly to `main`.
 - **After merging a milestone covered by a design doc** (`docs/design/<milestone>.md`), update its `_Status:` line from `"Ready for implementation"` to `"Implemented — merged in <short-sha> (<date>)"`. Do this in the same PR that ships the feature, or immediately after merge as a follow-up commit. The status line must never read "Ready for implementation" for code that is already on `main`.
 

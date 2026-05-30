@@ -26,6 +26,14 @@ const MODEL_CONTEXT_WINDOWS: [prefix: string, tokens: number][] = [
 
 const DEFAULT_CONTEXT_WINDOW = 100_000;
 
+/**
+ * Cap on the effective compaction window. Auto-compact's trigger uses
+ * `min(contextWindowFor(model), COMPACTION_TARGET_TOKENS)` so that very
+ * large model windows (e.g. Gemini 1M) don't push the trigger so high it
+ * never fires in practice. See docs/design/a5-compact-context.md §2.
+ */
+export const COMPACTION_TARGET_TOKENS = 256_000;
+
 const SUMMARIZATION_PROMPT = `Summarize this coding session for context compaction.
 Respond with exactly these five sections using these headers — do not add or rename sections:
 
@@ -48,7 +56,32 @@ Current state of work and the immediate next steps remaining.
 Rules:
 - Under 400 words total.
 - Copy file paths, error messages, function names, and version numbers exactly.
-- Do not narrate tool calls. Focus on outcomes and current state.`;
+- Do not narrate tool calls. Focus on outcomes and current state.
+- If the input contains a block labeled "**Original task** (verbatim):" followed by quoted lines, copy that block VERBATIM as the first thing in your response, before the ## Task section. Do not paraphrase or shorten the original task text. This rule keeps the user's original goal alive across nested compactions.`;
+
+/**
+ * Pull the original user task — the first user-role text message — out of the
+ * history at the head of compaction. Returns empty string if no such message
+ * exists. The quotation block this produces is prepended to the summary body
+ * so the verbatim original task survives even after multiple nested
+ * compactions (see SUMMARIZATION_PROMPT verbatim-copy rule).
+ */
+function extractOriginalTask(messages: Message[]): string {
+  for (const msg of messages) {
+    if (msg.role !== "user") continue;
+    const text = msg.parts.find((p) => p.type === "text");
+    if (text && text.type === "text" && text.text.trim()) {
+      // Already-quoted (this is a nested compaction whose head is a summary):
+      // extract the inner quotation rather than re-quoting it.
+      const m = text.text.match(/\*\*Original task\*\* \(verbatim\):\n((?:> .*\n?)+)/);
+      if (m) {
+        return m[1].replace(/^> /gm, "").trimEnd();
+      }
+      return text.text;
+    }
+  }
+  return "";
+}
 
 export function contextWindowFor(model: string): number {
   for (const [prefix, size] of MODEL_CONTEXT_WINDOWS) {
@@ -140,11 +173,15 @@ export async function compactHistory(
     return { messagesRemoved: 0, summaryLength: 0 };
   }
 
-  // Order matters: extractErrorResults must run on the original messages,
-  // before streamToText flattens them. Flattening collapses function_result
-  // parts into bounded-length text, which would defeat verbatim error
-  // preservation for any error longer than PART_FLATTEN_CAP.
+  // Order matters: extractErrorResults and extractOriginalTask must run on
+  // the original messages, before streamToText flattens them. Flattening
+  // collapses function_result parts into bounded-length text, which would
+  // defeat verbatim error preservation for any error longer than
+  // PART_FLATTEN_CAP. The original-task extraction runs on the head so it
+  // also picks up the verbatim quotation from a prior summary (nested
+  // compaction case).
   const errors = extractErrorResults(head);
+  const originalTask = extractOriginalTask(head);
   const summary = await streamToText(compactionClient, head, SUMMARIZATION_PROMPT);
 
   const errorBlock =
@@ -153,12 +190,19 @@ export async function compactHistory(
         errors.map((e) => "```\n" + e + "\n```").join("\n\n")
       : "";
 
+  const originalTaskBlock = originalTask
+    ? `\n\n**Original task** (verbatim):\n${originalTask
+        .split("\n")
+        .map((l) => `> ${l}`)
+        .join("\n")}\n`
+    : "";
+
   const summaryMessage: Message = {
     role: "user",
     parts: [
       {
         type: "text",
-        text: `[Session context compacted — earlier conversation summarized]\n\n${summary}${errorBlock}`,
+        text: `[Session context compacted — earlier conversation summarized]${originalTaskBlock}\n${summary}${errorBlock}`,
       },
     ],
   };

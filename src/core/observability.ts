@@ -31,6 +31,19 @@ export type ObservabilityEvent =
       reason: string;
     }
   /** Emitted when the agent retries after an empty LLM response (no text, no tool calls). */
-  | { type: "empty_response_retry" };
+  | { type: "empty_response_retry" }
+  /** Emitted when context token ratio first crosses the 60% notice threshold this session. */
+  | { type: "compact_threshold_warned"; ratio: number }
+  /** Emitted at the start of a compaction (manual via /compact or auto at turn boundary). */
+  | { type: "compact_started"; trigger: "auto" | "manual"; ratio?: number }
+  /** Emitted after compactHistory() returns successfully. */
+  | {
+      type: "compact_completed";
+      trigger: "auto" | "manual";
+      messagesRemoved: number;
+      summaryLength: number;
+    }
+  /** Emitted when compactHistory() throws — fail-open, turn proceeds with original history. */
+  | { type: "compact_failed"; trigger: "auto" | "manual"; error: string };
 
 export type ObservabilityHandler = (event: ObservabilityEvent) => void;

@@ -357,6 +357,7 @@ async function createAgent(
     onObservability: debug ? makeDebugHandler() : undefined,
     snapshotManager,
     compactionClient,
+    autoCompact: config.autoCompact,
   });
   return { agent, skills, mcpManager, snapshotManager };
 }

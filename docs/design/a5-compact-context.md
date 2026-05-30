@@ -1,6 +1,6 @@
 # Design: A5 — /compact + /context
 
-_Status: A5a Implemented — merged in 4aba15e (2026-05-17), closes [#112](https://github.com/zjshen14/opencli/issues/112). A5b blocked pending real-session data from A5a; tracking [#113](https://github.com/zjshen14/opencli/issues/113). Phase: [Roadmap A5](../roadmap.md)._
+_Status: A5a Implemented — merged in 4aba15e (2026-05-17), closes [#112](https://github.com/zjshen14/opencli/issues/112). A5b Ready for implementation — Phase 2 data collected from the card_trade session, deferred risks resolved below; tracking [#113](https://github.com/zjshen14/opencli/issues/113). Phase: [Roadmap A5](../roadmap.md)._
 
 ---
 
@@ -23,14 +23,15 @@ The feedback from the [design review](https://github.com/zjshen14/opencli/issues
 - **No auto-compact.** Collects real-session data for Phase 2 validation.
 - ~6 files, ~2 days to implement + test
 
-### **A5b — Auto-compact with safety gates (design review complete, blocked on A5a)**
-- Accurate token counting via provider APIs (not JSON.stringify hack)
-- Auto-compact only after agent completes a full turn (blocks mid-task triggers)
-- Config gate: `autoCompact: false` default; flip after A5a validation
-- Threshold warnings when approaching 60% and 75%
-- Original prompt preservation: keep first 2 messages verbatim
-- Better compaction model failure handling
-- ~8 files, ~3 days to implement + real-session integration tests
+### **A5b — Auto-compact with safety gates (ready for implementation)**
+- Auto-compact fires at **turn boundary** when `estimatedTokens / contextWindowFor(model) >= 0.75`
+- Token estimation stays on `JSON.stringify.length / 4` — Phase 2 data shows it's accurate enough as a *trigger* (off by a constant factor; threshold tuning absorbs it). Provider-API token counting deferred to a future change once a concrete reason to be exact appears.
+- Config gate: `autoCompact: true` default once landed (validated by A5a + Phase 2). `autoCompact: false` opts out.
+- Threshold warning at 60%; auto-compact at 75% (one warning per session)
+- Original prompt preservation: anchor logic from PR #154 already keeps the first user message; A5b makes it part of the summary path rather than the prune path
+- Compaction failure handling: catch, surface via observability + stderr warning, continue with un-compacted history (fail-open)
+- Replay test using the card_trade session as a fixture
+- ~5 files, ~2 days to implement
 
 **Sequencing:**
 1. A5a ships → users can manually `/compact` long sessions
@@ -61,13 +62,14 @@ The feedback from the [design review](https://github.com/zjshen14/opencli/issues
 
 | Item | Status |
 |---|---|
-| Auto-compact with provider token APIs | TBD (design review) |
-| Turn-boundary detection (no mid-task triggers) | TBD |
-| Config gate `autoCompact: false` default | TBD |
-| Original prompt preservation | TBD |
-| Compaction failure handling | TBD |
-| Threshold warnings + visibility | TBD |
-| Real-session integration tests | TBD |
+| Auto-compact at turn boundary, 75% threshold | ✓ Spec'd below |
+| Token estimation: keep `JSON.stringify.length / 4` (good enough for trigger) | ✓ Spec'd below |
+| Config gate `autoCompact: true` default | ✓ Spec'd below |
+| Original prompt preservation (anchor in summary message) | ✓ Spec'd below — composes with PR #154 prune anchor |
+| Compaction failure handling — fail-open with observability event | ✓ Spec'd below |
+| Threshold warning at 60% (once per session) | ✓ Spec'd below |
+| Replay integration test using card_trade session | ✓ Spec'd below |
+| Provider token APIs | Out of scope — defer until a real reason emerges |
 
 ---
 
@@ -139,6 +141,292 @@ Free-form summaries silently drop content. Named sections act as checklists — 
 - No observability or metrics (A5b instruments this).
 
 A5a ships a manual escape hatch. It is not yet a smart, automatic system. That comes in A5b after real-session validation.
+
+---
+
+## A5b — Auto-compact design (resolved against Phase 2 data)
+
+### Phase 2 findings
+
+The card_trade session (`2026-05-17T22-00-06-184`) ran across two real coding sessions and exposed the actual shape of context growth:
+
+| Metric | Value | What it tells us |
+|---|---|---|
+| Total events in JSONL | 662 | Real sessions exceed the default `historySize: 50` by an order of magnitude |
+| User turns | 42 | Manual `/compact` would require 21 invocations to keep the head visible — unrealistic |
+| `tool_call` + `tool_result` pairs | 290 + 289 | Tool calls dominate context, exactly as the JetBrains paper predicted (~84% of tokens) |
+| Estimated tokens (JSON/4) | ~402k | Under Gemini's raw 1M window (40%) but well over a sensibly-capped effective window — motivates the 256k cap in §2 |
+| Tool results containing `Error:` | 23 | Error signals are real and frequent — the verbatim-preservation rule from A5a matters |
+| First prune (50-message threshold) | event #92 | About 14% through; from there on the head was being dropped every turn |
+| `JSON.stringify.length / 4` vs. real token count | within ~2× for Gemini; doesn't matter for trigger | A constant-factor error absorbs into the threshold. Save the provider-API round-trip cost. |
+
+The session confirms the A5 thesis: **the user couldn't reasonably know when to `/compact`**, and prune was silently dropping the original task message every turn from event #92 onward. PR #154 (prune anchor) is keeping the *original task* visible — but not the 200+ messages of work-in-progress decisions, file paths, and intermediate state in between.
+
+### Design decisions
+
+#### 1. Trigger — *only* at turn boundary
+
+The check runs **at the top of `Agent.run()`**, immediately after the new user message is appended to context and *before* the streaming loop:
+
+```ts
+async *run(userInput: string, mode: AgentRunMode = "react"): AsyncGenerator<AgentEvent> {
+  this.context.addMessage({ role: "user", parts: [{ type: "text", text: userInput }] });
+
+  // A5b: auto-compact at turn boundary, never mid-stream.
+  await this.maybeAutoCompact();   // <-- new
+
+  // ... existing while-loop ...
+}
+```
+
+Why this specific position: by the time `addMessage` returns, the user has sent a complete prompt and the LLM hasn't seen it yet. No tool calls are in flight. No partial assistant response is buffered. Auto-compact replaces the head, then the loop begins as if resuming a fresh agent with a summary. This is the placement that makes trajectory elongation impossible — the LLM cannot retry an action it never saw, because everything before the summary point is now compressed into one user message.
+
+Explicitly forbidden positions: between `client.stream()` arrival and `executeCalls()`; between `executeCalls()` and the next `client.stream()`; inside any compactionClient stream. None of these are turn boundaries.
+
+#### 2. Threshold — 75% of an effective window, with a 60% soft warning
+
+The trigger compares estimated tokens to `min(contextWindowFor(model), COMPACTION_TARGET_TOKENS)` where `COMPACTION_TARGET_TOKENS = 256_000`:
+
+```ts
+const COMPACTION_TARGET_TOKENS = 256_000;
+
+const tokens = estimateTokens(context.getMessages(), systemInstruction);
+const window = Math.min(contextWindowFor(this.model), COMPACTION_TARGET_TOKENS);
+const ratio = tokens / window;
+```
+
+- `ratio >= 0.75` → auto-compact this turn (call `compactHistory()`)
+- `0.60 <= ratio < 0.75` → emit one notice per session: `context at 60% — auto-compact will trigger at 75%`
+- `ratio < 0.60` → no action
+
+**Why cap the window at 256K** when Gemini supports 1M:
+
+| Model | Raw window | Effective window | Trigger | Behavior on card_trade |
+|---|---|---|---|---|
+| Gemini 2.5/3.x (1M) | 1,000,000 | 256,000 | 192,000 tokens | Compacts at turn ~20, 32 — 2 compactions total |
+| Anthropic Sonnet (200K) | 200,000 | 200,000 | 150,000 tokens | Compacts earlier; same shape |
+| OpenAI gpt-4o (128K) | 128,000 | 128,000 | 96,000 tokens | Compacts more aggressively |
+| Unknown (100K fallback) | 100,000 | 100,000 | 75,000 tokens | Most aggressive |
+
+Without the cap, the 1M Gemini window puts the trigger at 750k — the card_trade session (which maxed at ~402k estimated tokens) would never compact, defeating the purpose. The 256k cap is also defensible on cost-and-latency grounds: very long contexts increase per-turn latency and dollars, and our cheap compaction summary is much faster to produce at 256k than at 750k. Users who genuinely want the full Gemini window can set `autoCompact: false`.
+
+The "warned at 60%" state lives in an `Agent` instance field (`warnedAt60: boolean`). It resets in two places:
+1. `clearHistory()` — session reset
+2. Successful `compactHistory()` — after a compaction, ratio drops well below 60%; re-arming the warning lets the user see the *next* climb back toward the threshold (relevant for very long sessions that compact more than once).
+
+#### 3. Token estimation — keep `JSON.stringify / 4`
+
+The Phase 2 measurement confirms the estimator is off by a constant factor (~2× for Gemini text content, much closer for tool results which are mostly bytes). For a *threshold trigger*, constant-factor error is fine — it just shifts when the trigger fires. Provider-API token counting would add an async round-trip on every turn for no behavior gain.
+
+If the estimator turns out to be wildly different on a real provider (e.g., Anthropic Sonnet streaming with thoughtSignature inflation), we can replace the estimator inside `Agent.getContextStats()` without touching the trigger logic. The contract is `(messages, systemInstruction) → estimatedTokens`, called once per turn.
+
+#### 4. Original prompt preservation — done via summary message, not prune
+
+`compactHistory()` already keeps the last `KEEP_RECENT` messages verbatim and synthesizes one summary message at position 0. The summary message body must lead with a verbatim quotation of the original first user message (the task statement) so it never gets paraphrased:
+
+```ts
+const originalTask = context.history[0]?.parts.find(p => p.type === "text")?.text ?? "";
+const summaryBody = `[Session context compacted]
+
+**Original task** (verbatim):
+> ${originalTask.split("\n").join("\n> ")}
+
+${structuredSummary}${errorBlock}`;
+```
+
+After A5b lands, the prune anchor logic in `prune()` (from PR #154) becomes a safety net rather than the primary mechanism — useful for sessions that never compact (short ones, `autoCompact: false`).
+
+#### 5. Compaction failure — fail-open, surface via observability + AgentEvent stream
+
+`compactHistory()` calls a network LLM and can fail (rate limit, network glitch, malformed response). A5b must not block the user's turn on a compaction failure.
+
+Two implementation rules:
+
+1. **The signal goes through the existing event stream**, not `process.stderr`. The agent loop already yields `error` events for snapshot warnings (`agent.ts:249-252`) and the REPL renderer handles them — direct `stderr.write` from inside `core/` would couple the library to a console and could collide with `MarkdownStreamRenderer`'s paragraph buffering. To keep notices distinct from real errors, **add a new `AgentEvent` variant**: `{ type: "notice"; message: string }`.
+2. **The trigger uses Agent's actual shape**: a discrete field `private autoCompact: boolean`, not `this.config.autoCompact` (the Agent stores fields directly, not a config object — see `agent.ts:50-56`). The token estimate **must include `systemInstruction`** so the trigger matches what the next `client.stream()` actually sends (the existing `getContextStats()` only counts messages; A5b will tighten it or add a separate `estimateTurnTokens(systemInstruction)` method).
+
+Concrete shape:
+
+```ts
+private async maybeAutoCompact(systemInstruction: string): Promise<AgentEvent[]> {
+  if (!this.autoCompact) return [];
+
+  const messages = this.context.getMessages();
+  const tokens = Math.round(
+    (JSON.stringify(messages).length + systemInstruction.length) / 4,
+  );
+  const effectiveWindow = Math.min(contextWindowFor(this.model), COMPACTION_TARGET_TOKENS);
+  const ratio = tokens / effectiveWindow;
+
+  if (ratio < 0.60) return [];
+
+  if (ratio < 0.75) {
+    if (this.warnedAt60) return [];
+    this.warnedAt60 = true;
+    this.obs?.({ type: "compact_threshold_warned", ratio });
+    return [
+      {
+        type: "notice",
+        message: `context at ${Math.round(ratio * 100)}% — auto-compact will trigger at 75%`,
+      },
+    ];
+  }
+
+  // ratio ≥ 0.75 — auto-compact this turn
+  this.obs?.({ type: "compact_started", trigger: "auto", ratio });
+  try {
+    const result = await compactHistory(this.context, this.compactionClient);
+    this.warnedAt60 = false; // re-arm: ratio drops well below 60% after compaction
+    this.obs?.({
+      type: "compact_completed",
+      trigger: "auto",
+      messagesRemoved: result.messagesRemoved,
+      summaryLength: result.summaryLength,
+    });
+    return [
+      {
+        type: "notice",
+        message: `auto-compacted ${result.messagesRemoved} older messages into a ${result.summaryLength}-char summary`,
+      },
+    ];
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    this.obs?.({ type: "compact_failed", trigger: "auto", error: message });
+    return [
+      {
+        type: "notice",
+        message: `auto-compact failed: ${message} — continuing with full history`,
+      },
+    ];
+  }
+}
+```
+
+And the caller in `run()`:
+
+```ts
+async *run(userInput: string, mode: AgentRunMode = "react"): AsyncGenerator<AgentEvent> {
+  this.context.addMessage({ role: "user", parts: [{ type: "text", text: userInput }] });
+
+  const systemInstruction = mode === "plan" ? planSystem : reactSystem;
+  for (const notice of await this.maybeAutoCompact(systemInstruction)) {
+    yield notice;
+  }
+
+  // ... existing while-loop ...
+}
+```
+
+Three reasons fail-open is the right posture:
+1. The user has already typed their next prompt; blocking them on a compaction infra failure is hostile.
+2. The pre-existing prune logic still bounds message count (with the PR #154 anchor preserving the original task), so context won't explode.
+3. If failures are persistent, the observability events and the `notice` event make it visible — the user can choose to set `autoCompact: false`.
+
+#### 6. Interaction with `prune()`
+
+Compaction and `ContextManager.prune()` (default `maxHistoryMessages = 50`) run on different axes — *tokens* vs. *messages* — and they must coexist deterministically:
+
+| Rule | What it does | When it fires |
+|---|---|---|
+| `prune()` | Drops messages from the head when count > `maxHistoryMessages`, keeping the PR #154 first-user-text anchor | Every `addMessage()` call |
+| `compactHistory()` | Replaces the head with one structured summary message, keeping `KEEP_RECENT` messages verbatim | Top of `Agent.run()` when token ratio ≥ 0.75 (auto) or `/compact` (manual) |
+
+Concrete invariants:
+
+- **After a compaction**, history is `[summary, ...tail]` = 1 + `KEEP_RECENT` (10) = **11 messages**. This is well under `maxHistoryMessages = 50`, so prune is a no-op immediately after.
+- **Between compactions**, messages accumulate through normal tool-call / tool-result turns. Once count crosses 50, prune fires and drops the oldest messages. **The summary message at position 0 is preserved** because the existing anchor logic preserves *the first user-role text message*, and the summary is exactly that shape (role: "user", parts: [{ type: "text" }]).
+- **Recursive summarization** (a compaction whose head includes a previous summary) is handled by the structured prompt: it explicitly instructs the model to copy the prior "Original task" quotation block verbatim. The original first user message survives across an unbounded number of nested compactions by string equality, not by paraphrase.
+
+This means the two mechanisms never fight: prune cannot drop a fresh summary (anchor protection), and compaction cannot lose the original task (verbatim quotation invariant). Compaction is the "real" mechanism; prune is the safety net that handles sessions that never compact (short ones, `autoCompact: false`, or model windows so large that the token threshold is never crossed).
+
+#### 7. Config flag
+
+Add to `~/.opencli/config.json` (`src/state/config.ts`):
+
+```ts
+export interface Config {
+  // ...existing...
+  /** Auto-compact context at 75% of model window. Default: true. */
+  autoCompact?: boolean;
+}
+```
+
+Default is **`true` once A5b lands**. Validated by the Phase 2 data — the card_trade session would have compacted at most 2-3 times across 42 turns, well within the cost envelope, and the user would not have lost mid-session decisions.
+
+Opt-out: `opencli config --auto-compact false` (or hand-edit JSON).
+
+#### 8. Observability events
+
+Three new entries in `ObservabilityEvent`:
+
+```ts
+| { type: "compact_threshold_warned"; ratio: number }
+| { type: "compact_started"; trigger: "auto" | "manual"; ratio?: number }
+| { type: "compact_completed"; trigger: "auto" | "manual"; messagesRemoved: number; summaryLength: number }
+| { type: "compact_failed"; trigger: "auto" | "manual"; error: string }
+```
+
+The existing `/compact` command should emit `compact_started` / `compact_completed` with `trigger: "manual"` once these types land — gives us a single observability surface for both code paths.
+
+### Implementation outline (file list)
+
+| Action | File | Purpose |
+|---|---|---|
+| Modify | `src/core/agent.ts` | Add `private autoCompact: boolean` field (constructor option `autoCompact?: boolean`, default true). Add `private warnedAt60: boolean`. Add `maybeAutoCompact(systemInstruction): Promise<AgentEvent[]>`. Call it at the top of `run()` and yield the returned notices. Reset `warnedAt60` in `clearHistory()` and on successful compaction. |
+| Modify | `src/core/agent.ts` | Add `{ type: "notice"; message: string }` to the `AgentEvent` union so notices have a distinct shape from `error`. |
+| Modify | `src/core/compact.ts` | Export `COMPACTION_TARGET_TOKENS = 256_000`. Prepend verbatim original-task quotation to the summary message body. Update the structured prompt to instruct the model to copy any prior "Original task" quotation verbatim (for nested compactions). |
+| Modify | `src/core/observability.ts` | Add the four new event types: `compact_threshold_warned`, `compact_started`, `compact_completed`, `compact_failed`. |
+| Modify | `src/state/config.ts` | Add `autoCompact?: boolean` field. Default resolution `autoCompact !== false`. |
+| Modify | `src/cli/index.ts` | Pass `config.autoCompact` through to the `Agent` constructor. |
+| Modify | `src/cli/renderer.ts` / `runner.ts` | Render `notice` events as a dim one-line `i message`. Keep them out of the markdown stream (write through `printInfo` or equivalent). |
+| Modify | `src/core/compact.test.ts` | Add tests for: trigger at exact 75% of effective window; no trigger below 60%; warning at 60% emits notice; one warning per session; warning re-arms after successful compaction; fail-open on compactionClient error yields a notice; original task survives the summary. |
+| Create | `src/core/compact.replay.test.ts` | Replay test using the card_trade session JSONL as a fixture (see §Test strategy below). |
+| Modify | `src/cli/repl.ts` | Emit `compact_started` / `compact_completed` from the existing `/compact` handler with `trigger: "manual"`. |
+
+### Test strategy
+
+**Unit tests** (`compact.test.ts`):
+- Auto-compact fires at `ratio >= 0.75` and not at `0.74999`
+- Trigger correctly uses `min(contextWindow, COMPACTION_TARGET_TOKENS)` — a Gemini session at 200k tokens triggers (200k / 256k = 78%), not just at 750k
+- No fire when `autoCompact: false` regardless of ratio
+- Warning fires exactly once across consecutive turns above 60%
+- Warning re-arms after a successful compaction (next climb back above 60% fires again)
+- Warning resets on `clearHistory()`
+- Compaction failure surfaces `compact_failed` and the turn proceeds (history unchanged)
+- Summary message body begins with the verbatim original first user message
+- After two consecutive compactions, the original task still appears verbatim at the head of the most recent summary (nested-compaction invariant)
+- Notices are yielded through the `AgentEvent` stream, not written to `process.stderr`
+
+**Replay test** (new `compact.replay.test.ts`):
+
+The test must be parameterized so the trigger actually fires on the fixture; otherwise it passes trivially with zero compactions.
+
+- Load the card_trade session JSONL (~662 events, ~402k tokens at end) as a fixture
+- Construct an `Agent` with:
+  - A mock `LLMClient` that returns minimal text (no real LLM cost during the replay)
+  - A mock `compactionClient` whose `stream()` yields a deterministic summary string
+  - The `Agent` configured with `model: "claude-sonnet-4-6"` (200k window) so trigger fires at ~150k tokens — within the session's range
+- Walk the JSONL: for each `user` entry, call `agent.run(userText)` and drain the generator
+- Collect every yielded `AgentEvent`, partitioning by type
+- Assertions:
+  - **Lower bound:** at least one `compact_completed` observability event was emitted (≥ 1 auto-compaction actually happened — proves the trigger fired against real data)
+  - **Upper bound:** no more than 5 `compact_completed` events across the whole replay (proves runaway triggering didn't happen; based on the math in §2, expected value is 2-3 for the Claude-200k configuration)
+  - **No-mid-task invariant:** every `compact_completed` event appears in the event stream *before* any `tool_call` event for the same user turn
+  - **Original task verbatim:** after the final user turn, the summary message at position 0 in `context.getMessages()` contains the original first user message text as a verbatim substring
+  - **Notice events emitted:** at least one `notice` event with `auto-compact` in the message (the user-visible signal)
+
+The replay test is what specifically validates the design against the data the design was tuned for. Parameterizing the model is the trick that makes the test exercise the trigger instead of falling silently below it.
+
+### Acceptance criteria
+
+- `agent.run()` with `autoCompact: true` (default) calls `compactHistory()` exactly when `tokens / min(contextWindow, 256_000)` first crosses 0.75, before the first LLM call of that turn
+- `agent.run()` with `autoCompact: false` never auto-compacts (manual `/compact` still works)
+- 60% notice is yielded through the `AgentEvent` stream (not written to `stderr` from `core/`) exactly once per session, then re-arms after a successful compaction
+- Compaction failure does not throw, does not block the turn, emits `compact_failed` observability, and yields a user-visible `notice`
+- Replay test against the card_trade session: **≥ 1** and **≤ 5** auto-compactions across the full 42-turn session, with Claude-200k as the configured model in the fixture
+- Summary message body always contains the verbatim text of the original first user message — including after a nested compaction (a compaction whose head contained a previous summary)
+- The estimated-tokens computation in the trigger includes both messages and the system instruction (matching the actual `client.stream()` payload)
+- `npm run typecheck && npm run lint && npm run format:check && npm test` pass
 
 ---
 

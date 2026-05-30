@@ -103,6 +103,27 @@ export function deleteWordBeforeCursor(
   return { input: newBefore + after, cursorPos: newBefore.length };
 }
 
+/**
+ * Translate a character-offset cursor position into (line, col) coordinates
+ * within a multi-line input. Lines are split on "\n" — the column for a cursor
+ * at a newline boundary is reported as the end of the preceding line, NOT
+ * column 0 of the following line. Used by readLine to position the terminal
+ * cursor across multiple rendered prompt lines.
+ */
+export function cursorLineCol(input: string, cursorPos: number): { line: number; col: number } {
+  let remaining = cursorPos;
+  const lines = input.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (remaining <= lines[i].length) {
+      return { line: i, col: remaining };
+    }
+    remaining -= lines[i].length + 1; // +1 for the consumed "\n"
+  }
+  // Past the end (shouldn't happen if cursorPos is valid) — clamp to end of last line.
+  const last = lines.length - 1;
+  return { line: last, col: lines[last]?.length ?? 0 };
+}
+
 // Visible length of a string (strips ANSI escape codes)
 // eslint-disable-next-line no-control-regex
 const visLen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
@@ -112,6 +133,11 @@ const visLen = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").length;
 const MAX_POPUP = 8;
 const PROMPT_STR = "› "; // visible prompt (2 chars)
 const PROMPT = chalk.green(PROMPT_STR);
+// Continuation prompt shown on each subsequent line of a multi-line input.
+// Length must match PROMPT_STR's visible length so cursor-column math stays
+// consistent across lines.
+const CONT_PROMPT_STR = "· ";
+const CONT_PROMPT = chalk.dim(CONT_PROMPT_STR);
 
 function filterCommands(commands: SlashCommand[], input: string): SlashCommand[] {
   const q = input.slice(1).toLowerCase(); // strip leading "/"
@@ -280,37 +306,64 @@ export async function readLine(
     let histIdx = -1; // -1 = live input; ≥0 = browsing history
     let savedInput = ""; // snapshot of live input while browsing history
     let selectedIdx = -1; // popup selection; -1 = none
+    // How many rows BELOW the top of the render area the cursor was left at
+    // the end of the previous render(). Used to back up to the top before
+    // re-rendering. 0 means cursor is already on the prompt (top) line.
+    let cursorRowsBelowTop = 0;
 
     // ── render ──────────────────────────────────────────────────────────────
-    // Invariant: the cursor is ALWAYS on the prompt line when render() is
-    // called — either because no popup was shown, or because we moved it
-    // back up after drawing the popup. So we never need to move up first;
-    // clearLine + clearDown is enough to erase the prompt and any popup
-    // lines that may still be visible below it.
+    // Each render moves the cursor up to the top of the area we drew last
+    // time, clears from there down, then re-draws prompt + (multi-line)
+    // input + optional popup, finally repositioning the cursor at the
+    // user's editing position. The popup is suppressed once input contains
+    // a newline — slash-command completion is only useful single-line.
     const render = () => {
-      const matches = input.startsWith("/") ? filterCommands(commands, input) : [];
+      const lines = input.split("\n");
+      const firstLine = lines[0];
+      const matches =
+        lines.length === 1 && firstLine.startsWith("/") ? filterCommands(commands, firstLine) : [];
 
-      let out = A.clearLine + A.clearDown;
+      let out = A.up(cursorRowsBelowTop) + A.clearLine + A.clearDown;
 
-      // Draw prompt + current input
-      out += PROMPT + input;
+      // Draw prompt + each input line. PROMPT for the first line, CONT_PROMPT
+      // for continuations so the user can see which lines are extensions.
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) out += "\n";
+        out += (i === 0 ? PROMPT : CONT_PROMPT) + lines[i];
+      }
 
-      // Draw popup (if any)
+      // Popup below the (last) input line
       out += renderPopup(matches, selectedIdx);
 
-      // Reposition cursor on the prompt line at cursorPos
-      if (matches.length > 0) {
-        out += A.up(matches.length);
-      }
-      out += "\r" + A.right(PROMPT_STR.length + cursorPos);
+      // Position the cursor at (cursorLine, cursorCol) within the input area.
+      // After the writes above, the cursor is at the bottom-right of the
+      // popup (or at the end of the last input line if no popup). Move it
+      // up to the target line.
+      const { line: cursorLine, col: cursorCol } = cursorLineCol(input, cursorPos);
+      const lastDrawnRow = lines.length - 1 + matches.length;
+      const upBy = lastDrawnRow - cursorLine;
+      if (upBy > 0) out += A.up(upBy);
 
+      const promptLen = cursorLine === 0 ? PROMPT_STR.length : CONT_PROMPT_STR.length;
+      out += "\r" + A.right(promptLen + cursorCol);
+
+      cursorRowsBelowTop = cursorLine;
       stdout.write(out);
     };
 
     // ── cleanup ──────────────────────────────────────────────────────────────
+    // Finalize: clear our render area, re-draw the input on multiple lines so
+    // the user's final command stays visible in scrollback, then advance past
+    // it. Mirrors the multi-line shape of render() above.
     const done = (result: string | null) => {
-      // Cursor is on the prompt line; clear any popup below and finalise
-      stdout.write(A.clearLine + A.clearDown + PROMPT + input + "\n");
+      const lines = input.split("\n");
+      let out = A.up(cursorRowsBelowTop) + A.clearLine + A.clearDown;
+      for (let i = 0; i < lines.length; i++) {
+        if (i > 0) out += "\n";
+        out += (i === 0 ? PROMPT : CONT_PROMPT) + lines[i];
+      }
+      out += "\n";
+      stdout.write(out);
       if (stdin.isTTY) {
         stdin.setRawMode(false);
         stdin.unref(); // release the event loop after the REPL exits
@@ -348,13 +401,23 @@ export async function readLine(
         return;
       }
 
-      // Enter → submit (or select popup item)
+      // Enter → submit, complete a popup selection, OR continue to next line.
+      // Continuation: an input that ends with a literal "\" followed by Enter
+      // strips the trailing backslash and inserts a newline, so the user can
+      // build a multi-line prompt.
       if (key.name === "return" || key.name === "enter") {
         if (selectedIdx >= 0 && matches[selectedIdx]) {
           // Complete the selected slash command
           input = "/" + matches[selectedIdx].name + " ";
           cursorPos = input.length;
           selectedIdx = -1;
+          render();
+          return;
+        }
+        if (input.endsWith("\\")) {
+          input = input.slice(0, -1) + "\n";
+          cursorPos = input.length;
+          histIdx = -1;
           render();
           return;
         }

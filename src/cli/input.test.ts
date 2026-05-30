@@ -20,6 +20,7 @@ const {
   deleteBeforeCursor,
   deleteWordBeforeCursor,
   renderSelectOptions,
+  cursorLineCol,
 } = await import("./input.js");
 
 describe("insertAtCursor", () => {
@@ -95,6 +96,48 @@ describe("deleteWordBeforeCursor", () => {
   it("deletes a middle word when cursor is mid-string", () => {
     const result = deleteWordBeforeCursor("foo bar baz", 7);
     expect(result).toEqual({ input: "foo  baz", cursorPos: 4 });
+  });
+});
+
+describe("cursorLineCol", () => {
+  it("single-line input: line 0, col = cursorPos", () => {
+    expect(cursorLineCol("hello", 0)).toEqual({ line: 0, col: 0 });
+    expect(cursorLineCol("hello", 3)).toEqual({ line: 0, col: 3 });
+    expect(cursorLineCol("hello", 5)).toEqual({ line: 0, col: 5 });
+  });
+
+  it("two-line input: column 0 of the second line", () => {
+    // "foo\n" — cursor at index 4 (immediately after the newline) is col 0 of line 1
+    expect(cursorLineCol("foo\n", 4)).toEqual({ line: 1, col: 0 });
+  });
+
+  it("two-line input: middle of the second line", () => {
+    expect(cursorLineCol("foo\nbar", 4)).toEqual({ line: 1, col: 0 });
+    expect(cursorLineCol("foo\nbar", 6)).toEqual({ line: 1, col: 2 });
+    expect(cursorLineCol("foo\nbar", 7)).toEqual({ line: 1, col: 3 });
+  });
+
+  it("cursor at end of first line (before newline)", () => {
+    expect(cursorLineCol("foo\nbar", 3)).toEqual({ line: 0, col: 3 });
+  });
+
+  it("three-line input: indexes across both newlines", () => {
+    // "ab\ncd\nef" — newlines at 2 and 5
+    expect(cursorLineCol("ab\ncd\nef", 0)).toEqual({ line: 0, col: 0 });
+    expect(cursorLineCol("ab\ncd\nef", 2)).toEqual({ line: 0, col: 2 });
+    expect(cursorLineCol("ab\ncd\nef", 3)).toEqual({ line: 1, col: 0 });
+    expect(cursorLineCol("ab\ncd\nef", 5)).toEqual({ line: 1, col: 2 });
+    expect(cursorLineCol("ab\ncd\nef", 6)).toEqual({ line: 2, col: 0 });
+    expect(cursorLineCol("ab\ncd\nef", 8)).toEqual({ line: 2, col: 2 });
+  });
+
+  it("empty input", () => {
+    expect(cursorLineCol("", 0)).toEqual({ line: 0, col: 0 });
+  });
+
+  it("cursor past end clamps to end of last line", () => {
+    expect(cursorLineCol("foo", 99)).toEqual({ line: 0, col: 3 });
+    expect(cursorLineCol("foo\nbar", 99)).toEqual({ line: 1, col: 3 });
   });
 });
 

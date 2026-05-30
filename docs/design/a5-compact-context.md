@@ -1,6 +1,6 @@
 # Design: A5 — /compact + /context
 
-_Status: Staged into A5a (Ready for implementation) and A5b (Ready for design review after A5a ships). Tracking issues: [#26](https://github.com/zjshen14/opencli/issues/26) (A5a), [#27](https://github.com/zjshen14/opencli/issues/27) (A5b). Phase: [Roadmap A5](../roadmap.md)._
+_Status: A5a Implemented — merged in 4aba15e (2026-05-17), closes [#112](https://github.com/zjshen14/opencli/issues/112). A5b blocked pending real-session data from A5a; tracking [#113](https://github.com/zjshen14/opencli/issues/113). Phase: [Roadmap A5](../roadmap.md)._
 
 ---
 

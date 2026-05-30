@@ -530,6 +530,23 @@ describe("print functions write to stderr/stdout", () => {
     expect(stderrSpy).not.toHaveBeenCalled();
   });
 
+  it("printToolResultCompact expands on error instead of showing a misleading ✓", () => {
+    printToolResultCompact("read", "Error: ENOENT: no such file or directory, open 'missing.ts'");
+    const output = stripAnsi(stderr());
+    // Should use ✗ + red, not ✓ + dim — the previous behaviour put a green
+    // success mark next to an error message.
+    expect(output).toContain("✗");
+    expect(output).not.toContain("✓");
+    expect(output).toContain("ENOENT");
+  });
+
+  it("printToolResultCompact still shows ✓ for non-error results", () => {
+    printToolResultCompact("read", "1\timport foo from 'bar';");
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✓");
+    expect(output).not.toContain("✗");
+  });
+
   it("printEditDiff writes + and - lines to stderr", () => {
     printEditDiff("old content\n", "new content\n", "src/foo.ts");
     const output = stderr();

@@ -161,9 +161,15 @@ export function printToolCallCompact(name: string, args: Record<string, unknown>
   process.stderr.write(chalk.dim(`  ○ ${name.padEnd(6)}${arg}`) + "\n");
 }
 
-// Overwrites the compact call line with a ✓ result summary
+// Overwrites the compact call line with a ✓ result summary, or expands the
+// row when the tool failed — otherwise a misleading green ✓ would appear next
+// to an error message (e.g. "✓ read   ENOENT: no such file or directory ...").
 export function printToolResultCompact(name: string, result: string): void {
   if (name === "think") return; // think results are silent — the call line is enough
+  if (result.trim().startsWith("Error:")) {
+    printToolResultExpanded(name, result);
+    return;
+  }
   const summary = summariseResult(name, result);
   process.stderr.write(chalk.dim(`  ✓ ${summary}`) + "\n");
 }

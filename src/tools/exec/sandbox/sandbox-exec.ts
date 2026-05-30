@@ -20,7 +20,14 @@ function buildStrictProfile(cwd: string): string {
 (allow ipc*)
 (allow process-info* (target others))
 
-; Reads: cwd + minimum system paths required for binaries to load
+; Reads: cwd + minimum system paths required for binaries to load.
+; Without these, /bin/sh and dyld can't load and the shell exits with
+; SIGABRT before our command ever runs.
+;
+; The (literal "/") allow lets dyld stat the root directory during path
+; resolution — without it everything below SIGABRTs on macOS 13+, even
+; though every accessed path is itself allowed by one of the subpath rules.
+(allow file-read* (literal "/"))
 (allow file-read* (subpath "${cwd}"))
 (allow file-read* (subpath "/usr"))
 (allow file-read* (subpath "/bin"))
@@ -29,9 +36,18 @@ function buildStrictProfile(cwd: string): string {
 (allow file-read* (subpath "/Library"))
 (allow file-read* (subpath "/private/etc"))
 (allow file-read* (subpath "/private/var/db"))
+(allow file-read* (subpath "/private/var/select"))
 (allow file-read* (subpath "/dev"))
 (allow file-read* (subpath "/private/tmp"))
 (allow file-read* (subpath "/private/var/folders"))
+; macOS 13+ cryptex sealed system content. Sub-mount of /System so the
+; subpath rule above doesn't reach it; required on Ventura/Sonoma/Sequoia/Tahoe.
+(allow file-read* (subpath "/System/Volumes/Preboot"))
+; Homebrew binaries — common tools like node, python3, gh live here.
+; Without these, strict mode is unusable on any project that depends on
+; a Homebrew-installed runtime.
+(allow file-read* (subpath "/opt/homebrew"))
+(allow file-read* (subpath "/usr/local"))
 
 ; Writes: only cwd + tmp
 (allow file-write* (subpath "${cwd}"))

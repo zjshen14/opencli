@@ -2,9 +2,9 @@
 
 # 🤖 OpenCLI
 
-**An open-source, model-agnostic AI coding agent for your terminal**
+**An open-source AI coding agent for your terminal — runs on any model, sandboxes every command.**
 
-Works with Google Gemini · Anthropic Claude · Any OpenAI-compatible provider
+Claude Code's workflow, without the lock-in · Google Gemini · Anthropic Claude · any OpenAI-compatible provider
 
 [![npm version](https://img.shields.io/npm/v/@zjshen/opencli)](https://www.npmjs.com/package/@zjshen/opencli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -16,6 +16,10 @@ Works with Google Gemini · Anthropic Claude · Any OpenAI-compatible provider
 </div>
 
 ---
+
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="OpenCLI writing and running code from the terminal" width="700">
+</p>
 
 ## Quick Start
 
@@ -40,13 +44,20 @@ npx @zjshen/opencli
 
 ## Features
 
-- 🔀 **Model-agnostic** — Switch between Gemini, Claude, or any OpenAI-compatible provider with a flag
-- 🛡️ **Sandboxed execution** — OS-level isolation for shell commands (macOS `sandbox-exec`, Linux `bwrap`)
-- 🧩 **Extensible skills** — Compatible with the [Agent Skills open standard](https://agentskills.io) (works with Claude Code & Gemini CLI skills)
-- 📋 **Plan mode** — Review and approve changes before they're applied (`/plan <task>`)
-- 🔍 **Auditable tool use** — Every file read, write, and shell command is explicit and confirmable
-- 💬 **Session management** — Resume conversations across sessions
-- ⚡ **Lightweight** — No heavy framework, just `npm install` and go
+**The three things that make OpenCLI different:**
+
+- 🔀 **Runs on any model** — Gemini, Claude, or any OpenAI-compatible provider. Switch with a single flag — no rewrite, no vendor lock-in.
+- 🛡️ **Sandboxed by default** — Every shell command runs inside an OS-level sandbox (macOS `sandbox-exec`, Linux `bwrap`). The agent physically cannot write to `/etc`, `~/.ssh`, or your credentials.
+- 🧩 **Standard skills** — Drop-in compatible with the [Agent Skills open standard](https://agentskills.io). Your existing Claude Code and Gemini CLI skills just work.
+
+Plus everything you'd expect from a serious coding agent:
+
+- 📋 **Plan mode** — review and approve changes before they're applied (`/plan <task>`)
+- 🔍 **Auditable tool use** — every file read, write, and shell command is explicit and confirmable
+- ↩️ **Snapshot & rewind** — undo a whole session's writes with `/rewind`
+- 🔌 **MCP support** — connect any [Model Context Protocol](https://modelcontextprotocol.io) server
+- 💬 **Session management** — resume conversations across sessions
+- ⚡ **Lightweight** — no heavy framework, just `npm install` and go
 
 ## Why OpenCLI?
 

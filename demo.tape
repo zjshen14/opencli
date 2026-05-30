@@ -1,30 +1,33 @@
+# Records docs/assets/demo.gif — a scripted, deterministic OpenCLI session.
+# Render with:  vhs demo.tape   (requires vhs, ffmpeg, ttyd, node)
+# The session itself is hand-authored in scripts/demo-playback.mjs so it needs
+# no API key and renders identically every time.
+
 Output docs/assets/demo.gif
 
+Require node
+
 Set Shell "zsh"
-Set FontSize 18
-Set Width 1200
-Set Height 700
-Set Padding 40
+Set FontSize 19
+Set Width 1320
+Set Height 840
+Set Padding 28
+Set Margin 36
+Set MarginFill "#6D28D9"
+Set BorderRadius 12
+Set WindowBar Colorful
+Set WindowBarSize 40
 Set Theme "Catppuccin Macchiato"
-Set WindowBar Rings
 
 Hide
-Type "rm -f hello.py"
-Enter
-Type "npm run dev --silent"
-Enter
-Sleep 2s
 Type "clear"
 Enter
 Show
 
-Sleep 1s
-Type "Write a python script that prints 'Hello from OpenCLI!' to hello.py"
-Sleep 500ms
+Sleep 600ms
+Type "node scripts/demo-playback.mjs"
+Sleep 400ms
 Enter
 
-Sleep 15s
-
-Type "/exit"
-Enter
-Sleep 1s
+# Playback self-paces (~19s). Hold to the end, then linger on the final frame.
+Sleep 23s

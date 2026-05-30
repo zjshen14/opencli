@@ -20,9 +20,8 @@ export async function runAgentTurn(
   userMessage: string,
   mode: AgentRunMode = "react",
 ): Promise<string> {
-  const spinner = createSpinner("Thinking…");
+  const spinner = createSpinner();
   spinner.start();
-  let firstToken = true;
   const mdRenderer = new MarkdownStreamRenderer();
   const pendingEdits: { file_path: string; old_string: string; new_string: string }[] = [];
   let fullText = "";
@@ -32,20 +31,14 @@ export async function runAgentTurn(
     for await (const event of agent.run(userMessage, mode)) {
       switch (event.type) {
         case "text":
-          if (firstToken) {
-            spinner.stop();
-            firstToken = false;
-          }
+          spinner.stop();
           turnText += event.text;
           fullText += event.text;
           mdRenderer.push(event.text);
           break;
 
         case "tool_call":
-          if (firstToken) {
-            spinner.stop();
-            firstToken = false;
-          }
+          spinner.stop();
           mdRenderer.flush();
           void session.log({
             type: "tool_call",
@@ -70,9 +63,11 @@ export async function runAgentTurn(
               });
             }
           }
+          spinner.scheduleStart();
           break;
 
         case "tool_result":
+          spinner.stop();
           void session.log({ type: "tool_result", name: event.name, result: event.result });
           if (COMPACT_TOOLS.has(event.name)) {
             printToolResultCompact(event.name, event.result);
@@ -86,10 +81,13 @@ export async function runAgentTurn(
           } else {
             printToolResult(event.name, event.result);
           }
+          spinner.scheduleStart();
           break;
 
         case "skill_activated":
+          spinner.stop();
           printSkillActivated(event.name);
+          spinner.scheduleStart();
           break;
 
         case "error":
@@ -99,10 +97,7 @@ export async function runAgentTurn(
           break;
 
         case "done":
-          if (firstToken) {
-            spinner.stop();
-            firstToken = false;
-          }
+          spinner.stop();
           mdRenderer.flush();
           void session.log({ type: "assistant", content: turnText });
           turnText = "";
@@ -118,24 +113,72 @@ export async function runAgentTurn(
   return fullText;
 }
 
-function createSpinner(text: string) {
+// Varied verbs shown while waiting on the model or tool execution — picked
+// at random each time the spinner restarts, so the UI feels alive across a
+// long agentic loop instead of going silent after the first tool call.
+const SPINNER_VERBS = [
+  "Thinking",
+  "Working",
+  "Cooking",
+  "Brewing",
+  "Stewing",
+  "Tinkering",
+  "Pondering",
+  "Crafting",
+  "Reasoning",
+  "Considering",
+  "Exploring",
+  "Noodling",
+  "Hatching",
+];
+
+function createSpinner() {
   const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+  // Delay before the spinner actually appears after scheduleStart(). Back-to-back
+  // events (e.g. several parallel tool_results yielded synchronously) finish
+  // within this window, so the spinner doesn't flash between them.
+  const START_DELAY_MS = 80;
   let i = 0;
   let timer: NodeJS.Timeout | undefined;
+  let pendingStart: NodeJS.Timeout | undefined;
+  let visible = false;
+
+  const pickVerb = () => SPINNER_VERBS[Math.floor(Math.random() * SPINNER_VERBS.length)];
+
+  const startNow = () => {
+    if (visible) return;
+    visible = true;
+    const text = `${pickVerb()}…`;
+    process.stderr.write(chalk.dim(`${frames[0]} ${text}`));
+    i = 0;
+    timer = setInterval(() => {
+      process.stderr.write(`\r${chalk.cyan(frames[i % frames.length])} ${chalk.dim(text)}`);
+      i++;
+    }, 80);
+  };
+
   return {
-    start() {
-      process.stderr.write(chalk.dim(`${frames[0]} ${text}`));
-      timer = setInterval(() => {
-        process.stderr.write(`\r${chalk.cyan(frames[i % frames.length])} ${chalk.dim(text)}`);
-        i++;
-      }, 80);
+    start: startNow,
+    scheduleStart() {
+      if (pendingStart || visible) return;
+      pendingStart = setTimeout(() => {
+        pendingStart = undefined;
+        startNow();
+      }, START_DELAY_MS);
     },
     stop() {
+      if (pendingStart) {
+        clearTimeout(pendingStart);
+        pendingStart = undefined;
+      }
       if (timer) {
         clearInterval(timer);
         timer = undefined;
       }
-      process.stderr.write("\r\x1b[K");
+      if (visible) {
+        process.stderr.write("\r\x1b[K");
+        visible = false;
+      }
     },
   };
 }

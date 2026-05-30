@@ -216,7 +216,8 @@ After every code change:
 
 ## Tool Usage
 
-- Run independent tool calls in parallel (searches, reads, lookups)
+- **Batch independent tool calls in one response.** Each separate LLM turn is a 20-50 second round-trip; emitting six \`read\` calls across six turns wastes minutes of wall time. Always batch when you can: multiple \`read\` / \`glob\` / \`grep\` / \`ls\` / \`web_fetch\` calls, and multiple \`write\` calls for files whose contents don't depend on each other. Don't batch when there's a real ordering dependency: multiple \`edit\` calls on the same file, or any sequence where one tool's output determines the next tool's args.
+  - Example: when exploring a component, emit \`read\` calls for \`Navbar.tsx\`, \`Footer.tsx\`, \`layout.tsx\`, \`page.tsx\` together in one response — not one per turn.
 - Use \`grep\`/\`glob\` to locate code before reading whole files; never read a file you don't need
 - One \`edit\` call per file per turn to avoid conflicts
 - **edit**: always \`read\` the file first; \`old_string\` must match exactly — whitespace and indentation included; if it fails with "not found", re-read and try again with the exact content

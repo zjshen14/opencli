@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ToolRegistry } from "./registry.js";
-import type { Tool } from "./base.js";
+import type { Tool, ToolExecutionContext } from "./base.js";
 
 function makeTool(name: string, output: string): Tool {
   return {
@@ -9,6 +9,22 @@ function makeTool(name: string, output: string): Tool {
     parameters: { type: "object", properties: {} },
     execute: async () => ({ success: true, output }),
   };
+}
+
+function makeContextCapturingTool(
+  name: string,
+): Tool & { capturedCtx: ToolExecutionContext | undefined } {
+  const t = {
+    name,
+    description: `Tool ${name}`,
+    parameters: { type: "object", properties: {} },
+    capturedCtx: undefined as ToolExecutionContext | undefined,
+    execute: async (_params: Record<string, unknown>, ctx?: ToolExecutionContext) => {
+      t.capturedCtx = ctx;
+      return { success: true, output: "ok" };
+    },
+  };
+  return t;
 }
 
 describe("ToolRegistry", () => {
@@ -119,5 +135,33 @@ describe("ToolRegistry", () => {
     const result = await registry.execute("validated", { value: 42 });
     expect(result.success).toBe(true);
     expect(result.output).toBe("42");
+  });
+
+  it("passes a ToolExecutionContext to the tool's execute function", async () => {
+    const registry = new ToolRegistry();
+    const capturingTool = makeContextCapturingTool("ctx-tool");
+    registry.register(capturingTool);
+    await registry.execute("ctx-tool", {});
+    expect(capturingTool.capturedCtx).toBeDefined();
+    expect(capturingTool.capturedCtx?.registry).toBe(registry);
+  });
+
+  it("allows a composed tool to call sub-tools via ctx.registry", async () => {
+    const registry = new ToolRegistry();
+    registry.register(makeTool("sub", "sub-result"));
+    registry.register({
+      name: "composed",
+      description: "Composed tool",
+      parameters: { type: "object", properties: {} },
+      composedOf: ["sub"],
+      atomic: true,
+      execute: async (_params, ctx) => {
+        const sub = await ctx!.registry.execute("sub", {});
+        return { success: true, output: `composed:${sub.output}` };
+      },
+    });
+    const result = await registry.execute("composed", {});
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("composed:sub-result");
   });
 });

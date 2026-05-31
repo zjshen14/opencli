@@ -1,4 +1,4 @@
-import type { Tool } from "./base.js";
+import type { Tool, ToolExecutionContext } from "./base.js";
 import type { ToolResult } from "../providers/types.js";
 
 export class ToolRegistry {
@@ -37,8 +37,9 @@ export class ToolRegistry {
       return { success: false, output: "", error: validationError };
     }
 
+    const ctx: ToolExecutionContext = { registry: this };
     try {
-      return await tool.execute(params);
+      return await tool.execute(params, ctx);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return { success: false, output: "", error: message };

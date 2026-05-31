@@ -354,6 +354,45 @@ describe("compactHistory — original task preservation", () => {
     expect(finalSummary).toContain("Build a card trading site");
   });
 
+  it("quotes the original first user task even after prune ran and later user messages exist", async () => {
+    // Load-bearing assumption: extractOriginalTask must pick the original
+    // task — which (post-PR #154 prune anchor) is preserved at the head even
+    // after pruning fires. Without this, a long session would quote whichever
+    // user turn happened to slip through the message cap, not the user's
+    // actual goal. PR #154's anchor logic merges the original task with the
+    // next user turn via a "[earlier conversation pruned]" marker;
+    // extractOriginalTask must strip that suffix.
+    //
+    // maxHistoryMessages = 25 so prune fires but leaves enough for the
+    // compaction split (need >KEEP_RECENT messages in the head).
+    const ctx = new ContextManager(undefined, 25);
+    ctx.addMessage(userMsg("ORIGINAL_TASK_BUILD_THE_THING"));
+    ctx.addMessage(modelMsg("Acknowledged."));
+    for (let i = 0; i < 50; i++) {
+      if (i % 7 === 0) {
+        ctx.addMessage(userMsg(`LATER_USER_TURN_${i}_NOT_THE_TASK`));
+      } else {
+        ctx.addMessage(i % 2 === 0 ? userMsg(`pad ${i}`) : modelMsg(`pad ${i}`));
+      }
+    }
+
+    // Sanity: prune fired (history was capped) and the first message still
+    // starts with the original task. PR #154's anchor may have merged it with
+    // the next user turn via the "[earlier conversation pruned]" marker.
+    const firstMsgText = (ctx.getMessages()[0].parts[0] as { type: "text"; text: string }).text;
+    expect(firstMsgText.startsWith("ORIGINAL_TASK_BUILD_THE_THING")).toBe(true);
+    expect(ctx.messageCount).toBeLessThanOrEqual(25);
+
+    await compactHistory(ctx, makeMockClient(FIXED_SUMMARY));
+    const summaryText = (ctx.getMessages()[0].parts[0] as { type: "text"; text: string }).text;
+
+    // The quotation contains the ORIGINAL task only — NOT the merged-in next
+    // user turn, NOT the prune marker, NOT a later user-turn substring.
+    expect(summaryText).toContain("> ORIGINAL_TASK_BUILD_THE_THING");
+    expect(summaryText).not.toContain("> LATER_USER_TURN");
+    expect(summaryText).not.toContain("earlier conversation pruned");
+  });
+
   it("emits no quotation block when there is no user text message anywhere in the head", async () => {
     const ctx = new ContextManager();
     // To exercise the "no usable anchor" branch, the head (everything before

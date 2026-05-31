@@ -57,26 +57,46 @@ Rules:
 - Under 400 words total.
 - Copy file paths, error messages, function names, and version numbers exactly.
 - Do not narrate tool calls. Focus on outcomes and current state.
-- If the input contains a block labeled "**Original task** (verbatim):" followed by quoted lines, copy that block VERBATIM as the first thing in your response, before the ## Task section. Do not paraphrase or shorten the original task text. This rule keeps the user's original goal alive across nested compactions.`;
+- If the input contains a block labeled "**Original task** (verbatim):" followed by quoted ("> ...") lines, OMIT that block entirely from your response. The calling code preserves the original task separately and prepends it; including it here would duplicate it on every nested compaction.`;
 
 /**
  * Pull the original user task — the first user-role text message — out of the
- * history at the head of compaction. Returns empty string if no such message
- * exists. The quotation block this produces is prepended to the summary body
- * so the verbatim original task survives even after multiple nested
- * compactions (see SUMMARIZATION_PROMPT verbatim-copy rule).
+ * head at compaction time. Returns "" if there is no such message.
+ *
+ * Three shapes this function recognises:
+ *  1. A plain user-text message — that text IS the original task.
+ *  2. A user-text message that PR #154's prune anchor has merged with the next
+ *     turn via "\n\n[earlier conversation pruned]\n\n…". Keep only the prefix
+ *     before that separator — otherwise the next user turn leaks into the
+ *     quote on long sessions where prune fires before compaction does.
+ *  3. A summary message from a prior compaction containing a "**Original
+ *     task** (verbatim):" block. Lift the inner quoted lines directly so the
+ *     text is reconstructed by string equality, not paraphrase.
+ *
+ * The calling code prepends the result as a quotation block in the summary
+ * body. SUMMARIZATION_PROMPT instructs the model to OMIT any existing block
+ * so the result isn't duplicated on nested compactions.
  */
 function extractOriginalTask(messages: Message[]): string {
   for (const msg of messages) {
     if (msg.role !== "user") continue;
     const text = msg.parts.find((p) => p.type === "text");
     if (text && text.type === "text" && text.text.trim()) {
-      // Already-quoted (this is a nested compaction whose head is a summary):
-      // extract the inner quotation rather than re-quoting it.
-      const m = text.text.match(/\*\*Original task\*\* \(verbatim\):\n((?:> .*\n?)+)/);
-      if (m) {
-        return m[1].replace(/^> /gm, "").trimEnd();
+      // Shape 3 (nested compaction): an existing quotation block — lift its
+      // contents directly, ignoring any surrounding text.
+      const nested = text.text.match(/\*\*Original task\*\* \(verbatim\):\n((?:> .*\n?)+)/);
+      if (nested) {
+        return nested[1].replace(/^> /gm, "").trimEnd();
       }
+      // Shape 2 (prune-merged): PR #154 anchor merged the original task with
+      // the next user-text turn via "[earlier conversation pruned]". Only the
+      // prefix before that marker is the original task; the suffix is later
+      // content that the summary itself will cover.
+      const elisionIdx = text.text.indexOf("\n\n[earlier conversation pruned]");
+      if (elisionIdx >= 0) {
+        return text.text.slice(0, elisionIdx);
+      }
+      // Shape 1 (plain): use as-is.
       return text.text;
     }
   }

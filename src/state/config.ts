@@ -27,6 +27,9 @@ export interface Config {
   provider?: "gemini" | "anthropic" | "openai";
   /** Custom base URL for proxy or local inference setups (e.g. LiteLLM, Ollama). */
   baseUrl?: string;
+  /** Auto-compact context at the 75% token threshold (A5b). Defaults to true
+   *  when absent. Set to false to disable; manual /compact still works. */
+  autoCompact?: boolean;
 }
 
 const DEFAULTS: Config = {

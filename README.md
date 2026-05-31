@@ -7,6 +7,8 @@
 Claude Code's workflow, without the lock-in · Google Gemini · Anthropic Claude · any OpenAI-compatible provider
 
 [![npm version](https://img.shields.io/npm/v/@zjshen/opencli)](https://www.npmjs.com/package/@zjshen/opencli)
+[![npm downloads](https://img.shields.io/npm/dm/@zjshen/opencli)](https://www.npmjs.com/package/@zjshen/opencli)
+[![GitHub stars](https://img.shields.io/github/stars/zjshen14/opencli)](https://github.com/zjshen14/opencli/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/zjshen14/opencli/actions/workflows/ci.yml/badge.svg)](https://github.com/zjshen14/opencli/actions)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D20.6-green.svg)](https://nodejs.org)
@@ -303,6 +305,14 @@ npm run eval         # Cross-provider eval matrix (requires npm run build first)
 `npm run eval` makes real API calls and costs money (~$1–5 per full run). It requires a **billing-enabled** API key — free-tier quotas are insufficient for preview models.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
+
+New contributors: check the [good first issues](https://github.com/zjshen14/opencli/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) for scoped, well-described starting points.
+
+## Star History
+
+<a href="https://star-history.com/#zjshen14/opencli&Date">
+  <img src="https://api.star-history.com/svg?repos=zjshen14/opencli&type=Date" alt="OpenCLI star history chart" width="600">
+</a>
 
 ## License
 

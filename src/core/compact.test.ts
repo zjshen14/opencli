@@ -300,3 +300,76 @@ describe("contextWindowFor", () => {
     expect(contextWindowFor("unknown-model-xyz")).toBe(100_000);
   });
 });
+
+describe("compactHistory — original task preservation", () => {
+  it("prepends a verbatim quotation of the first user text message", async () => {
+    const ctx = new ContextManager();
+    ctx.restoreMessages([
+      userMsg("Original goal: build a card trading site with Next.js"),
+      modelMsg("Sure, let me start."),
+      ...makeMessages(20),
+    ]);
+
+    await compactHistory(ctx, makeMockClient(FIXED_SUMMARY));
+
+    const compacted = ctx.getMessages();
+    const summaryText = (compacted[0].parts[0] as { type: "text"; text: string }).text;
+
+    expect(summaryText).toContain("**Original task** (verbatim):");
+    // Verbatim quotation lines are prefixed with "> " (Markdown block quote)
+    expect(summaryText).toContain("> Original goal: build a card trading site with Next.js");
+  });
+
+  it("preserves the original task across a nested compaction", async () => {
+    const ctx = new ContextManager();
+    ctx.restoreMessages([
+      userMsg("Build a card trading site"),
+      modelMsg("Acknowledged."),
+      ...makeMessages(20),
+    ]);
+
+    // First compaction — produces a summary message at position 0 containing
+    // the verbatim quotation block.
+    const firstSummary =
+      "## Task\nBuild card site.\n\n## Progress\nDid X.\n\n## Decisions\nUsed Y.\n\n## Errors\nNone.\n\n## State\nDone.";
+    await compactHistory(ctx, makeMockClient(firstSummary));
+
+    // Add more turns so a second compaction has something to compress.
+    for (let i = 0; i < 30; i++) {
+      ctx.addMessage(i % 2 === 0 ? userMsg(`later ${i}`) : modelMsg(`response ${i}`));
+    }
+
+    // The compaction prompt instructs the model to copy the verbatim quotation
+    // block. We emulate that with a mock client that returns a summary
+    // already containing the same quotation block — same shape the real LLM
+    // would produce under the prompt rule.
+    const secondMockSummary =
+      "**Original task** (verbatim):\n> Build a card trading site\n\n## Task\nContinuing card site work.\n\n## Progress\nDid Z.\n\n## Decisions\nMore Y.\n\n## Errors\nNone.\n\n## State\nProgressing.";
+    await compactHistory(ctx, makeMockClient(secondMockSummary));
+
+    const compacted = ctx.getMessages();
+    const finalSummary = (compacted[0].parts[0] as { type: "text"; text: string }).text;
+
+    // The original task survives by string equality, NOT paraphrase.
+    expect(finalSummary).toContain("Build a card trading site");
+  });
+
+  it("emits no quotation block when there is no user text message anywhere in the head", async () => {
+    const ctx = new ContextManager();
+    // To exercise the "no usable anchor" branch, the head (everything before
+    // the last KEEP_RECENT=10) must contain no user-text message. Build a
+    // 22-message history where the first 12 are only function_results + model
+    // turns and the last 10 (the verbatim tail) are user-text; head sent to
+    // the summarizer is exactly those 12 anchor-free messages.
+    const headMessages = Array.from({ length: 12 }, (_, i) =>
+      i % 2 === 0 ? errorResultMsg("bash", `result ${i}`) : modelMsg(`model ${i}`),
+    );
+    const tailMessages = Array.from({ length: 10 }, (_, i) => userMsg(`tail user ${i}`));
+    ctx.restoreMessages([...headMessages, ...tailMessages]);
+
+    await compactHistory(ctx, makeMockClient(FIXED_SUMMARY));
+
+    const summaryText = (ctx.getMessages()[0].parts[0] as { type: "text"; text: string }).text;
+    expect(summaryText).not.toContain("**Original task** (verbatim):");
+  });
+});

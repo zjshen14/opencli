@@ -12,6 +12,7 @@ import {
   printEditDiff,
   printSkillActivated,
   printError,
+  printInfo,
 } from "./renderer.js";
 
 export async function runAgentTurn(
@@ -94,6 +95,13 @@ export async function runAgentTurn(
           spinner.stop();
           mdRenderer.flush();
           printError(event.message);
+          break;
+
+        case "notice":
+          spinner.stop();
+          mdRenderer.flush();
+          printInfo(event.message);
+          spinner.scheduleStart();
           break;
 
         case "done":

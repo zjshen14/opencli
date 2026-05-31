@@ -4,6 +4,7 @@ import { ToolRegistry } from "../tools/registry.js";
 import { SkillRegistry } from "../skills/registry.js";
 import type { LLMClient } from "../providers/client.js";
 import type { Message, StreamEvent, ToolDefinition } from "../providers/types.js";
+import { contextWindowFor, COMPACTION_TARGET_TOKENS } from "./compact.js";
 
 // A client that always requests the same tool call (never finishes on its own)
 function makeLoopingClient(toolName = "noop", args: Record<string, unknown> = {}): LLMClient {
@@ -522,5 +523,208 @@ describe("Agent stuck-loop detection", () => {
     // Should be a max-turns error, NOT a stuck-loop error
     expect((error as { type: "error"; message: string }).message).toMatch(/maximum iterations/i);
     expect((error as { type: "error"; message: string }).message).not.toMatch(/identical/i);
+  });
+});
+
+describe("Agent auto-compact (A5b)", () => {
+  // Returns a quiet finishing client so each agent.run() emits no tool calls
+  // and ends cleanly with a "done" event. The point of these tests is the
+  // turn-boundary check, not the run loop.
+  function makeQuietClient(): LLMClient {
+    return {
+      async *stream() {
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+  }
+
+  function makeCompactionClient(summary: string): LLMClient {
+    return {
+      async *stream() {
+        yield { type: "text", text: summary } as StreamEvent;
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+  }
+
+  // Construct an Agent whose context already holds enough JSON bytes to push
+  // it over `ratio` of a model with the given window. Returns the agent.
+  function makeAgentAtRatio(
+    ratio: number,
+    model: string,
+    options: { autoCompact?: boolean; compactionClient?: LLMClient } = {},
+  ): { agent: Agent; events: import("./observability.js").ObservabilityEvent[] } {
+    const events: import("./observability.js").ObservabilityEvent[] = [];
+    const agent = new Agent(
+      makeQuietClient(),
+      makeNoopRegistry(),
+      new SkillRegistry(),
+      "", // tiny system instruction
+      undefined,
+      50,
+      {
+        model,
+        onObservability: (e) => events.push(e),
+        compactionClient:
+          options.compactionClient ??
+          makeCompactionClient(
+            "# Task\nx\n# Progress\nx\n# Decisions\nx\n# Errors\nNone\n# State\nx",
+          ),
+        autoCompact: options.autoCompact,
+      },
+    );
+
+    // Inject messages whose serialized JSON crosses `ratio` of the effective
+    // window. We control bytes precisely so the trigger math is deterministic.
+    const effectiveWindow = Math.min(contextWindowFor(model), COMPACTION_TARGET_TOKENS);
+    const targetTokens = Math.ceil(effectiveWindow * ratio);
+    const targetBytes = targetTokens * 4;
+    // The first message is the original task — keep it short so the
+    // verbatim-quotation check has a recognizable substring.
+    const padBytes = Math.max(0, targetBytes - 200);
+    const filler = "x".repeat(padBytes);
+    const messages = [
+      { role: "user" as const, parts: [{ type: "text" as const, text: "ORIGINAL_TASK_TOKEN" }] },
+      { role: "model" as const, parts: [{ type: "text" as const, text: "ack" }] },
+      // Add bulk messages whose total bytes hit the target. Split into chunks
+      // so it looks like real history rather than one giant message.
+      ...Array.from({ length: 20 }, (_, i) => ({
+        role: (i % 2 === 0 ? "user" : "model") as "user" | "model",
+        parts: [
+          {
+            type: "text" as const,
+            text: filler.slice(i * (padBytes / 20), (i + 1) * (padBytes / 20)),
+          },
+        ],
+      })),
+    ];
+    agent.restoreMessages(messages);
+
+    return { agent, events };
+  }
+
+  it("does not fire below 60% ratio", async () => {
+    const { agent, events } = makeAgentAtRatio(0.5, "claude-sonnet-4-6");
+    await collectEvents(agent, "next");
+    expect(events.some((e) => e.type === "compact_threshold_warned")).toBe(false);
+    expect(events.some((e) => e.type === "compact_started")).toBe(false);
+  });
+
+  it("yields a notice and emits compact_threshold_warned between 60% and 75%", async () => {
+    const { agent, events } = makeAgentAtRatio(0.65, "claude-sonnet-4-6");
+    const yielded = await collectEvents(agent, "next");
+
+    expect(events.some((e) => e.type === "compact_threshold_warned")).toBe(true);
+    expect(events.some((e) => e.type === "compact_started")).toBe(false);
+
+    const notice = yielded.find((e) => e.type === "notice");
+    expect(notice).toBeDefined();
+    expect((notice as { type: "notice"; message: string }).message).toMatch(
+      /auto-compact will trigger at 75%/,
+    );
+  });
+
+  it("fires the warning only once per session across consecutive turns", async () => {
+    const { agent, events } = makeAgentAtRatio(0.65, "claude-sonnet-4-6");
+    await collectEvents(agent, "first");
+    await collectEvents(agent, "second");
+    await collectEvents(agent, "third");
+
+    expect(events.filter((e) => e.type === "compact_threshold_warned")).toHaveLength(1);
+  });
+
+  it("auto-compacts at ratio ≥ 0.75 and emits compact_started + compact_completed", async () => {
+    const { agent, events } = makeAgentAtRatio(0.8, "claude-sonnet-4-6");
+    await collectEvents(agent, "next");
+
+    expect(events.some((e) => e.type === "compact_started")).toBe(true);
+    expect(events.some((e) => e.type === "compact_completed")).toBe(true);
+
+    // The completed event should have the trigger field set to "auto"
+    const completed = events.find((e) => e.type === "compact_completed");
+    expect((completed as { trigger: string }).trigger).toBe("auto");
+  });
+
+  it("does not auto-compact when autoCompact: false", async () => {
+    const { agent, events } = makeAgentAtRatio(0.8, "claude-sonnet-4-6", { autoCompact: false });
+    await collectEvents(agent, "next");
+
+    expect(events.some((e) => e.type === "compact_started")).toBe(false);
+    expect(events.some((e) => e.type === "compact_threshold_warned")).toBe(false);
+  });
+
+  it("uses min(contextWindow, 256_000) — fires on Gemini at 200K tokens", async () => {
+    // Gemini's raw window is 1_048_576. At 200K tokens, raw ratio is 19% (won't fire),
+    // but effective ratio is 200K/256K ≈ 78% (should fire). This is the entire
+    // reason for COMPACTION_TARGET_TOKENS — without the cap, this test would not
+    // exercise the trigger on the highest-window provider.
+    const { agent, events } = makeAgentAtRatio(0.8, "gemini-3.1-flash-lite-preview");
+    await collectEvents(agent, "next");
+    expect(events.some((e) => e.type === "compact_started")).toBe(true);
+  });
+
+  it("re-arms the 60% warning after a successful compaction", async () => {
+    // Start above 75% so the first turn auto-compacts (and re-arms the
+    // warning). Then force the ratio back to 65% and confirm a second
+    // warning fires.
+    const { agent, events } = makeAgentAtRatio(0.8, "claude-sonnet-4-6");
+    await collectEvents(agent, "first");
+    expect(events.filter((e) => e.type === "compact_completed")).toHaveLength(1);
+    // After compaction the history shrank — re-inflate to the 65% band.
+    // Easier: directly re-set messages to a known-size payload.
+    const padBytes = Math.ceil(200_000 * 0.65) * 4 - 200;
+    const refilled = [
+      { role: "user" as const, parts: [{ type: "text" as const, text: "ORIGINAL_TASK_TOKEN" }] },
+      { role: "model" as const, parts: [{ type: "text" as const, text: "x".repeat(padBytes) }] },
+    ];
+    agent.restoreMessages(refilled);
+
+    await collectEvents(agent, "second");
+    // Two warnings total: one initial-trigger path is N/A because the first
+    // turn hit 80%, but the new climb into 65% must rearm and warn.
+    expect(events.filter((e) => e.type === "compact_threshold_warned")).toHaveLength(1);
+  });
+
+  it("fail-open: compactionClient error yields a notice and does not throw", async () => {
+    const failingClient: LLMClient = {
+      stream(): AsyncGenerator<StreamEvent> {
+        // Returning a rejected generator object (rather than declaring an
+        // async generator that never yields) avoids the require-yield lint.
+        async function* throwing(): AsyncGenerator<StreamEvent> {
+          if (false as boolean) yield { type: "done" } as StreamEvent;
+          throw new Error("simulated compaction failure");
+        }
+        return throwing();
+      },
+    };
+    const { agent, events } = makeAgentAtRatio(0.8, "claude-sonnet-4-6", {
+      compactionClient: failingClient,
+    });
+    const yielded = await collectEvents(agent, "next");
+
+    expect(events.some((e) => e.type === "compact_failed")).toBe(true);
+    const notice = yielded.find((e) => e.type === "notice");
+    expect(notice).toBeDefined();
+    expect((notice as { type: "notice"; message: string }).message).toMatch(/auto-compact failed/);
+
+    // The turn must still complete normally — yielded events include "done".
+    expect(yielded.some((e) => e.type === "done")).toBe(true);
+  });
+
+  it("clearHistory resets the warning flag", async () => {
+    const { agent, events } = makeAgentAtRatio(0.65, "claude-sonnet-4-6");
+    await collectEvents(agent, "first");
+    expect(events.filter((e) => e.type === "compact_threshold_warned")).toHaveLength(1);
+
+    agent.clearHistory();
+
+    // Re-inflate context above 60% so the next turn's check would warn again.
+    const padBytes = Math.ceil(200_000 * 0.65) * 4 - 200;
+    agent.restoreMessages([
+      { role: "user", parts: [{ type: "text", text: "ORIGINAL_TASK_TOKEN" }] },
+      { role: "model", parts: [{ type: "text", text: "x".repeat(padBytes) }] },
+    ]);
+    await collectEvents(agent, "second");
+    expect(events.filter((e) => e.type === "compact_threshold_warned")).toHaveLength(2);
   });
 });

@@ -22,6 +22,18 @@ const SAFE_COMMANDS = [
   /^uniq(\s|$)/,
   /^file(\s|$)/,
   /^type(\s|$)/,
+  /^tree(\s|$)/,
+  /^realpath(\s|$)/,
+  /^basename(\s|$)/,
+  /^dirname(\s|$)/,
+  /^du(\s|$)/,
+  /^df(\s|$)/,
+  // Text processing / checksums
+  /^cut(\s|$)/,
+  /^column(\s|$)/,
+  /^cksum(\s|$)/,
+  /^shasum(\s|$)/,
+  /^md5sum(\s|$)/,
   // Shell utilities
   /^echo(\s|$)/,
   /^printf(\s|$)/,
@@ -32,9 +44,9 @@ const SAFE_COMMANDS = [
   /^env(\s|$)/,
   /^printenv(\s|$)/,
   // Git read-only operations
-  /^git\s+(status|log|diff|show|branch|remote|tag|describe|rev-parse|shortlog|blame|ls-files|ls-tree|stash\s+list)(\s|$)/,
+  /^git\s+(status|log|diff|show|show-ref|cat-file|branch|remote|tag|describe|rev-parse|shortlog|blame|ls-files|ls-tree|stash\s+list)(\s|$)/,
   // npm / node read-only
-  /^npm\s+(test|run\s+(test|typecheck|lint|format:check)|ls|list|audit|outdated)(\s|$)/,
+  /^npm\s+(test|run\s+(test|typecheck|lint|format:check)|ls|list|audit|outdated|view|info)(\s|$)/,
   /^npx\s+tsc(\s|$)/,
   /^node\s+(--version|-v)$/,
   /^npm\s+(--version|-v)$/,

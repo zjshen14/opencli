@@ -135,8 +135,12 @@ export class Agent {
     // A5b auto-compact: fires only at this turn-boundary position — before any
     // LLM call or tool execution this turn. Any LLM/network errors inside
     // maybeAutoCompact are caught by it; the turn always proceeds.
-    for (const notice of await this.maybeAutoCompact(systemInstruction)) {
-      yield notice;
+    // Skipped in plan mode: read-only exploration shouldn't spend tokens on a
+    // compaction round-trip; the react turn that follows will trigger it.
+    if (mode !== "plan") {
+      for (const notice of await this.maybeAutoCompact(systemInstruction)) {
+        yield notice;
+      }
     }
 
     let turns = 0;
@@ -382,10 +386,16 @@ export class Agent {
       if (this.warnedAt60) return [];
       this.warnedAt60 = true;
       this.obs?.({ type: "compact_threshold_warned", ratio });
+      // Phrase the notice against the *compaction budget*, not the raw model
+      // window — otherwise a Gemini (1M window) user at 154k/256k effective
+      // would see "context at 60%" while actually using ~15% of their model's
+      // real context, which reads as a hard hit on the LLM's capacity.
+      const budgetKb = Math.round(effectiveWindow / 1000);
+      const usedKb = Math.round(estimatedTokens / 1000);
       return [
         {
           type: "notice",
-          message: `context at ${Math.round(ratio * 100)}% — auto-compact will trigger at 75%`,
+          message: `approaching auto-compact threshold — ${usedKb}k / ${budgetKb}k tokens used (compacts at 75% of budget)`,
         },
       ];
     }

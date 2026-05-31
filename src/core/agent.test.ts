@@ -620,8 +620,11 @@ describe("Agent auto-compact (A5b)", () => {
     const notice = yielded.find((e) => e.type === "notice");
     expect(notice).toBeDefined();
     expect((notice as { type: "notice"; message: string }).message).toMatch(
-      /auto-compact will trigger at 75%/,
+      /approaching auto-compact threshold/,
     );
+    // Shows tokens/budget pair so the user doesn't read it as a fraction of
+    // the model's full context window.
+    expect((notice as { type: "notice"; message: string }).message).toMatch(/\d+k \/ \d+k tokens/);
   });
 
   it("fires the warning only once per session across consecutive turns", async () => {
@@ -664,25 +667,53 @@ describe("Agent auto-compact (A5b)", () => {
   });
 
   it("re-arms the 60% warning after a successful compaction", async () => {
-    // Start above 75% so the first turn auto-compacts (and re-arms the
-    // warning). Then force the ratio back to 65% and confirm a second
-    // warning fires.
-    const { agent, events } = makeAgentAtRatio(0.8, "claude-sonnet-4-6");
+    // Genuine re-arm coverage: the previous version went straight to 0.8 and
+    // skipped the 60–75% latch entirely, so deleting the post-compaction
+    // re-arm line would still have passed it. We now:
+    //   1. Sit at 0.65 → first warning fires; warnedAt60 latches true
+    //   2. Climb to 0.80 → auto-compact fires; re-arm code resets to false
+    //   3. Drop to 0.65 again → SECOND warning must fire (proves re-arm)
+    const { agent, events } = makeAgentAtRatio(0.65, "claude-sonnet-4-6");
     await collectEvents(agent, "first");
-    expect(events.filter((e) => e.type === "compact_completed")).toHaveLength(1);
-    // After compaction the history shrank — re-inflate to the 65% band.
-    // Easier: directly re-set messages to a known-size payload.
-    const padBytes = Math.ceil(200_000 * 0.65) * 4 - 200;
-    const refilled = [
-      { role: "user" as const, parts: [{ type: "text" as const, text: "ORIGINAL_TASK_TOKEN" }] },
-      { role: "model" as const, parts: [{ type: "text" as const, text: "x".repeat(padBytes) }] },
-    ];
-    agent.restoreMessages(refilled);
-
-    await collectEvents(agent, "second");
-    // Two warnings total: one initial-trigger path is N/A because the first
-    // turn hit 80%, but the new climb into 65% must rearm and warn.
     expect(events.filter((e) => e.type === "compact_threshold_warned")).toHaveLength(1);
+    expect(events.filter((e) => e.type === "compact_completed")).toHaveLength(0);
+
+    // Climb into the auto-compact band.
+    const effectiveWindow = Math.min(
+      contextWindowFor("claude-sonnet-4-6"),
+      COMPACTION_TARGET_TOKENS,
+    );
+    const fill = (ratio: number) => {
+      const padBytes = Math.ceil(effectiveWindow * ratio) * 4 - 200;
+      agent.restoreMessages([
+        { role: "user", parts: [{ type: "text", text: "ORIGINAL_TASK_TOKEN" }] },
+        { role: "model", parts: [{ type: "text", text: "x".repeat(padBytes) }] },
+      ]);
+    };
+
+    fill(0.8);
+    await collectEvents(agent, "second");
+    expect(events.filter((e) => e.type === "compact_completed")).toHaveLength(1);
+
+    // Re-fill the 60–75% band. If re-arm is broken, no second warning.
+    fill(0.65);
+    await collectEvents(agent, "third");
+
+    expect(events.filter((e) => e.type === "compact_threshold_warned")).toHaveLength(2);
+  });
+
+  it("does not run auto-compact in plan mode (read-only exploration)", async () => {
+    const { agent, events } = makeAgentAtRatio(0.8, "claude-sonnet-4-6");
+
+    // Drain a plan-mode turn. Even though ratio is above the trigger,
+    // plan mode is read-only exploration and shouldn't spend tokens on a
+    // compaction round-trip — the next react turn will trigger it.
+    const planEvents = [];
+    for await (const e of agent.run("plan something", "plan")) planEvents.push(e);
+
+    expect(events.some((e) => e.type === "compact_started")).toBe(false);
+    expect(events.some((e) => e.type === "compact_completed")).toBe(false);
+    expect(planEvents.some((e) => e.type === "notice")).toBe(false);
   });
 
   it("fail-open: compactionClient error yields a notice and does not throw", async () => {

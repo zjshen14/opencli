@@ -159,4 +159,50 @@ describe("scoreScenario — file checks", () => {
     );
     expect(score).toBe("fail");
   });
+
+  it("passes when notContains overlaps as a substring of contains (e.g. == inside ===)", () => {
+    // Regression: fix-strict-equality.yaml has contains: '=== ""' and
+    // notContains: '== ""'. The correctly fixed code (s === "") contains
+    // both — the scorer must strip `contains` matches before checking
+    // `notContains` so this passes instead of false-failing.
+    const { score } = scoreScenario(
+      makeScenario({
+        category: "bug-fix",
+        expected: {
+          files: {
+            "src/utils.ts": { contains: '=== ""', notContains: '== ""' },
+          },
+        },
+      }),
+      makeResult({
+        files: { "src/utils.ts": 'function f(s) { if (s === "") return s; }' },
+      }),
+    );
+    expect(score).toBe("pass");
+  });
+
+  it("still fails when the forbidden pattern appears outside any contains match", () => {
+    // Edge case for the substring-overlap fix: if the file has BOTH a correct
+    // `===` AND a residual `==` somewhere else, the notContains check should
+    // still fire on the residual.
+    const { score } = scoreScenario(
+      makeScenario({
+        category: "bug-fix",
+        expected: {
+          files: {
+            "src/utils.ts": { contains: '=== ""', notContains: '== ""' },
+          },
+        },
+      }),
+      makeResult({
+        // Two functions: one fixed, one still buggy. The buggy `== ""` must
+        // still trip notContains.
+        files: {
+          "src/utils.ts":
+            'function f(s) { if (s === "") return s; }\nfunction g(s) { if (s == "") return s; }',
+        },
+      }),
+    );
+    expect(score).toBe("fail");
+  });
 });

@@ -1,0 +1,15 @@
+id: multi-edit-coordinated-fixes
+category: bug-fix
+description: Use multi_edit to apply two coordinated fixes to utils.ts in one atomic operation
+prompt: "src/utils.ts has two bugs: sum() crashes on empty array (the reduce call is missing an initial accumulator value), and capitalize() uses loose equality (== instead of ===) for the empty-string check. Use the multi_edit tool to fix both in a single atomic operation rather than calling edit twice."
+fixture: mini-ts-bugs
+expected:
+  files:
+    src/utils.ts:
+      contains:
+        - "reduce((a, b) => a + b, 0)"
+        - '=== ""'
+      # The leading-space form pins the pre-fix loose-equality bug; the scorer
+      # also strips `contains` matches before checking `notContains` so
+      # `=== ""` doesn't false-fail.
+      notContains: ' == ""'

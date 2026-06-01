@@ -7,4 +7,8 @@ expected:
   files:
     src/utils.ts:
       contains: '=== ""'
-      notContains: '== ""'
+      # Leading space + " ==" is the original loose-equality form. The scorer
+      # also strips `contains` matches before checking `notContains` so the
+      # `==` inside `===` no longer false-fails, but the leading space here
+      # keeps the YAML self-documenting about what we're forbidding.
+      notContains: ' == ""'

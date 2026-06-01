@@ -406,6 +406,7 @@ src/skills/
     gh-pr/       Open, review, check CI, merge GitHub PRs
     branch/      Create feature branches tied to issue numbers
     new-skill/   Scaffold a custom SKILL.md interactively (disable-agent-invocation)
+    changelog/   Generate a changelog from recent git history
 ```
 
 #### Discovery priority (first match wins)

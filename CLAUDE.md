@@ -73,7 +73,7 @@ src/
   skills/
     registry.ts     # Discover SKILL.md files across 4 scoped directories
     loader.ts       # Parse SKILL.md frontmatter, !{cmd} preprocessing, $ARGUMENTS substitution
-    builtin/        # review, commit, explain, debug, test, gh-issue, gh-pr, branch, run-tests, typecheck, lint, new-skill
+    builtin/        # review, commit, explain, debug, test, gh-issue, gh-pr, branch, run-tests, typecheck, lint, new-skill, changelog
   mcp/            # MCP integration — bridges external tool servers into ToolRegistry
     types.ts        # McpStdioServer, McpHttpServer, McpServerConfig, McpConfig, McpToolInfo
     config.ts       # loadMcpConfig(agentDir) — reads ~/.opencli/mcp.json; expands ${VAR} refs

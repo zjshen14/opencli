@@ -64,6 +64,8 @@ describe("bashTool.requiresConfirmation", () => {
     expect(needs("git show HEAD")).toBe(false);
     expect(needs("git branch -a")).toBe(false);
     expect(needs("git remote -v")).toBe(false);
+    expect(needs("git show-ref --heads")).toBe(false);
+    expect(needs("git cat-file -t HEAD")).toBe(false);
   });
 
   it("does not require confirmation for npm read commands", () => {
@@ -72,6 +74,23 @@ describe("bashTool.requiresConfirmation", () => {
     expect(needs("npm run typecheck")).toBe(false);
     expect(needs("npm run lint")).toBe(false);
     expect(needs("npm run format:check")).toBe(false);
+    expect(needs("npm view react version")).toBe(false);
+    expect(needs("npm info typescript")).toBe(false);
+  });
+
+  it("does not require confirmation for additional read-only utilities", () => {
+    expect(needs("tree src/")).toBe(false);
+    expect(needs("tree -L 2")).toBe(false);
+    expect(needs("realpath ./src/index.ts")).toBe(false);
+    expect(needs("basename /some/path/file.ts")).toBe(false);
+    expect(needs("dirname /some/path/file.ts")).toBe(false);
+    expect(needs("du -sh dist/")).toBe(false);
+    expect(needs("df -h")).toBe(false);
+    expect(needs("cut -d: -f1 /etc/passwd")).toBe(false);
+    expect(needs("column -t data.txt")).toBe(false);
+    expect(needs("shasum -a 256 package.json")).toBe(false);
+    expect(needs("md5sum dist/index.js")).toBe(false);
+    expect(needs("cksum file.txt")).toBe(false);
   });
 
   it("requires confirmation for git write commands", () => {

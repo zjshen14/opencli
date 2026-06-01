@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { writeFile, mkdir, rm, readFile } from "node:fs/promises";
+import { writeFile, mkdir, mkdtemp, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { readTool } from "./read.js";
@@ -213,6 +213,17 @@ describe("grepTool", () => {
 // --- multi_edit ---
 
 describe("multiEditTool", () => {
+  let multiEditDir: string;
+
+  // mkdtemp creates a directory with a kernel-allocated random suffix, sidestepping
+  // CodeQL's "insecure temporary file" rule that flags fixed names in os.tmpdir().
+  beforeEach(async () => {
+    multiEditDir = await mkdtemp(join(tmpdir(), "opencli-multi-edit-"));
+  });
+  afterEach(async () => {
+    await rm(multiEditDir, { recursive: true, force: true });
+  });
+
   function makeRegistry(): ToolRegistry {
     const registry = new ToolRegistry();
     registry.register(editTool);
@@ -221,7 +232,7 @@ describe("multiEditTool", () => {
   }
 
   it("applies multiple edits in order via the registry", async () => {
-    const path = join(tmpDir, "multi.ts");
+    const path = join(multiEditDir, "multi.ts");
     await writeFile(path, `const a = 1;\nconst b = 2;\nconst c = 3;\n`);
     const registry = makeRegistry();
     const result = await registry.execute("multi_edit", {
@@ -239,7 +250,7 @@ describe("multiEditTool", () => {
   });
 
   it("stops on the first failing edit and returns its error", async () => {
-    const path = join(tmpDir, "stop.ts");
+    const path = join(multiEditDir, "stop.ts");
     await writeFile(path, `const x = 1;\n`);
     const registry = makeRegistry();
     const result = await registry.execute("multi_edit", {

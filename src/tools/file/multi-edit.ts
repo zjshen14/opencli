@@ -4,9 +4,12 @@ import type { Tool } from "../base.js";
 export const multiEditTool: Tool = {
   name: "multi_edit",
   description:
-    "Apply multiple sequential edits to a file as a single confirmed operation. Each edit's old_string must appear exactly once in the file at the time it is applied.",
+    "Apply multiple sequential edits to a file as a single confirmed operation. " +
+    "Each edit's old_string must appear exactly once in the file at the time it is applied. " +
+    "Edits are applied in order; if any edit fails, the operation stops at that point " +
+    "(earlier edits are NOT rolled back — use /rewind or git to undo the partial state).",
   composedOf: ["edit"],
-  atomic: true,
+  singleConfirmation: true,
   parameters: {
     type: "object",
     properties: {
@@ -33,7 +36,11 @@ export const multiEditTool: Tool = {
   },
   async execute({ file_path, edits }, ctx) {
     if (!ctx) {
-      return { success: false, output: "", error: "multi_edit requires an execution context" };
+      return {
+        success: false,
+        output: "",
+        error: "multi_edit must be invoked via ToolRegistry, not called directly.",
+      };
     }
     const editList = edits as Array<{ old_string: string; new_string: string }>;
     for (const edit of editList) {

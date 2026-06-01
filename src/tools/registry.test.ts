@@ -154,7 +154,7 @@ describe("ToolRegistry", () => {
       description: "Composed tool",
       parameters: { type: "object", properties: {} },
       composedOf: ["sub"],
-      atomic: true,
+      singleConfirmation: true,
       execute: async (_params, ctx) => {
         const sub = await ctx!.registry.execute("sub", {});
         return { success: true, output: `composed:${sub.output}` };
@@ -163,5 +163,64 @@ describe("ToolRegistry", () => {
     const result = await registry.execute("composed", {});
     expect(result.success).toBe(true);
     expect(result.output).toBe("composed:sub-result");
+  });
+
+  it("rejects a composed tool that delegates to a confirmation-gated sub-tool without singleConfirmation", async () => {
+    // Safety invariant: composition must not silently bypass user confirmation.
+    // If a sub-tool's requiresConfirmation predicate would fire, the composing
+    // tool must either set singleConfirmation: true (so its own user-prompt
+    // covers the composite) or stop composing that sub-tool.
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "dangerous",
+      description: "A sub-tool that requires confirmation",
+      parameters: { type: "object", properties: {} },
+      requiresConfirmation: () => true,
+      execute: async () => ({ success: true, output: "executed dangerous" }),
+    });
+    registry.register({
+      name: "unsafe_composer",
+      description: "Composes a confirmation-gated tool without owning the confirmation",
+      parameters: { type: "object", properties: {} },
+      composedOf: ["dangerous"],
+      // Note: singleConfirmation NOT set — this should fail at execute time.
+      execute: async (_params, ctx) => {
+        return ctx!.registry.execute("dangerous", {});
+      },
+    });
+
+    const result = await registry.execute("unsafe_composer", {});
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/singleConfirmation: true/);
+    expect(result.error).toMatch(/dangerous/);
+    expect(result.error).toMatch(/unsafe_composer/);
+  });
+
+  it("allows a composed tool to delegate to a confirmation-gated sub-tool when singleConfirmation is true", async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: "gated",
+      description: "A sub-tool that requires confirmation",
+      parameters: { type: "object", properties: {} },
+      requiresConfirmation: () => true,
+      execute: async () => ({ success: true, output: "executed gated" }),
+    });
+    registry.register({
+      name: "safe_composer",
+      description: "Composes a confirmation-gated tool and owns the confirmation",
+      parameters: { type: "object", properties: {} },
+      composedOf: ["gated"],
+      singleConfirmation: true,
+      requiresConfirmation: () => true,
+      execute: async (_params, ctx) => {
+        return ctx!.registry.execute("gated", {});
+      },
+    });
+
+    const result = await registry.execute("safe_composer", {});
+
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("executed gated");
   });
 });

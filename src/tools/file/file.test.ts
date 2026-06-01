@@ -258,11 +258,11 @@ describe("multiEditTool", () => {
   it("returns error when called without execution context", async () => {
     const result = await multiEditTool.execute({ file_path: "any.ts", edits: [] });
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/execution context/);
+    expect(result.error).toMatch(/must be invoked via ToolRegistry/);
   });
 
-  it("reports atomic and composedOf metadata", () => {
-    expect(multiEditTool.atomic).toBe(true);
+  it("reports singleConfirmation and composedOf metadata", () => {
+    expect(multiEditTool.singleConfirmation).toBe(true);
     expect(multiEditTool.composedOf).toEqual(["edit"]);
   });
 });

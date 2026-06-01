@@ -14,9 +14,12 @@ export interface ToolRunner {
   execute(name: string, params: Record<string, unknown>): Promise<ToolResult>;
 }
 
+/** Context passed to a tool's execute() — gives composed tools a way to call
+ *  sub-tools by name. Optional because tools may also be invoked directly in
+ *  tests. The registry always populates it when invoking a tool via
+ *  `ToolRegistry.execute()`. */
 export interface ToolExecutionContext {
   registry: ToolRunner;
-  tmpDir?: string;
 }
 
 export interface Tool {
@@ -31,8 +34,16 @@ export interface Tool {
   validate?: (params: Record<string, unknown>) => string | null;
   /** When true, the executor middle-truncates output that exceeds MAX_TOOL_OUTPUT. */
   truncateOutput?: boolean;
-  /** Names of sub-tools this tool delegates to internally. Informational for the executor. */
+  /** Names of sub-tools this tool delegates to internally via ToolExecutionContext.
+   *  Used by ToolRegistry to enforce a safety invariant: a composed tool may only
+   *  delegate to sub-tools that themselves require confirmation if the composed
+   *  tool sets `singleConfirmation: true` (so the user is prompted once for the
+   *  composite operation rather than skipping confirmation entirely). */
   composedOf?: string[];
-  /** When true, requiresConfirmation fires once for this tool; sub-tool calls skip confirmation. */
-  atomic?: boolean;
+  /** When true, the parent tool's confirmation is treated as covering every
+   *  sub-tool it invokes via ctx.registry. Required to compose any sub-tool
+   *  that has its own requiresConfirmation predicate. Note: this controls
+   *  CONFIRMATION semantics only — failures inside the composed operation do
+   *  NOT roll back; the snapshot/rewind system handles undo separately. */
+  singleConfirmation?: boolean;
 }

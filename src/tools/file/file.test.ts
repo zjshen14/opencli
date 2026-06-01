@@ -1,12 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { writeFile, mkdir, rm } from "node:fs/promises";
+import { writeFile, mkdir, mkdtemp, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { readTool } from "./read.js";
 import { writeTool } from "./write.js";
 import { editTool } from "./edit.js";
+import { multiEditTool } from "./multi-edit.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
+import { ToolRegistry } from "../registry.js";
 
 let tmpDir: string;
 
@@ -205,5 +207,73 @@ describe("grepTool", () => {
     const result = await grepTool.execute({ pattern: "[invalid", path: tmpDir });
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/Invalid regex/);
+  });
+});
+
+// --- multi_edit ---
+
+describe("multiEditTool", () => {
+  let multiEditDir: string;
+
+  // mkdtemp creates a directory with a kernel-allocated random suffix, sidestepping
+  // CodeQL's "insecure temporary file" rule that flags fixed names in os.tmpdir().
+  beforeEach(async () => {
+    multiEditDir = await mkdtemp(join(tmpdir(), "opencli-multi-edit-"));
+  });
+  afterEach(async () => {
+    await rm(multiEditDir, { recursive: true, force: true });
+  });
+
+  function makeRegistry(): ToolRegistry {
+    const registry = new ToolRegistry();
+    registry.register(editTool);
+    registry.register(multiEditTool);
+    return registry;
+  }
+
+  it("applies multiple edits in order via the registry", async () => {
+    const path = join(multiEditDir, "multi.ts");
+    await writeFile(path, `const a = 1;\nconst b = 2;\nconst c = 3;\n`);
+    const registry = makeRegistry();
+    const result = await registry.execute("multi_edit", {
+      file_path: path,
+      edits: [
+        { old_string: "const a = 1;", new_string: "const a = 10;" },
+        { old_string: "const b = 2;", new_string: "const b = 20;" },
+      ],
+    });
+    expect(result.success).toBe(true);
+    const content = await readFile(path, "utf8");
+    expect(content).toContain("const a = 10;");
+    expect(content).toContain("const b = 20;");
+    expect(content).toContain("const c = 3;");
+  });
+
+  it("stops on the first failing edit and returns its error", async () => {
+    const path = join(multiEditDir, "stop.ts");
+    await writeFile(path, `const x = 1;\n`);
+    const registry = makeRegistry();
+    const result = await registry.execute("multi_edit", {
+      file_path: path,
+      edits: [
+        { old_string: "not present", new_string: "irrelevant" },
+        { old_string: "const x = 1;", new_string: "const x = 99;" },
+      ],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/not found/);
+    const content = await readFile(path, "utf8");
+    expect(content).toContain("const x = 1;");
+  });
+
+  it("returns error when called without execution context", async () => {
+    const result = await multiEditTool.execute({ file_path: "any.ts", edits: [] });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/must be invoked via ToolRegistry/);
+  });
+
+  it("reports singleConfirmation and composedOf metadata", () => {
+    expect(multiEditTool.singleConfirmation).toBe(true);
+    expect(multiEditTool.composedOf).toEqual(["edit"]);
   });
 });

@@ -1,6 +1,7 @@
 export { readTool } from "./file/read.js";
 export { writeTool } from "./file/write.js";
 export { editTool } from "./file/edit.js";
+export { multiEditTool } from "./file/multi-edit.js";
 export { globTool } from "./file/glob.js";
 export { grepTool } from "./file/grep.js";
 export { lsTool } from "./file/ls.js";
@@ -15,6 +16,7 @@ import { ToolRegistry } from "./registry.js";
 import { readTool } from "./file/read.js";
 import { writeTool } from "./file/write.js";
 import { editTool } from "./file/edit.js";
+import { multiEditTool } from "./file/multi-edit.js";
 import { globTool } from "./file/glob.js";
 import { grepTool } from "./file/grep.js";
 import { lsTool } from "./file/ls.js";
@@ -39,6 +41,7 @@ export function createDefaultRegistry(model?: string, runner?: SandboxRunner): T
     readTool,
     writeTool,
     editTool,
+    multiEditTool,
     globTool,
     grepTool,
     lsTool,

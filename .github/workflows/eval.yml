@@ -1,0 +1,43 @@
+name: Eval Matrix
+
+# Manual-only trigger. Real API calls cost real money (~$1-2 per full 3-provider
+# run) so we do NOT run on PR. See docs/design/d1-eval-harness.md.
+on:
+  workflow_dispatch:
+
+jobs:
+  eval:
+    name: Run cross-provider eval matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      EVAL_JSON_OUT: eval-results.json
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run eval matrix
+        run: npm run eval
+
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_id }}
+          path: eval-results.json
+          if-no-files-found: error

@@ -697,9 +697,11 @@ These live in `src/eval/*.test.ts` and run as part of `npm test` (no API calls).
 | Command | When | Cost |
 |---|---|---|
 | `npm test` | Every PR (automated) | Free — harness unit tests only |
-| `npm run eval` | Manual trigger on PRs; auto on release | ~$1–5 per full run (~10–20 min at 5 s/scenario avg) |
+| `npm run eval` | Manual trigger via [Eval Matrix workflow](../../.github/workflows/eval.yml) (workflow_dispatch only) | ~$1–5 per full run (~5–20 min depending on column count) |
 
-`EVAL_JSON_OUT=results.json npm run eval` writes a machine-readable artifact for regression diffing. CI can archive this and compare to the previous release using `jq '.passRates'`.
+`EVAL_JSON_OUT=results.json npm run eval` writes a machine-readable artifact for regression diffing. The workflow uploads the JSON as a run artifact; committed baselines live under [`docs/eval/`](../eval/).
+
+**Why not PR-triggered.** Real API calls cost money and are subject to provider tail latency / rate limits. Running on every PR would be hostile to contributors (cost) and produce flaky red builds (latency). Manual-only refreshes anchor the baseline at meaningful points (pre-Phase-B, post-B2, etc.).
 
 ---
 

@@ -1,0 +1,158 @@
+{
+  "timestamp": "2026-06-01T17:41:25.740Z",
+  "providers": [
+    "gemini"
+  ],
+  "scenarios": [
+    {
+      "id": "add-clamp-function",
+      "category": "feature-add",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "add-counter-reset",
+      "category": "feature-add",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "add-input-validation",
+      "category": "feature-add",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "add-math-tests",
+      "category": "multi-file",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "add-power-function",
+      "category": "feature-add",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "add-version-constant",
+      "category": "feature-add",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "create-and-wire-formatter",
+      "category": "multi-file",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "explain-counter-class",
+      "category": "read-explain",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "explain-math-module",
+      "category": "read-explain",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "explain-task-interface",
+      "category": "read-explain",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "extract-duplicate-validation",
+      "category": "refactor",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "fix-missing-return",
+      "category": "bug-fix",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "fix-null-guard",
+      "category": "bug-fix",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "fix-off-by-one",
+      "category": "bug-fix",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "fix-strict-equality",
+      "category": "bug-fix",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "fix-subtract-operator",
+      "category": "bug-fix",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "list-util-exports",
+      "category": "read-explain",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "multi-edit-coordinated-fixes",
+      "category": "bug-fix",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "rename-internal-variable",
+      "category": "refactor",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "split-long-function",
+      "category": "refactor",
+      "results": {
+        "gemini": "pass"
+      }
+    },
+    {
+      "id": "update-interface-and-impl",
+      "category": "multi-file",
+      "results": {
+        "gemini": "pass"
+      }
+    }
+  ],
+  "passRates": {
+    "gemini": 1
+  }
+}

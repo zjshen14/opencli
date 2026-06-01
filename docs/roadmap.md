@@ -77,7 +77,7 @@ See [`docs/evaluation.md`](evaluation.md) for the full strategy, scoring rubric,
 | # | Milestone | Sequencing |
 |---|---|---|
 | **D0** | **Eval foundation** | Now — document current coverage; publish rubric |
-| **D1** | **Scenario suite + provider parity matrix** | Before Phase B — 20 tasks × N providers in CI; parity baseline must exist before B-work begins |
+| **D1** | **Scenario suite + provider parity matrix** | Before Phase B — 20 tasks × N providers in CI; parity baseline must exist before B-work begins. First baseline published 2026-06-01: [`docs/eval/baseline-2026-06-01.md`](eval/baseline-2026-06-01.md) (Gemini only; Anthropic + OpenAI columns pending repo secrets). |
 | **D2** | **Contract evals** (sandbox, plan mode, HITL, headless schema) | Alongside A6 — all A-phase properties must be testable before A closes |
 | **D3** | **SWE-bench Verified harness** | After B5a — stable default config needed before publishing a number |
 | **D4** | **Custom cross-vendor routing benchmark** | After B5b — publishable artifact comparing single-vendor vs cross-vendor routing |

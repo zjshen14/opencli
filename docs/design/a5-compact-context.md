@@ -1,6 +1,6 @@
 # Design: A5 — /compact + /context
 
-_Status: A5a Implemented — merged in 4aba15e (2026-05-17), closes [#112](https://github.com/zjshen14/opencli/issues/112). A5b Ready for implementation — Phase 2 data collected from the card_trade session, deferred risks resolved below; tracking [#113](https://github.com/zjshen14/opencli/issues/113). Phase: [Roadmap A5](../roadmap.md)._
+_Status: A5a Implemented — merged in 4aba15e (2026-05-17), closes [#112](https://github.com/zjshen14/opencli/issues/112). A5b Implemented — merged in 0042ada (2026-05-31), closes [#113](https://github.com/zjshen14/opencli/issues/113). Phase: [Roadmap A5](../roadmap.md)._
 
 ---
 
@@ -16,14 +16,14 @@ _Status: A5a Implemented — merged in 4aba15e (2026-05-17), closes [#112](https
 
 The feedback from the [design review](https://github.com/zjshen14/opencli/issues/26#issuecomment-4469196098) identified critical gaps in auto-compact logic (mid-task triggers, trajectory elongation risk, token estimation accuracy). Ship in two stages:
 
-### **A5a — Manual context compaction (ready to implement)**
+### **A5a — Manual context compaction (implemented)**
 - User-triggered `/compact` command with structured LLM summary
 - `/context` command showing token usage + percentage
 - Core algorithm: tail-keep + error-signal extraction
 - **No auto-compact.** Collects real-session data for Phase 2 validation.
 - ~6 files, ~2 days to implement + test
 
-### **A5b — Auto-compact with safety gates (ready for implementation)**
+### **A5b — Auto-compact with safety gates (implemented)**
 - Auto-compact fires at **turn boundary** when `estimatedTokens / contextWindowFor(model) >= 0.75`
 - Token estimation stays on `JSON.stringify.length / 4` — Phase 2 data shows it's accurate enough as a *trigger* (off by a constant factor; threshold tuning absorbs it). Provider-API token counting deferred to a future change once a concrete reason to be exact appears.
 - Config gate: `autoCompact: true` default once landed (validated by A5a + Phase 2). `autoCompact: false` opts out.

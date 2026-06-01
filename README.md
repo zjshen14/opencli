@@ -191,6 +191,8 @@ Environment variables take precedence over config file:
 | `OPENCLI_MODEL` | Model override (beats `--model` and config) |
 | `OPENCLI_SANDBOX` | Sandbox mode override: `auto` \| `strict` \| `off` |
 | `OPENCLI_SNAPSHOT` | Set to `off` to disable git snapshot/rewind |
+| `OPENCLI_SYSTEM_MD` | Path to a Markdown file that overrides the default system instruction (for prompt hill-climbing) |
+| `OPENCLI_MAX_TOOL_OUTPUT` | Max chars before bash/grep/glob/web_fetch output is middle-truncated (default: 20 000) |
 
 ## Sandbox Isolation
 

@@ -63,7 +63,7 @@ src/
   tools/
     base.ts         # Tool interface + JSONSchema type
     registry.ts     # ToolRegistry: register, execute, list
-    file/           # read, write, edit, glob, grep, ls
+    file/           # read, write, edit, multi_edit, glob, grep, ls
     exec/           # bash (with requiresConfirmation for non-safe commands); sandbox/ (bwrap, sandbox-exec, passthrough)
     web/            # web_fetch tool
     task/           # todo_write and todo_read tools

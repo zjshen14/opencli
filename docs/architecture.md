@@ -266,6 +266,7 @@ src/tools/
     read.ts        Read file contents (offset + limit support).
     write.ts       Create or overwrite files (requiresConfirmation outside CWD).
     edit.ts        Exact old_string → new_string replacement (fails if ambiguous).
+    multi-edit.ts  Apply an ordered list of edits to one file as a single confirmed unit (singleConfirmation).
     glob.ts        Find files by pattern.
     grep.ts        Regex search across file contents.
     ls.ts          List directory contents.
@@ -337,6 +338,12 @@ interface SandboxRunner {
 #### Tool interface
 
 ```typescript
+/** Passed to every tool's execute() by ToolRegistry — gives composed tools a way
+ *  to call sub-tools by name without routing back through the executor's confirmation gate. */
+interface ToolExecutionContext {
+  registry: ToolRunner; // ToolRunner is a minimal subset of ToolRegistry
+}
+
 interface Tool {
   name: string;
   description: string;
@@ -345,7 +352,7 @@ interface Tool {
   /** true = read-only; passed in plan mode. false/undefined = write tool, blocked in plan mode. */
   readonly?: boolean;
 
-  execute: (params: Record<string, unknown>) => Promise<ToolResult>;
+  execute: (params: Record<string, unknown>, ctx?: ToolExecutionContext) => Promise<ToolResult>;
 
   /** Return true to require interactive confirmation before execution. */
   requiresConfirmation?: (args: Record<string, unknown>) => boolean;
@@ -353,6 +360,15 @@ interface Tool {
   /** Return an error string if params are invalid, null if valid.
    *  Called by ToolRegistry.execute() before execute() — after required-field check. */
   validate?: (params: Record<string, unknown>) => string | null;
+
+  /** Names of sub-tools this tool invokes via ctx.registry (tool composition).
+   *  ToolRegistry refuses to run a composed tool that delegates to a confirmation-gated
+   *  sub-tool unless the composing tool also sets singleConfirmation: true. */
+  composedOf?: string[];
+
+  /** When true, the parent confirmation covers all sub-tool invocations.
+   *  Required whenever composedOf includes a tool with requiresConfirmation. */
+  singleConfirmation?: boolean;
 }
 
 interface ToolResult {

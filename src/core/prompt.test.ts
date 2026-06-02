@@ -75,6 +75,12 @@ describe("buildReminder", () => {
     expect(buildReminder(calls)).toContain("verify the change works");
   });
 
+  it("fires test reminder after multi_edit call", () => {
+    const calls = [{ name: "multi_edit", args: { file_path: "foo.ts", edits: [] } }];
+    expect(buildReminder(calls)).toContain("verify the change works");
+    expect(buildReminder(calls)).toContain("don't add features");
+  });
+
   it("fires git reminder only when bash command includes git", () => {
     const gitCall = [{ name: "bash", args: { command: "git status" } }];
     const nonGitCall = [{ name: "bash", args: { command: "npm test" } }];

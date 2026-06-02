@@ -67,10 +67,12 @@ export interface AgentReminder {
   shouldFire: (calls: ReadonlyArray<{ name: string; args: Record<string, unknown> }>) => boolean;
 }
 
+const isWriteCall = (name: string) => name === "write" || name === "edit" || name === "multi_edit";
+
 export const AGENT_REMINDERS: AgentReminder[] = [
   {
     text: "verify the change works — find and run the project's test command before reporting done",
-    shouldFire: (calls) => calls.some((c) => c.name === "write" || c.name === "edit"),
+    shouldFire: (calls) => calls.some((c) => isWriteCall(c.name)),
   },
   {
     text: "never commit or push without an explicit user request",
@@ -79,7 +81,7 @@ export const AGENT_REMINDERS: AgentReminder[] = [
   },
   {
     text: "don't add features or refactoring beyond what was asked",
-    shouldFire: (calls) => calls.some((c) => c.name === "write" || c.name === "edit"),
+    shouldFire: (calls) => calls.some((c) => isWriteCall(c.name)),
   },
 ];
 

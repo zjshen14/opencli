@@ -56,6 +56,12 @@ describe("toolStyle", () => {
     expect(icon).toBe("✎");
   });
 
+  it("returns yellow + ✎ for multi_edit", () => {
+    const { color, icon } = toolStyle("multi_edit");
+    expect(color).toBe("yellow");
+    expect(icon).toBe("✎");
+  });
+
   it("returns cyan + ⟳ for unknown tools", () => {
     const { color, icon } = toolStyle("read");
     expect(color).toBe("cyan");
@@ -73,6 +79,40 @@ describe("formatToolArgs", () => {
       }),
     );
     expect(result).toBe("src/foo.ts");
+  });
+
+  it("returns file_path and edit count for multi_edit", () => {
+    const result = stripAnsi(
+      formatToolArgs("multi_edit", {
+        file_path: "src/foo.ts",
+        edits: [
+          { old_string: "x", new_string: "y" },
+          { old_string: "a", new_string: "b" },
+        ],
+      }),
+    );
+    expect(result).toBe("src/foo.ts  (2 edits)");
+  });
+
+  it("uses singular edit count for multi_edit with one edit", () => {
+    const result = stripAnsi(
+      formatToolArgs("multi_edit", {
+        file_path: "src/foo.ts",
+        edits: [{ old_string: "x", new_string: "y" }],
+      }),
+    );
+    expect(result).toBe("src/foo.ts  (1 edit)");
+  });
+
+  it("does not dump edits JSON for multi_edit display", () => {
+    const result = stripAnsi(
+      formatToolArgs("multi_edit", {
+        file_path: "src/foo.ts",
+        edits: [{ old_string: "very long old string content", new_string: "new" }],
+      }),
+    );
+    expect(result).not.toContain("old_string");
+    expect(result).not.toContain("very long old string content");
   });
 
   it("extracts file_path as primary arg", () => {
@@ -203,6 +243,20 @@ describe("summariseResult", () => {
     it("returns 'written' regardless of result content", () => {
       const result = stripAnsi(summariseResult("write", "anything"));
       expect(result).toContain("written");
+    });
+  });
+
+  describe("multi_edit", () => {
+    it("shows result without name/content collision", () => {
+      const result = stripAnsi(summariseResult("multi_edit", "Applied 3 edits to src/foo.ts"));
+      expect(result).toContain("multi_edit");
+      expect(result).toContain("Applied 3 edits to src/foo.ts");
+    });
+
+    it("preserves spacing between name and result", () => {
+      const result = stripAnsi(summariseResult("multi_edit", "Applied 1 edit to src/bar.ts"));
+      // "multi_edit" followed by spaces then result — no collision
+      expect(result).toMatch(/multi_edit\s+Applied/);
     });
   });
 

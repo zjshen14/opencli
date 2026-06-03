@@ -206,13 +206,18 @@ export type ChalkColor = "magenta" | "yellow" | "cyan" | "white";
 
 export function toolStyle(name: string): { color: ChalkColor; icon: string } {
   if (name === "bash") return { color: "magenta", icon: "❯" };
-  if (name === "write" || name === "edit") return { color: "yellow", icon: "✎" };
+  if (name === "write" || name === "edit" || name === "multi_edit")
+    return { color: "yellow", icon: "✎" };
   return { color: "cyan", icon: "⟳" };
 }
 
 export function formatToolArgs(name: string, args: Record<string, unknown>): string {
   if (name === "edit" && typeof args.file_path === "string") {
     return chalk.dim(args.file_path);
+  }
+  if (name === "multi_edit" && typeof args.file_path === "string") {
+    const n = Array.isArray(args.edits) ? args.edits.length : "?";
+    return chalk.dim(`${args.file_path}  (${n} edit${n === 1 ? "" : "s"})`);
   }
   // pattern before path so grep/glob show the search term rather than the directory
   const pathArg = args.file_path ?? args.pattern ?? args.path ?? args.command ?? null;
@@ -253,6 +258,9 @@ export function summariseResult(name: string, result: string): string {
   }
   if (name === "write") {
     return `${name.padEnd(6)}${chalk.dim("written")}`;
+  }
+  if (name === "multi_edit") {
+    return `multi_edit  ${chalk.dim(trimmed.slice(0, 80))}`;
   }
   if (name === "ls") {
     const entries = trimmed && trimmed !== "(empty directory)" ? trimmed.split("\n").length : 0;

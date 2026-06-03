@@ -192,8 +192,8 @@ Template placeholders: `{CWD}`, `{SESSION_TMP}`, `{TOOL_CATALOG}`, `{GIT_CONTEXT
 **Skill content** is held in a separate `skillContent[]` array, never pruned, tagged as `<skill_content name="...">`. Prepended as a synthetic `## Active Skills` user message when `getMessages()` is called.
 
 **Event-driven reminders** (`AGENT_REMINDERS` in `prompt.ts`): after each tool-execution round, `buildReminder()` appends a short reminder to the last tool result. Currently fires on:
-- `write` or `edit` → "verify the change works — find and run the project's test command"
-- `write` or `edit` → "don't add features or refactoring beyond what was asked"
+- `write`, `edit`, or `multi_edit` → "verify the change works — find and run the project's test command"
+- `write`, `edit`, or `multi_edit` → "don't add features or refactoring beyond what was asked"
 - `bash` with `git` in the command → "never commit or push without an explicit user request"
 Each reminder fires at most once per session.
 
@@ -395,6 +395,7 @@ Only if all three pass is `tool.execute(params)` called.
 | `bash` | Any command not in `SAFE_COMMANDS` allowlist |
 | `write` | Path outside `process.cwd()` |
 | `edit` | Path outside `process.cwd()` |
+| `multi_edit` | Path outside `process.cwd()` |
 
 ---
 

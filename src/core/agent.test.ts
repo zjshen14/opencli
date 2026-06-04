@@ -5,6 +5,7 @@ import { SkillRegistry } from "../skills/registry.js";
 import type { LLMClient } from "../providers/client.js";
 import type { Message, StreamEvent, ToolDefinition } from "../providers/types.js";
 import { contextWindowFor, COMPACTION_TARGET_TOKENS } from "./compact.js";
+import { PERIODIC_REMINDER_INTERVAL } from "./prompt.js";
 
 // A client that always requests the same tool call (never finishes on its own)
 function makeLoopingClient(toolName = "noop", args: Record<string, unknown> = {}): LLMClient {
@@ -805,5 +806,123 @@ describe("Agent activate_skill — conversation well-formedness", () => {
       (p) => p.type === "function_result" && (p as { name: string }).name === "activate_skill",
     );
     expect(hasFnResult).toBe(true);
+  });
+});
+
+describe("Agent periodic reminder injection", () => {
+  it(`appends reminder to the last tool result at turn ${PERIODIC_REMINDER_INTERVAL}`, async () => {
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream() {
+        callCount++;
+        if (callCount <= PERIODIC_REMINDER_INTERVAL) {
+          yield {
+            type: "function_call",
+            id: `c${callCount}`,
+            name: "noop",
+            args: { n: callCount }, // vary args to avoid stuck-loop detection
+          } as StreamEvent;
+        }
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+
+    const agent = new Agent(
+      client,
+      makeNoopRegistry(),
+      new SkillRegistry(),
+      undefined,
+      undefined,
+      PERIODIC_REMINDER_INTERVAL + 5,
+    );
+    const events = await collectEvents(agent, "go");
+
+    const toolResults = events
+      .filter((e) => e.type === "tool_result")
+      .map((e) => e as { type: "tool_result"; result: string; name: string });
+
+    expect(toolResults).toHaveLength(PERIODIC_REMINDER_INTERVAL);
+    // Only the last result (at turn PERIODIC_REMINDER_INTERVAL) carries the reminder
+    const lastResult = toolResults[toolResults.length - 1];
+    expect(lastResult?.result).toContain("[reminder:");
+    expect(lastResult?.result).toContain("commit only when explicitly asked");
+
+    for (const r of toolResults.slice(0, -1)) {
+      expect(r.result).not.toContain("commit only when explicitly asked");
+    }
+  });
+
+  it("does not append reminder before the interval is reached", async () => {
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream() {
+        callCount++;
+        if (callCount < PERIODIC_REMINDER_INTERVAL) {
+          yield {
+            type: "function_call",
+            id: `c${callCount}`,
+            name: "noop",
+            args: { n: callCount },
+          } as StreamEvent;
+        }
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+
+    const agent = new Agent(
+      client,
+      makeNoopRegistry(),
+      new SkillRegistry(),
+      undefined,
+      undefined,
+      PERIODIC_REMINDER_INTERVAL + 5,
+    );
+    const events = await collectEvents(agent, "go");
+
+    const toolResults = events
+      .filter((e) => e.type === "tool_result")
+      .map((e) => e as { type: "tool_result"; result: string });
+
+    for (const r of toolResults) {
+      expect(r.result).not.toContain("commit only when explicitly asked");
+    }
+  });
+
+  it("fires again at the second multiple of the interval", async () => {
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream() {
+        callCount++;
+        if (callCount <= PERIODIC_REMINDER_INTERVAL * 2) {
+          yield {
+            type: "function_call",
+            id: `c${callCount}`,
+            name: "noop",
+            args: { n: callCount },
+          } as StreamEvent;
+        }
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+
+    const agent = new Agent(
+      client,
+      makeNoopRegistry(),
+      new SkillRegistry(),
+      undefined,
+      undefined,
+      PERIODIC_REMINDER_INTERVAL * 2 + 5,
+    );
+    const events = await collectEvents(agent, "go");
+
+    const toolResults = events
+      .filter((e) => e.type === "tool_result")
+      .map((e) => e as { type: "tool_result"; result: string });
+
+    const reminderResults = toolResults.filter((r) =>
+      r.result.includes("commit only when explicitly asked"),
+    );
+    // Reminders fired at turns 5 and 10
+    expect(reminderResults).toHaveLength(2);
   });
 });

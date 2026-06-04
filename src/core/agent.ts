@@ -5,7 +5,7 @@ import { toolToDefinition, activateSkillDefinition } from "../providers/schema.j
 import { ContextManager } from "./context.js";
 import { executeCalls } from "./executor.js";
 import type { ConfirmFn } from "./executor.js";
-import { buildReminder, buildPlanSuffix } from "./prompt.js";
+import { buildReminder, buildPlanSuffix, buildPeriodicReminder } from "./prompt.js";
 import type { FunctionCallPart, Message } from "../providers/types.js";
 import type { ObservabilityHandler } from "./observability.js";
 import type { SnapshotManager } from "../state/snapshot.js";
@@ -306,16 +306,18 @@ export class Agent {
         envErrorCount = 0;
       }
 
-      // Append an event-driven reminder to the last tool result based on what
-      // tools just ran — fires only when relevant (e.g. edit → "run tests").
-      const reminder = buildReminder(
+      // Append reminders to the last tool result: event-driven (fires when relevant
+      // tools run) and periodic (every N turns to counter long-session drift).
+      const eventReminder = buildReminder(
         pendingCalls.map((c) => ({ name: c.name, args: c.args })),
         firedReminders,
       );
-      if (reminder && results.length > 0) {
+      const periodicReminder = buildPeriodicReminder(turns);
+      const combined = eventReminder + periodicReminder;
+      if (combined && results.length > 0) {
         results[results.length - 1] = {
           ...results[results.length - 1],
-          result: results[results.length - 1].result + reminder,
+          result: results[results.length - 1].result + combined,
         };
       }
 

@@ -5,7 +5,7 @@ import { loadSettings, saveSettings } from "../state/settings.js";
 import { selectKey } from "./input.js";
 
 // Pattern format for deny rules: "toolName(argGlob)" where * matches any chars.
-// bash → matches args.command; write/edit → args.file_path; others → JSON(args).
+// bash → matches args.command; write/edit/multi_edit → args.file_path; others → JSON(args).
 // Example: "bash(rm -rf *)" or "write(src/cli/*)" or "bash(*)" (all bash).
 
 export function globMatch(pattern: string, str: string): boolean {
@@ -23,7 +23,7 @@ export function matchesDenyPattern(
   const primaryArg =
     toolName === "bash"
       ? String(args.command ?? "")
-      : toolName === "write" || toolName === "edit"
+      : toolName === "write" || toolName === "edit" || toolName === "multi_edit"
         ? String(args.file_path ?? "")
         : JSON.stringify(args);
 
@@ -102,7 +102,7 @@ export async function createConfirmFn(): Promise<ConfirmBundle> {
     const detail =
       toolName === "bash"
         ? (args.command as string)
-        : toolName === "write" || toolName === "edit"
+        : toolName === "write" || toolName === "edit" || toolName === "multi_edit"
           ? (args.file_path as string)
           : JSON.stringify(args);
 

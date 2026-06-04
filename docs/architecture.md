@@ -562,7 +562,7 @@ The HITL confirmation function (`createConfirmFn` in `repl.ts`) persists "Yes al
 **Allow vs deny formats are different:**
 
 - `allow` entries use the exact-args key format `toolName:JSON(args)` (e.g. `bash:{"command":"git status"}`) or the tool-wildcard `toolName:*`. These are exact-match strings written by the "Yes always" flow.
-- `deny` entries use a glob-pattern format `toolName(argGlob)` where `*` matches any sequence (e.g. `bash(rm -rf *)`, `write(.env*)`, `bash(*)` to deny all bash). The matched arg is `args.command` for `bash`, `args.file_path` for `write`/`edit`, and `JSON.stringify(args)` for any other tool. Pattern globbing is implemented in `src/cli/confirm.ts` (`globMatch` + `matchesDenyPattern`).
+- `deny` entries use a glob-pattern format `toolName(argGlob)` where `*` matches any sequence (e.g. `bash(rm -rf *)`, `write(.env*)`, `bash(*)` to deny all bash). The matched arg is `args.command` for `bash`, `args.file_path` for `write`/`edit`/`multi_edit`, and `JSON.stringify(args)` for any other tool. Pattern globbing is implemented in `src/cli/confirm.ts` (`globMatch` + `matchesDenyPattern`).
 
 **Order of evaluation in `createConfirmFn`:** `deny` patterns are checked first and short-circuit to a deny decision regardless of any matching `allow` entry. Only if no deny pattern matches does the function consult the `allow` list and (failing that) prompt the user interactively. Both global and project-scoped `deny` lists are unioned.
 

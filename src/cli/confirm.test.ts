@@ -77,6 +77,22 @@ describe("matchesDenyPattern", () => {
     expect(matchesDenyPattern(patterns, "bash", { command: "git status" })).toBe(false);
   });
 
+  it("matches multi_edit patterns against file_path", () => {
+    const patterns = ["multi_edit(.env*)"];
+    expect(
+      matchesDenyPattern(patterns, "multi_edit", {
+        file_path: ".env",
+        edits: [{ old_string: "a", new_string: "b" }],
+      }),
+    ).toBe(true);
+    expect(
+      matchesDenyPattern(patterns, "multi_edit", {
+        file_path: "src/foo.ts",
+        edits: [{ old_string: "a", new_string: "b" }],
+      }),
+    ).toBe(false);
+  });
+
   it("uses JSON stringify for unknown tools", () => {
     const patterns = ['read({"file_path":"secret.txt"})'];
     expect(matchesDenyPattern(patterns, "read", { file_path: "secret.txt" })).toBe(true);
@@ -101,6 +117,12 @@ describe("createForcesConfirmationFn", () => {
     const fn = createForcesConfirmationFn(["write(src/*)"]);
     expect(fn("write", { file_path: "src/index.ts" })).toBe(true);
     expect(fn("write", { file_path: "test/index.ts" })).toBe(false);
+  });
+
+  it("returns true when multi_edit path matches an ask pattern", () => {
+    const fn = createForcesConfirmationFn(["multi_edit(.env*)"]);
+    expect(fn("multi_edit", { file_path: ".env", edits: [] })).toBe(true);
+    expect(fn("multi_edit", { file_path: "src/foo.ts", edits: [] })).toBe(false);
   });
 
   it("returns false for a non-matching tool name", () => {

@@ -5,7 +5,7 @@ import { toolToDefinition, activateSkillDefinition } from "../providers/schema.j
 import { ContextManager } from "./context.js";
 import { executeCalls } from "./executor.js";
 import type { ConfirmFn } from "./executor.js";
-import { buildReminder, buildPlanSuffix } from "./prompt.js";
+import { buildReminder, buildPlanSuffix, buildPeriodicReminder } from "./prompt.js";
 import type {
   FunctionCallPart,
   FunctionResultPart,
@@ -409,14 +409,16 @@ export class Agent {
     pendingCalls: FunctionCallPart[],
     results: FunctionResultPart[],
   ): void {
-    const reminder = buildReminder(
+    const eventReminder = buildReminder(
       pendingCalls.map((c) => ({ name: c.name, args: c.args })),
       state.firedReminders,
     );
-    if (reminder && results.length > 0) {
+    const periodicReminder = buildPeriodicReminder(state.turns);
+    const combined = eventReminder + periodicReminder;
+    if (combined && results.length > 0) {
       results[results.length - 1] = {
         ...results[results.length - 1],
-        result: results[results.length - 1].result + reminder,
+        result: results[results.length - 1].result + combined,
       };
     }
   }

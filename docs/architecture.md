@@ -1,6 +1,6 @@
 # Architecture — OpenCLI
 
-_Last updated: 2026-05-09. Keep in sync with the code — update this doc in the same commit as any structural change it describes._
+_Last updated: 2026-06-05. Keep in sync with the code — update this doc in the same commit as any structural change it describes._
 
 ## Design principles
 
@@ -114,7 +114,7 @@ src/core/
 
 5. If no function calls → yield { type: "done" }, return.
 
-6. Safety guards (checked each turn before tool execution):
+6. Safety guards (before tool execution):
    a. Max-turns (default 50, --max-turns to override):
       if turns > maxTurns → yield error event, return.
    b. Stuck-loop (3 identical consecutive call signatures):
@@ -122,10 +122,15 @@ src/core/
 
 7. Execute all pending calls via executeCalls() (see executor below).
 
-8. Append event-driven reminders to last tool result (AGENT_REMINDERS).
+8. Env-error-loop guard (after tool execution): if the same OS-level error
+   pattern (EPERM, EACCES, ENOSPC, EMFILE, ENOMEM, "permission denied", etc.)
+   appears in tool results across 3 consecutive turns → yield error event, return.
+   These are environment conditions that code changes cannot fix.
+
+9. Append event-driven reminders to last tool result (AGENT_REMINDERS).
    Each reminder fires at most once per session (firedReminders Set).
 
-9. Append tool results as a user message to context. Go to step 3.
+10. Append tool results as a user message to context. Go to step 3.
 ```
 
 #### Plan mode
@@ -170,7 +175,12 @@ Event types:
 | `tool_exec_start` | Before `tool.execute()` |
 | `tool_exec_end` | After `tool.execute()` (latency, success, output bytes) |
 | `tool_denied` | When a call is blocked (plan_mode / user_denied / non_interactive) |
-| `guard_triggered` | When max-turns or stuck-loop fires |
+| `guard_triggered` | When a safety guard fires (max_turns, stuck_loop, or env_error_loop) |
+| `empty_response_retry` | When LLM returns an empty stream (no text, no tool calls) — retried once |
+| `compact_threshold_warned` | When context ratio first crosses 60% of the compaction budget this session |
+| `compact_started` | Before a compaction starts (auto at 75% ratio, or manual via `/compact`) |
+| `compact_completed` | After `compactHistory()` returns successfully |
+| `compact_failed` | When `compactHistory()` throws — turn proceeds with full history |
 
 #### Context management (`context.ts`)
 

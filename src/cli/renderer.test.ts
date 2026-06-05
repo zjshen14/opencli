@@ -549,6 +549,25 @@ describe("print functions write to stderr/stdout", () => {
     expect(output).toContain("more lines");
   });
 
+  it("printToolResultExpanded separates long tool names from error message", () => {
+    // multi_edit is 10 chars — padEnd(6) adds no space, so the name would
+    // collide with the error text without the explicit two-space separator.
+    printToolResultExpanded("multi_edit", "Error: old_string not found in file");
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✗");
+    expect(output).toContain("multi_edit");
+    expect(output).toContain("Error: old_string not found in file");
+    expect(output).toMatch(/multi_edit\s+Error:/);
+  });
+
+  it("printToolResultExpanded separates long tool names from line-count text", () => {
+    const longOutput = Array.from({ length: 7 }, (_, i) => `line${i + 1}`).join("\n");
+    printToolResultExpanded("web_fetch", longOutput);
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✓");
+    expect(output).toMatch(/web_fetch\s+\(\d+ lines\)/);
+  });
+
   it("printToolCallCompact writes ○ line to stderr", () => {
     printToolCallCompact("read", { file_path: "src/foo.ts" });
     const output = stripAnsi(stderr());

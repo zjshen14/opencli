@@ -113,10 +113,13 @@ export function printToolResultExpanded(name: string, result: string): void {
   const trimmed = result.trim();
   const isError = trimmed.startsWith("Error:");
   const lines = trimmed ? trimmed.split("\n") : [];
+  // For names ≥6 chars padEnd(6) adds no separator; always emit two spaces so
+  // the name never runs directly into the status text.
+  const nameCol = name.length < 6 ? name.padEnd(6) : `${name}  `;
 
   if (isError) {
     const errMsg = lines[0]?.slice(0, 80) ?? "Error";
-    process.stderr.write(chalk.red(`  ✗ ${name.padEnd(6)}${errMsg}`) + "\n");
+    process.stderr.write(chalk.red(`  ✗ ${nameCol}${errMsg}`) + "\n");
     const bodyLines = lines.slice(1, MAX_EXPANDED_LINES);
     for (const line of bodyLines) {
       process.stderr.write(chalk.dim(`     ${line}`) + "\n");
@@ -127,7 +130,7 @@ export function printToolResultExpanded(name: string, result: string): void {
       );
     }
   } else {
-    process.stderr.write(chalk.dim(`  ✓ ${name.padEnd(6)}(${lines.length} lines)`) + "\n");
+    process.stderr.write(chalk.dim(`  ✓ ${nameCol}(${lines.length} lines)`) + "\n");
     const displayLines = lines.slice(0, MAX_EXPANDED_LINES);
     for (const line of displayLines) {
       process.stderr.write(chalk.dim(`     ${line}`) + "\n");

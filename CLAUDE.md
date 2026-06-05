@@ -100,7 +100,7 @@ src/
    - Before each execution, check `tool.requiresConfirmation(args)`; if true, invoke `confirmFn` (interactive y/n/always dialog in REPL; auto-deny in non-interactive mode unless `--yes`)
 5. Append event-driven reminders to the last tool result (e.g. after `edit` → "run tests")
 6. Feed results back as a user message; repeat from step 2 until no function calls
-7. **Safety guards**: max-turns limit (default 50, `--max-turns` to override); stuck-loop detection aborts after 3 identical consecutive call signatures
+7. **Safety guards**: max-turns limit (default 50, `--max-turns` to override); stuck-loop detection aborts after 3 identical consecutive call signatures; env-error-loop detection aborts after 3 consecutive turns with the same OS-level error (EPERM, EACCES, ENOSPC, etc.)
 
 **Plan mode** (`Agent.run(input, "plan")`): restricts tools to `read/glob/grep/think`, appends a plan-specific system prompt suffix, and sets `readOnly` on the executor so write tools are blocked at two layers. The REPL's `/plan <task>` command runs a plan pass, then shows `[@clack/prompts select]` Approve / Edit / Cancel before switching to react mode for execution.
 

@@ -241,8 +241,7 @@ export function summariseResult(name: string, result: string): string {
 
   if (name === "read") {
     const lines = trimmed.split("\n").length;
-    const filePath = trimmed.split("\n")[0]?.slice(0, 60) ?? "";
-    return `${name.padEnd(6)}${chalk.dim(`${filePath}  (${lines} lines)`)}`;
+    return `${name.padEnd(6)}${chalk.dim(`(${lines} lines)`)}`;
   }
   if (name === "glob") {
     const files = trimmed ? trimmed.split("\n").length : 0;

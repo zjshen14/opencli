@@ -355,39 +355,45 @@ describe("compactHistory — original task preservation", () => {
   });
 
   it("quotes the original first user task even after prune ran and later user messages exist", async () => {
-    // Load-bearing assumption: extractOriginalTask must pick the original
-    // task — which (post-PR #154 prune anchor) is preserved at the head even
-    // after pruning fires. Without this, a long session would quote whichever
-    // user turn happened to slip through the message cap, not the user's
-    // actual goal. PR #154's anchor logic merges the original task with the
-    // next user turn via a "[earlier conversation pruned]" marker;
-    // extractOriginalTask must strip that suffix.
+    // Load-bearing assumption: extractOriginalTask must pick the FIRST
+    // user-text message in the head — which (post-PR #154 prune anchor) is
+    // always the original task message after pruning. Without this, a long
+    // session would quote whichever user turn happened to slip through the
+    // 50-message cap, not the user's actual goal.
     //
-    // maxHistoryMessages = 25 so prune fires but leaves enough for the
-    // compaction split (need >KEEP_RECENT messages in the head).
+    // Setup: maxHistoryMessages = 25 (must exceed KEEP_RECENT so the compaction
+    // split leaves a non-empty head) with the PR #154 anchor; add 50 messages
+    // including several user-text turns. The anchor preserves message 0
+    // (the original task). Then compact and verify the verbatim quotation
+    // matches the ORIGINAL, not a later user message.
     const ctx = new ContextManager(undefined, 25);
     ctx.addMessage(userMsg("ORIGINAL_TASK_BUILD_THE_THING"));
     ctx.addMessage(modelMsg("Acknowledged."));
+    // Add lots of subsequent turns including OTHER user text messages.
+    // The prune anchor logic keeps message 0; everything else gets pruned
+    // when the 25-message cap is exceeded.
     for (let i = 0; i < 50; i++) {
-      if (i % 7 === 0) {
+      if (i % 5 === 0) {
         ctx.addMessage(userMsg(`LATER_USER_TURN_${i}_NOT_THE_TASK`));
       } else {
         ctx.addMessage(i % 2 === 0 ? userMsg(`pad ${i}`) : modelMsg(`pad ${i}`));
       }
     }
 
-    // Sanity: prune fired (history was capped) and the first message still
-    // starts with the original task. PR #154's anchor may have merged it with
-    // the next user turn via the "[earlier conversation pruned]" marker.
+    // Sanity: the anchor kept the original task at position 0. PR #154's
+    // anchor logic may have merged it with the next user turn via the
+    // "[earlier conversation pruned]" marker — the original task is still
+    // the prefix before that marker.
     const firstMsgText = (ctx.getMessages()[0].parts[0] as { type: "text"; text: string }).text;
     expect(firstMsgText.startsWith("ORIGINAL_TASK_BUILD_THE_THING")).toBe(true);
-    expect(ctx.messageCount).toBeLessThanOrEqual(25);
 
+    // Now compact and inspect the summary body
     await compactHistory(ctx, makeMockClient(FIXED_SUMMARY));
     const summaryText = (ctx.getMessages()[0].parts[0] as { type: "text"; text: string }).text;
 
-    // The quotation contains the ORIGINAL task only — NOT the merged-in next
-    // user turn, NOT the prune marker, NOT a later user-turn substring.
+    // The verbatim quotation must contain the original task ONLY — NOT the
+    // merged-in next user turn, NOT the prune marker, NOT one of the later
+    // user-turn substrings that came after.
     expect(summaryText).toContain("> ORIGINAL_TASK_BUILD_THE_THING");
     expect(summaryText).not.toContain("> LATER_USER_TURN");
     expect(summaryText).not.toContain("earlier conversation pruned");

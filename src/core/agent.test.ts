@@ -622,8 +622,7 @@ describe("Agent auto-compact (A5b)", () => {
     expect((notice as { type: "notice"; message: string }).message).toMatch(
       /approaching auto-compact threshold/,
     );
-    // Shows tokens/budget pair so the user doesn't read it as a fraction of
-    // the model's full context window.
+    // Shows tokens / budget pair so the percentage isn't read as a model-window fraction.
     expect((notice as { type: "notice"; message: string }).message).toMatch(/\d+k \/ \d+k tokens/);
   });
 
@@ -667,36 +666,40 @@ describe("Agent auto-compact (A5b)", () => {
   });
 
   it("re-arms the 60% warning after a successful compaction", async () => {
-    // Genuine re-arm coverage: the previous version went straight to 0.8 and
-    // skipped the 60–75% latch entirely, so deleting the post-compaction
-    // re-arm line would still have passed it. We now:
-    //   1. Sit at 0.65 → first warning fires; warnedAt60 latches true
-    //   2. Climb to 0.80 → auto-compact fires; re-arm code resets to false
-    //   3. Drop to 0.65 again → SECOND warning must fire (proves re-arm)
+    // Genuine re-arm test: must latch warnedAt60 = true on the first warning,
+    // then prove a SECOND warning fires after a compaction resets it. Going
+    // straight to 0.8 (the previous shape) skipped the 60-75% latch and so
+    // never actually exercised the re-arm code path.
+    //
+    // 1. Sit at 0.65 → first warning fires, warnedAt60 latches true
+    // 2. Climb to 0.80 → auto-compact fires, re-arms warnedAt60 to false
+    // 3. Drop to 0.65 → SECOND warning must fire (proves re-arm)
     const { agent, events } = makeAgentAtRatio(0.65, "claude-sonnet-4-6");
     await collectEvents(agent, "first");
     expect(events.filter((e) => e.type === "compact_threshold_warned")).toHaveLength(1);
     expect(events.filter((e) => e.type === "compact_completed")).toHaveLength(0);
 
-    // Climb into the auto-compact band.
+    // Re-inflate above 75% to trigger compaction
     const effectiveWindow = Math.min(
       contextWindowFor("claude-sonnet-4-6"),
       COMPACTION_TARGET_TOKENS,
     );
-    const fill = (ratio: number) => {
-      const padBytes = Math.ceil(effectiveWindow * ratio) * 4 - 200;
-      agent.restoreMessages([
-        { role: "user", parts: [{ type: "text", text: "ORIGINAL_TASK_TOKEN" }] },
-        { role: "model", parts: [{ type: "text", text: "x".repeat(padBytes) }] },
-      ]);
-    };
-
-    fill(0.8);
+    const targetForCompact = Math.ceil(effectiveWindow * 0.8);
+    const padBytesCompact = targetForCompact * 4 - 200;
+    agent.restoreMessages([
+      { role: "user", parts: [{ type: "text", text: "ORIGINAL_TASK_TOKEN" }] },
+      { role: "model", parts: [{ type: "text", text: "x".repeat(padBytesCompact) }] },
+    ]);
     await collectEvents(agent, "second");
     expect(events.filter((e) => e.type === "compact_completed")).toHaveLength(1);
 
-    // Re-fill the 60–75% band. If re-arm is broken, no second warning.
-    fill(0.65);
+    // Drop back to the 60-75% band. If re-arm is broken, no second warning.
+    const targetForWarn = Math.ceil(effectiveWindow * 0.65);
+    const padBytesWarn = targetForWarn * 4 - 200;
+    agent.restoreMessages([
+      { role: "user", parts: [{ type: "text", text: "ORIGINAL_TASK_TOKEN" }] },
+      { role: "model", parts: [{ type: "text", text: "x".repeat(padBytesWarn) }] },
+    ]);
     await collectEvents(agent, "third");
 
     expect(events.filter((e) => e.type === "compact_threshold_warned")).toHaveLength(2);
@@ -705,9 +708,9 @@ describe("Agent auto-compact (A5b)", () => {
   it("does not run auto-compact in plan mode (read-only exploration)", async () => {
     const { agent, events } = makeAgentAtRatio(0.8, "claude-sonnet-4-6");
 
-    // Drain a plan-mode turn. Even though ratio is above the trigger,
-    // plan mode is read-only exploration and shouldn't spend tokens on a
-    // compaction round-trip — the next react turn will trigger it.
+    // Drain a plan-mode turn — compaction should NOT happen even though ratio
+    // would normally trigger it. Plan mode is a read-only exploration pass and
+    // shouldn't spend tokens on a compaction round-trip.
     const planEvents = [];
     for await (const e of agent.run("plan something", "plan")) planEvents.push(e);
 

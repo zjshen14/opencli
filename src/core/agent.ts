@@ -6,12 +6,7 @@ import { ContextManager } from "./context.js";
 import { executeCalls } from "./executor.js";
 import type { ConfirmFn } from "./executor.js";
 import { buildReminder, buildPlanSuffix } from "./prompt.js";
-import type {
-  FunctionCallPart,
-  FunctionResultPart,
-  Message,
-  ToolDefinition,
-} from "../providers/types.js";
+import type { FunctionCallPart, Message } from "../providers/types.js";
 import type { ObservabilityHandler } from "./observability.js";
 import type { SnapshotManager } from "../state/snapshot.js";
 import { compactHistory, contextWindowFor, COMPACTION_TARGET_TOKENS } from "./compact.js";
@@ -39,25 +34,6 @@ const AUTO_COMPACT_TRIGGER_RATIO = 0.75;
 const DEFAULT_MAX_TURNS = 50;
 const STUCK_THRESHOLD = 3;
 const ENV_ERROR_THRESHOLD = 3;
-
-// Per-turn mutable state passed through the run() pipeline. Each guard reads
-// and updates the fields it owns; the loop is otherwise stateless. Kept as a
-// plain interface (not a class) so guard methods can mutate counters without
-// ceremony.
-interface TurnState {
-  turns: number;
-  lastCallSig: string;
-  stuckCount: number;
-  envErrorPattern: string;
-  envErrorCount: number;
-  emptyRetried: boolean;
-  firedReminders: Set<string>;
-}
-
-interface TurnSetup {
-  toolDefinitions: ToolDefinition[];
-  systemInstruction: string;
-}
 
 // OS-level errors that code changes cannot fix. If the same pattern appears in
 // tool results across ENV_ERROR_THRESHOLD consecutive turns, the loop aborts.
@@ -142,302 +118,223 @@ export class Agent {
       parts: [{ type: "text", text: userInput }],
     });
 
-    const setup = this.buildTurnSetup(mode);
+    const allToolDefs = [...this.tools.all().map(toolToDefinition), activateSkillDefinition];
+
+    let toolDefinitions = allToolDefs;
+    let systemInstruction: string;
+
+    if (mode === "plan") {
+      const readonlyTools = this.tools.all().filter((t) => t.readonly);
+      toolDefinitions = [...readonlyTools.map(toolToDefinition), activateSkillDefinition];
+      const planSuffix = buildPlanSuffix(new Set(readonlyTools.map((t) => t.name)));
+      systemInstruction = this.context.getSystemInstruction(toolDefinitions) + planSuffix;
+    } else {
+      systemInstruction = this.context.getSystemInstruction(allToolDefs);
+    }
 
     // A5b auto-compact: fires only at this turn-boundary position — before any
-    // LLM call or tool execution this turn. Skipped in plan mode: read-only
-    // exploration shouldn't spend tokens on a compaction round-trip.
+    // LLM call or tool execution this turn. Any LLM/network errors inside
+    // maybeAutoCompact are caught by it; the turn always proceeds.
+    // Skipped in plan mode: read-only exploration shouldn't spend tokens on
+    // a compaction round-trip; the react turn that follows will trigger it.
     if (mode !== "plan") {
-      for (const notice of await this.maybeAutoCompact(setup.systemInstruction)) {
+      for (const notice of await this.maybeAutoCompact(systemInstruction)) {
         yield notice;
       }
     }
 
-    const state: TurnState = {
-      turns: 0,
-      lastCallSig: "",
-      stuckCount: 0,
-      envErrorPattern: "",
-      envErrorCount: 0,
-      emptyRetried: false,
-      firedReminders: new Set<string>(),
-    };
+    let turns = 0;
+    let lastCallSig = "";
+    let stuckCount = 0;
+    let envErrorPattern = "";
+    let envErrorCount = 0;
+    let emptyRetried = false;
+    const firedReminders = new Set<string>();
 
     while (true) {
-      // 1. Stream from LLM (collect text + tool calls; observability)
-      const { text, pendingCalls } = yield* this.streamLLM(setup);
+      const pendingCalls: FunctionCallPart[] = [];
+      let responseText = "";
 
-      // 2. Record assistant message in context
-      this.recordAssistantMessage(text, pendingCalls);
+      const messages = this.context.getMessages();
+      const estimatedTokens = Math.round(
+        (JSON.stringify(messages).length + systemInstruction.length) / 4,
+      );
+      this.obs?.({ type: "context_snapshot", messageCount: messages.length, estimatedTokens });
+      this.obs?.({ type: "llm_call_start", model: this.model, inputMessages: messages.length });
+      const callStart = Date.now();
+      let usageInputTokens = 0;
+      let usageOutputTokens = 0;
 
-      // 3. Done / empty-retry — exits early if no tool calls
+      for await (const event of this.client.stream(messages, systemInstruction, toolDefinitions)) {
+        if (event.type === "text") {
+          responseText += event.text;
+          yield { type: "text", text: event.text };
+        } else if (event.type === "function_call") {
+          pendingCalls.push({
+            type: "function_call",
+            id: event.id,
+            name: event.name,
+            args: event.args,
+            ...(event.thoughtSignature ? { thoughtSignature: event.thoughtSignature } : {}),
+          });
+          yield {
+            type: "tool_call",
+            name: event.name,
+            args: event.args,
+            ...(event.thoughtSignature ? { thoughtSignature: event.thoughtSignature } : {}),
+          };
+        } else if (event.type === "usage") {
+          usageInputTokens = event.inputTokens;
+          usageOutputTokens = event.outputTokens;
+        }
+      }
+
+      this.obs?.({
+        type: "llm_call_end",
+        model: this.model,
+        inputTokens: usageInputTokens,
+        outputTokens: usageOutputTokens,
+        latencyMs: Date.now() - callStart,
+      });
+
+      const assistantParts: Message["parts"] = [];
+      if (responseText) assistantParts.push({ type: "text", text: responseText });
+      assistantParts.push(...pendingCalls);
+      if (assistantParts.length > 0) {
+        this.context.addMessage({ role: "model", parts: assistantParts });
+      }
+
       if (pendingCalls.length === 0) {
-        if (text.trim() === "" && !state.emptyRetried) {
-          // Empty stream is likely a transient provider issue (safety filter,
-          // output truncation, parse failure). Nothing was added to context,
-          // so the retry sees the same conversation state.
-          state.emptyRetried = true;
+        if (responseText.trim() === "" && !emptyRetried) {
+          // Empty stream (no text, no tool calls) is likely a transient provider issue
+          // (safety filter, output truncation, parse failure). Retry once before
+          // treating as intentional done — nothing was added to context, so the
+          // retry sees the same conversation state.
+          emptyRetried = true;
           this.obs?.({ type: "empty_response_retry" });
           continue;
         }
         yield { type: "done" };
         return;
       }
-      state.emptyRetried = false;
+      emptyRetried = false;
 
-      // 4. Loop guards (max-turns, stuck-loop) — abort with an error event if hit
-      state.turns++;
-      const maxTurnsAbort = this.checkMaxTurnsGuard(state);
-      if (maxTurnsAbort) {
-        yield maxTurnsAbort;
-        return;
-      }
-      const stuckAbort = this.checkStuckLoopGuard(state, pendingCalls);
-      if (stuckAbort) {
-        yield stuckAbort;
-        return;
-      }
-
-      // 5. Execute pending tool calls
-      const results = await this.executeTurnTools(pendingCalls, mode);
-
-      // 6. Drain any snapshot warning produced this turn
-      yield* this.drainSnapshotWarnings();
-
-      // 7. Environment-error guard (OS-level errors that code changes can't fix)
-      const envAbort = this.checkEnvErrorGuard(state, results);
-      if (envAbort) {
-        yield envAbort;
-        return;
-      }
-
-      // 8. Append event-driven reminder to the last tool result (e.g. edit → "run tests")
-      this.applyReminderToLastResult(state, pendingCalls, results);
-
-      // 9. Yield skill activations + tool results to the caller
-      yield* this.yieldSkillActivations(pendingCalls);
-      yield* this.yieldToolResults(results);
-
-      // 10. Record results in context so the next LLM turn sees them
-      this.recordToolResults(results);
-    }
-  }
-
-  // ────────────────────────────────────────────────────────────────────────
-  // Helpers below decompose the run() loop into named steps. Each owns one
-  // concern, can be unit-tested in isolation, and either yields events,
-  // mutates the TurnState, mutates context, or returns an abort event for
-  // the caller to yield. Splitting them up keeps run() readable as a 10-step
-  // pipeline rather than a 200-line generator.
-  // ────────────────────────────────────────────────────────────────────────
-
-  private buildTurnSetup(mode: AgentRunMode): TurnSetup {
-    const allToolDefs = [...this.tools.all().map(toolToDefinition), activateSkillDefinition];
-    if (mode === "plan") {
-      const readonlyTools = this.tools.all().filter((t) => t.readonly);
-      const toolDefinitions = [...readonlyTools.map(toolToDefinition), activateSkillDefinition];
-      const planSuffix = buildPlanSuffix(new Set(readonlyTools.map((t) => t.name)));
-      const systemInstruction = this.context.getSystemInstruction(toolDefinitions) + planSuffix;
-      return { toolDefinitions, systemInstruction };
-    }
-    return {
-      toolDefinitions: allToolDefs,
-      systemInstruction: this.context.getSystemInstruction(allToolDefs),
-    };
-  }
-
-  private async *streamLLM(
-    setup: TurnSetup,
-  ): AsyncGenerator<AgentEvent, { text: string; pendingCalls: FunctionCallPart[] }> {
-    const messages = this.context.getMessages();
-    const estimatedTokens = Math.round(
-      (JSON.stringify(messages).length + setup.systemInstruction.length) / 4,
-    );
-    this.obs?.({ type: "context_snapshot", messageCount: messages.length, estimatedTokens });
-    this.obs?.({ type: "llm_call_start", model: this.model, inputMessages: messages.length });
-
-    const callStart = Date.now();
-    let usageInputTokens = 0;
-    let usageOutputTokens = 0;
-    let text = "";
-    const pendingCalls: FunctionCallPart[] = [];
-
-    for await (const event of this.client.stream(
-      messages,
-      setup.systemInstruction,
-      setup.toolDefinitions,
-    )) {
-      if (event.type === "text") {
-        text += event.text;
-        yield { type: "text", text: event.text };
-      } else if (event.type === "function_call") {
-        pendingCalls.push({
-          type: "function_call",
-          id: event.id,
-          name: event.name,
-          args: event.args,
-          ...(event.thoughtSignature ? { thoughtSignature: event.thoughtSignature } : {}),
+      // Max turns guard
+      turns++;
+      if (turns > this.maxTurns) {
+        this.obs?.({
+          type: "guard_triggered",
+          guard: "max_turns",
+          reason: `Reached ${this.maxTurns} turns`,
         });
         yield {
-          type: "tool_call",
-          name: event.name,
-          args: event.args,
-          ...(event.thoughtSignature ? { thoughtSignature: event.thoughtSignature } : {}),
+          type: "error",
+          message: `Reached maximum iterations (${this.maxTurns}). Try breaking the task into smaller steps.`,
         };
-      } else if (event.type === "usage") {
-        usageInputTokens = event.inputTokens;
-        usageOutputTokens = event.outputTokens;
+        return;
       }
-    }
 
-    this.obs?.({
-      type: "llm_call_end",
-      model: this.model,
-      inputTokens: usageInputTokens,
-      outputTokens: usageOutputTokens,
-      latencyMs: Date.now() - callStart,
-    });
+      // Stuck-loop detection: same tool(s) + same args N times in a row
+      const sig = JSON.stringify(pendingCalls.map((c) => ({ name: c.name, args: c.args })));
+      if (sig === lastCallSig) {
+        stuckCount++;
+        if (stuckCount >= STUCK_THRESHOLD) {
+          this.obs?.({
+            type: "guard_triggered",
+            guard: "stuck_loop",
+            reason: `${STUCK_THRESHOLD} identical consecutive call signatures`,
+          });
+          yield {
+            type: "error",
+            message: `Detected ${STUCK_THRESHOLD} identical tool calls in a row — stopping to avoid a loop.`,
+          };
+          return;
+        }
+      } else {
+        lastCallSig = sig;
+        stuckCount = 1;
+      }
 
-    return { text, pendingCalls };
-  }
+      const { results } = await executeCalls(pendingCalls, {
+        tools: this.tools,
+        skills: this.skills,
+        context: this.context,
+        tmpDir: this.context.getSessionTmpDir(),
+        readOnly: mode === "plan",
+        confirmFn: this.confirmFn,
+        forcesConfirmation: this.forcesConfirmationFn,
+        obs: this.obs,
+        snapshot: this.snapshotManager,
+        cwd: process.cwd(),
+      });
 
-  private recordAssistantMessage(text: string, pendingCalls: FunctionCallPart[]): void {
-    const assistantParts: Message["parts"] = [];
-    if (text) assistantParts.push({ type: "text", text });
-    assistantParts.push(...pendingCalls);
-    if (assistantParts.length > 0) {
-      this.context.addMessage({ role: "model", parts: assistantParts });
-    }
-  }
+      // Surface any snapshot warning produced this turn as an error event.
+      // drainWarning() clears it so it is only emitted once per failure.
+      const snapshotWarning = this.snapshotManager?.drainWarning();
+      if (snapshotWarning) {
+        yield { type: "error", message: `[snapshot] ${snapshotWarning}` };
+      }
 
-  private checkMaxTurnsGuard(state: TurnState): AgentEvent | null {
-    if (state.turns <= this.maxTurns) return null;
-    this.obs?.({
-      type: "guard_triggered",
-      guard: "max_turns",
-      reason: `Reached ${this.maxTurns} turns`,
-    });
-    return {
-      type: "error",
-      message: `Reached maximum iterations (${this.maxTurns}). Try breaking the task into smaller steps.`,
-    };
-  }
+      // Environmental error guard: OS-level errors (EPERM, EACCES, etc.) cannot
+      // be fixed by editing code. If the same pattern recurs across consecutive
+      // turns, stop and surface a diagnosis instead of burning more turns.
+      const combinedResults = results.map((r) => r.result).join("\n");
+      const matchedPattern = ENV_ERROR_PATTERNS.find((p) =>
+        combinedResults.toLowerCase().includes(p.toLowerCase()),
+      );
+      if (matchedPattern) {
+        if (matchedPattern === envErrorPattern) {
+          envErrorCount++;
+        } else {
+          envErrorPattern = matchedPattern;
+          envErrorCount = 1;
+        }
+        if (envErrorCount >= ENV_ERROR_THRESHOLD) {
+          this.obs?.({
+            type: "guard_triggered",
+            guard: "env_error_loop",
+            reason: `"${matchedPattern}" in ${ENV_ERROR_THRESHOLD} consecutive turns`,
+          });
+          yield {
+            type: "error",
+            message: `Detected "${matchedPattern}" in ${ENV_ERROR_THRESHOLD} consecutive turns. This looks like an OS or environment restriction that code changes cannot fix — check permissions, network settings, or sandbox configuration.`,
+          };
+          return;
+        }
+      } else {
+        envErrorPattern = "";
+        envErrorCount = 0;
+      }
 
-  private checkStuckLoopGuard(
-    state: TurnState,
-    pendingCalls: FunctionCallPart[],
-  ): AgentEvent | null {
-    const sig = JSON.stringify(pendingCalls.map((c) => ({ name: c.name, args: c.args })));
-    if (sig !== state.lastCallSig) {
-      state.lastCallSig = sig;
-      state.stuckCount = 1;
-      return null;
-    }
-    state.stuckCount++;
-    if (state.stuckCount < STUCK_THRESHOLD) return null;
-    this.obs?.({
-      type: "guard_triggered",
-      guard: "stuck_loop",
-      reason: `${STUCK_THRESHOLD} identical consecutive call signatures`,
-    });
-    return {
-      type: "error",
-      message: `Detected ${STUCK_THRESHOLD} identical tool calls in a row — stopping to avoid a loop.`,
-    };
-  }
+      // Append an event-driven reminder to the last tool result based on what
+      // tools just ran — fires only when relevant (e.g. edit → "run tests").
+      const reminder = buildReminder(
+        pendingCalls.map((c) => ({ name: c.name, args: c.args })),
+        firedReminders,
+      );
+      if (reminder && results.length > 0) {
+        results[results.length - 1] = {
+          ...results[results.length - 1],
+          result: results[results.length - 1].result + reminder,
+        };
+      }
 
-  private async executeTurnTools(
-    pendingCalls: FunctionCallPart[],
-    mode: AgentRunMode,
-  ): Promise<FunctionResultPart[]> {
-    const { results } = await executeCalls(pendingCalls, {
-      tools: this.tools,
-      skills: this.skills,
-      context: this.context,
-      tmpDir: this.context.getSessionTmpDir(),
-      readOnly: mode === "plan",
-      confirmFn: this.confirmFn,
-      forcesConfirmation: this.forcesConfirmationFn,
-      obs: this.obs,
-      snapshot: this.snapshotManager,
-      cwd: process.cwd(),
-    });
-    return results;
-  }
-
-  // drainWarning() clears the warning so it is only emitted once per failure.
-  private *drainSnapshotWarnings(): Generator<AgentEvent> {
-    const snapshotWarning = this.snapshotManager?.drainWarning();
-    if (snapshotWarning) {
-      yield { type: "error", message: `[snapshot] ${snapshotWarning}` };
-    }
-  }
-
-  private checkEnvErrorGuard(state: TurnState, results: FunctionResultPart[]): AgentEvent | null {
-    const combinedResults = results
-      .map((r) => r.result)
-      .join("\n")
-      .toLowerCase();
-    const matchedPattern = ENV_ERROR_PATTERNS.find((p) =>
-      combinedResults.includes(p.toLowerCase()),
-    );
-    if (!matchedPattern) {
-      state.envErrorPattern = "";
-      state.envErrorCount = 0;
-      return null;
-    }
-    if (matchedPattern === state.envErrorPattern) {
-      state.envErrorCount++;
-    } else {
-      state.envErrorPattern = matchedPattern;
-      state.envErrorCount = 1;
-    }
-    if (state.envErrorCount < ENV_ERROR_THRESHOLD) return null;
-    this.obs?.({
-      type: "guard_triggered",
-      guard: "env_error_loop",
-      reason: `"${matchedPattern}" in ${ENV_ERROR_THRESHOLD} consecutive turns`,
-    });
-    return {
-      type: "error",
-      message: `Detected "${matchedPattern}" in ${ENV_ERROR_THRESHOLD} consecutive turns. This looks like an OS or environment restriction that code changes cannot fix — check permissions, network settings, or sandbox configuration.`,
-    };
-  }
-
-  private applyReminderToLastResult(
-    state: TurnState,
-    pendingCalls: FunctionCallPart[],
-    results: FunctionResultPart[],
-  ): void {
-    const reminder = buildReminder(
-      pendingCalls.map((c) => ({ name: c.name, args: c.args })),
-      state.firedReminders,
-    );
-    if (reminder && results.length > 0) {
-      results[results.length - 1] = {
-        ...results[results.length - 1],
-        result: results[results.length - 1].result + reminder,
-      };
-    }
-  }
-
-  private *yieldSkillActivations(pendingCalls: FunctionCallPart[]): Generator<AgentEvent> {
-    for (const call of pendingCalls) {
-      if (call.name === "activate_skill") {
+      const skillCalls = pendingCalls.filter((c) => c.name === "activate_skill");
+      for (const call of skillCalls) {
         yield { type: "skill_activated", name: call.args.name as string };
       }
-    }
-  }
 
-  private *yieldToolResults(results: FunctionResultPart[]): Generator<AgentEvent> {
-    for (const result of results) {
-      yield { type: "tool_result", name: result.name, result: result.result };
-    }
-  }
+      for (const result of results) {
+        yield { type: "tool_result", name: result.name, result: result.result };
+      }
 
-  private recordToolResults(results: FunctionResultPart[]): void {
-    if (results.length === 0) return;
-    this.context.addMessage({ role: "user", parts: results });
+      if (results.length > 0) {
+        this.context.addMessage({
+          role: "user",
+          parts: results,
+        });
+      }
+    }
   }
 
   async compact(): Promise<CompactResult> {
@@ -489,10 +386,10 @@ export class Agent {
       if (this.warnedAt60) return [];
       this.warnedAt60 = true;
       this.obs?.({ type: "compact_threshold_warned", ratio });
-      // Phrase the notice against the *compaction budget*, not the raw model
-      // window — otherwise a Gemini (1M window) user at 154k/256k effective
-      // would see "context at 60%" while actually using ~15% of their model's
-      // real context, which reads as a hard hit on the LLM's capacity.
+      // Phrase the notice against the *compaction budget*, not the model
+      // window — otherwise on Gemini (1M window) a user at 154k/256k tokens
+      // sees "context at 60%" when they're actually at 15% of their model's
+      // real window, which reads as a hard hit on the LLM's capacity.
       const budgetKb = Math.round(effectiveWindow / 1000);
       const usedKb = Math.round(estimatedTokens / 1000);
       return [

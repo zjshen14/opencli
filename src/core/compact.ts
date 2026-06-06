@@ -61,21 +61,21 @@ Rules:
 
 /**
  * Pull the original user task — the first user-role text message — out of the
- * head at compaction time. Returns "" if there is no such message.
+ * history at the head of compaction. Returns empty string if no such message
+ * exists. The quotation block this produces is prepended to the summary body
+ * so the verbatim original task survives even across multiple nested
+ * compactions and across prune events (the calling code owns preservation;
+ * SUMMARIZATION_PROMPT instructs the model to OMIT any existing quotation
+ * block so it isn't duplicated).
  *
  * Three shapes this function recognises:
  *  1. A plain user-text message — that text IS the original task.
  *  2. A user-text message that PR #154's prune anchor has merged with the next
  *     turn via "\n\n[earlier conversation pruned]\n\n…". Keep only the prefix
- *     before that separator — otherwise the next user turn leaks into the
- *     quote on long sessions where prune fires before compaction does.
- *  3. A summary message from a prior compaction containing a "**Original
- *     task** (verbatim):" block. Lift the inner quoted lines directly so the
- *     text is reconstructed by string equality, not paraphrase.
- *
- * The calling code prepends the result as a quotation block in the summary
- * body. SUMMARIZATION_PROMPT instructs the model to OMIT any existing block
- * so the result isn't duplicated on nested compactions.
+ *     before that separator — otherwise the next user turn leaks into the quote.
+ *  3. A summary message from a prior compaction containing a verbatim
+ *     "**Original task** (verbatim):" block. Lift the inner quoted lines
+ *     directly so the text is reconstructed by string equality, not paraphrase.
  */
 function extractOriginalTask(messages: Message[]): string {
   for (const msg of messages) {
@@ -83,15 +83,15 @@ function extractOriginalTask(messages: Message[]): string {
     const text = msg.parts.find((p) => p.type === "text");
     if (text && text.type === "text" && text.text.trim()) {
       // Shape 3 (nested compaction): an existing quotation block — lift its
-      // contents directly, ignoring any surrounding text.
+      // contents directly, ignoring any prefix the summary added around it.
       const nested = text.text.match(/\*\*Original task\*\* \(verbatim\):\n((?:> .*\n?)+)/);
       if (nested) {
         return nested[1].replace(/^> /gm, "").trimEnd();
       }
-      // Shape 2 (prune-merged): PR #154 anchor merged the original task with
-      // the next user-text turn via "[earlier conversation pruned]". Only the
-      // prefix before that marker is the original task; the suffix is later
-      // content that the summary itself will cover.
+      // Shape 2 (prune-merged): the PR #154 anchor logic joins the original
+      // task with the next user text turn separated by a marker. The original
+      // task is everything BEFORE the marker; the next turn is content the
+      // summary itself will cover.
       const elisionIdx = text.text.indexOf("\n\n[earlier conversation pruned]");
       if (elisionIdx >= 0) {
         return text.text.slice(0, elisionIdx);

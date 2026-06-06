@@ -71,6 +71,8 @@ Plus everything you'd expect from a serious coding agent:
 | **Extensible skills** | ✅ Agent Skills | ✅ Slash commands | ✅ Agent Skills | ❌ |
 | **Lightweight (zero config)** | ✅ | ✅ | ✅ | ⚠️ Git required |
 
+📖 **Full breakdown:** [OpenCLI vs Claude Code vs Gemini CLI vs Aider](docs/comparison.md) — an honest, in-depth comparison of where each tool fits.
+
 ## Frequently Asked Questions (FAQ)
 
 **What is the best open-source alternative to Claude Code?**

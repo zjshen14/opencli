@@ -101,6 +101,26 @@ describe("buildTape", () => {
     expect(tape.turns[0].iterations[0].toolCalls[0].thoughtSignature).toBe("sig-abc");
   });
 
+  it("pads an empty assistant entry with one extra empty iteration to match the agent's empty-response-retry", () => {
+    const entries: SessionEntry[] = [
+      { type: "user", content: "go", ...ts("t1") },
+      { type: "tool_call", name: "read", args: {}, ...ts("t2") },
+      { type: "tool_result", name: "read", result: "x", ...ts("t3") },
+      // Empty assistant content means the original agent's empty-response-retry
+      // mechanism fired — TWO stream() calls were made, both returning empty.
+      // Without padding, replay would only provide ONE iteration and the
+      // TapeClient would exhaust mid-replay.
+      { type: "assistant", content: "", ...ts("t4") },
+    ];
+    const tape = buildTape(entries, "empty-asst");
+    // Tool iteration + empty text iter + padding empty iter = 3 iterations
+    expect(tape.turns[0].iterations).toHaveLength(3);
+    expect(tape.turns[0].iterations[0].toolCalls).toHaveLength(1);
+    expect(tape.turns[0].iterations[1].text).toBe("");
+    expect(tape.turns[0].iterations[2].text).toBe("");
+    expect(tape.turns[0].iterations[2].toolCalls).toEqual([]);
+  });
+
   it("creates separate turns for each non-slash user message", () => {
     const entries: SessionEntry[] = [
       { type: "user", content: "first", ...ts("t1") },

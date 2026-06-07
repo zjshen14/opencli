@@ -1,0 +1,27 @@
+{
+  "source": "card-trade session from 2026-05-17, truncated to lines 33-105 (4 react-mode user turns, no /plan or empty-assistant artifacts)",
+  "tapeStats": {
+    "turns": 4,
+    "totalIterations": 36,
+    "totalToolCalls": 32
+  },
+  "observability": {
+    "exact": {
+      "compact_threshold_warned": 0,
+      "compact_started": 0,
+      "compact_completed": 0,
+      "compact_failed": 0,
+      "guard_triggered": 0,
+      "empty_response_retry": 0,
+      "llm_call_start": 36,
+      "llm_call_end": 36,
+      "context_snapshot": 36,
+      "tool_exec_start": 32,
+      "tool_exec_end": 32
+    }
+  },
+  "cleanExit": {
+    "tapeExhausted": true,
+    "unconsumedResults": 0
+  }
+}

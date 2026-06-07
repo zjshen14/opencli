@@ -1,0 +1,49 @@
+{
+  "inputSha256": "72118f89f074f898d3e20de679e919aa539e4fcaa5384f7efa25142f397f2f3d",
+  "inputBytes": 1608758,
+  "outputSha256": "adcf702b9200a34b6d451b242b770be130aca227b35d4d58390cdb399579b698",
+  "outputBytes": 52382,
+  "truncation": {
+    "fromLine": 33,
+    "toLine": 105
+  },
+  "totalReplacements": 28,
+  "rules": [
+    {
+      "find": "/Users/zhijie/",
+      "replace": "/Users/REPLAY-USER/",
+      "description": "absolute home path (macOS)",
+      "count": 9
+    },
+    {
+      "find": "/home/zhijie/",
+      "replace": "/home/replay-user/",
+      "description": "absolute home path (linux)",
+      "count": 0
+    },
+    {
+      "find": "/Users/zhijie",
+      "replace": "/Users/REPLAY-USER",
+      "description": "absolute home prefix (macOS)",
+      "count": 0
+    },
+    {
+      "find": "/home/zhijie",
+      "replace": "/home/replay-user",
+      "description": "absolute home prefix (linux)",
+      "count": 0
+    },
+    {
+      "find": "Zhijie",
+      "replace": "ReplayUser",
+      "description": "capitalised username",
+      "count": 0
+    },
+    {
+      "find": "zhijie",
+      "replace": "replay-user",
+      "description": "bare username",
+      "count": 19
+    }
+  ]
+}

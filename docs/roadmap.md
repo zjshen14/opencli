@@ -78,7 +78,7 @@ See [`docs/evaluation.md`](evaluation.md) for the full strategy, scoring rubric,
 |---|---|---|
 | **D0** | **Eval foundation** | Now — document current coverage; publish rubric |
 | **D1** | **Scenario suite + provider parity matrix** | Before Phase B — 20 tasks × N providers in CI; parity baseline must exist before B-work begins. First baseline published 2026-06-01: [`docs/eval/baseline-2026-06-01.md`](eval/baseline-2026-06-01.md) (Gemini only; Anthropic + OpenAI columns pending repo secrets). |
-| **D2** | **Contract evals** (sandbox, plan mode, HITL, headless schema, **context-management replay**) | Alongside A6 — all A-phase properties must be testable before A closes. Context-management replay design: [`docs/design/d2-context-management-replay.md`](design/d2-context-management-replay.md). |
+| **D2** | **Contract evals** (sandbox, plan mode, HITL, headless schema, **context-management replay**) | Alongside A6 — all A-phase properties must be testable before A closes. Context-management replay shipped 2026-06-06/07 via #229 + #231 + #232 + #233 — see [`docs/design/d2-context-management-replay.md`](design/d2-context-management-replay.md). Remaining contract evals tracked in [#234](https://github.com/zjshen14/opencli/issues/234). |
 | **D3** | **SWE-bench Verified harness** | After B5a — stable default config needed before publishing a number |
 | **D4** | **Custom cross-vendor routing benchmark** | After B5b — publishable artifact comparing single-vendor vs cross-vendor routing |
 

@@ -141,9 +141,21 @@ export function buildTape(entries: SessionEntry[], source: string): Tape {
       // to a final text-only iteration. (Real runtime would have spread
       // this text across iterations; replay collapses it because the
       // JSONL doesn't preserve the spread.)
+      //
+      // Empty content special-case: when the recorded turn ended with NO
+      // text (turnText accumulated empty across one or more iterations),
+      // the agent's empty-response-retry mechanism fired — calling
+      // stream() a SECOND time before emitting done. Replay must pad
+      // with one extra empty iteration to satisfy the retry path or the
+      // TapeClient will exhaust mid-replay.
       flushIteration();
       pendingIteration = startIteration();
       pendingIteration.text = entry.content;
+      flushIteration();
+      if (entry.content === "") {
+        pendingIteration = startIteration();
+        flushIteration();
+      }
       flushTurn();
       continue;
     }

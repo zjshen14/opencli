@@ -1,0 +1,7 @@
+{"type":"user","content":"try to access the protected dir","timestamp":"2026-06-01T00:00:00.000Z"}
+{"type":"tool_call","name":"bash","args":{"command":"ls /root"},"timestamp":"2026-06-01T00:00:01.000Z"}
+{"type":"tool_result","name":"bash","result":"ls: /root: EPERM: permission denied","timestamp":"2026-06-01T00:00:02.000Z"}
+{"type":"tool_call","name":"bash","args":{"command":"cat /root/secrets"},"timestamp":"2026-06-01T00:00:03.000Z"}
+{"type":"tool_result","name":"bash","result":"cat: /root/secrets: EPERM: still no","timestamp":"2026-06-01T00:00:04.000Z"}
+{"type":"tool_call","name":"bash","args":{"command":"touch /root/x"},"timestamp":"2026-06-01T00:00:05.000Z"}
+{"type":"tool_result","name":"bash","result":"touch: /root/x: EPERM: nope","timestamp":"2026-06-01T00:00:06.000Z"}

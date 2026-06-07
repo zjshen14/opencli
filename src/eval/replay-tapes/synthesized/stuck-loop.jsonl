@@ -1,0 +1,6 @@
+{"type":"user","content":"list the working directory","timestamp":"2026-06-01T00:00:00.000Z"}
+{"type":"tool_call","name":"bash","args":{"command":"ls"},"timestamp":"2026-06-01T00:00:01.000Z"}
+{"type":"tool_result","name":"bash","result":"file.txt","timestamp":"2026-06-01T00:00:02.000Z"}
+{"type":"tool_call","name":"bash","args":{"command":"ls"},"timestamp":"2026-06-01T00:00:03.000Z"}
+{"type":"tool_result","name":"bash","result":"file.txt","timestamp":"2026-06-01T00:00:04.000Z"}
+{"type":"tool_call","name":"bash","args":{"command":"ls"},"timestamp":"2026-06-01T00:00:05.000Z"}

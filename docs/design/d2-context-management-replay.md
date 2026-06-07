@@ -162,9 +162,12 @@ Because the tape was recorded before A5b, after the first auto-compaction fires 
 
 ### Synthesized tapes
 
-For assertions that need behaviors the real session doesn't exhibit (nested compactions, stuck-loop, env-error loop), small hand-written tapes live alongside the real ones under `src/eval/replay-tapes/synthesized/`. These are explicitly marked as synthesized and have richer `expected.json` annotations.
+For assertions that need behaviors the real session doesn't exhibit (nested compactions, stuck-loop, env-error loop), the harness uses two formats depending on payload size:
 
-This is the same separation D1 uses between real-fixture scenarios (the YAML suite against `mini-ts/`) and edge-case fixtures (`mini-ts-partial/`).
+- **Small JSONL tapes committed under `src/eval/replay-tapes/synthesized/`** — for cases where the recorded sequence is short and inspectable on PR diff. `stuck-loop` (6 entries) and `env-error-loop` (7 entries) both fit. These have richer `expected.json` annotations including a `guards: [{guard, reasonContains}]` block that asserts the specific guard fires with the expected reason fragment.
+- **Programmatic tapes in `synthesized.test.ts`** — for cases that need ≥ 500 KB of synthetic content to push the agent past a threshold. Nested compaction is the canonical example: it requires five 100 KB tool_results to bloat the tail past 75 % both before and after the first compaction. Committing that as JSONL would bloat the repo for no inspection value.
+
+This is the same separation D1 uses between real-fixture scenarios (the YAML suite against `mini-ts/`) and edge-case fixtures (`mini-ts-partial/`) — committed when small, generated when not.
 
 ---
 

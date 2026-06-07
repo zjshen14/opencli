@@ -1,0 +1,33 @@
+{
+  "source": "synthesised — three iterations whose tool_results all contain ENV_ERROR_PATTERNS['EPERM']; agent.ts ENV_ERROR_THRESHOLD=3 must abort the loop after the third recurrence. Args differ across iterations so the stuck-loop guard does NOT fire.",
+  "tapeStats": {
+    "turns": 1,
+    "totalIterations": 3,
+    "totalToolCalls": 3
+  },
+  "observability": {
+    "exact": {
+      "compact_threshold_warned": 0,
+      "compact_started": 0,
+      "compact_completed": 0,
+      "compact_failed": 0,
+      "empty_response_retry": 0,
+      "llm_call_start": 3,
+      "llm_call_end": 3,
+      "context_snapshot": 3,
+      "guard_triggered": 1,
+      "tool_exec_start": 3,
+      "tool_exec_end": 3
+    }
+  },
+  "cleanExit": {
+    "tapeExhausted": true,
+    "unconsumedResults": 0
+  },
+  "guards": [
+    {
+      "guard": "env_error_loop",
+      "reasonContains": "EPERM"
+    }
+  ]
+}

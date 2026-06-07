@@ -1,0 +1,33 @@
+{
+  "source": "synthesised — three iterations with identical (name, args) tool calls; agent.ts STUCK_THRESHOLD=3 must abort the loop after the third recurrence",
+  "tapeStats": {
+    "turns": 1,
+    "totalIterations": 3,
+    "totalToolCalls": 3
+  },
+  "observability": {
+    "exact": {
+      "compact_threshold_warned": 0,
+      "compact_started": 0,
+      "compact_completed": 0,
+      "compact_failed": 0,
+      "empty_response_retry": 0,
+      "llm_call_start": 3,
+      "llm_call_end": 3,
+      "context_snapshot": 3,
+      "guard_triggered": 1,
+      "tool_exec_start": 2,
+      "tool_exec_end": 2
+    }
+  },
+  "cleanExit": {
+    "tapeExhausted": true,
+    "unconsumedResults": 0
+  },
+  "guards": [
+    {
+      "guard": "stuck_loop",
+      "reasonContains": "identical consecutive call signatures"
+    }
+  ]
+}

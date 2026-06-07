@@ -22,6 +22,19 @@ A tape is a JSONL file with `SessionEntry` records (same format as `~/.opencli/p
 | What it proves | Realistic call patterns replay cleanly — every recorded `tool_call`/`tool_result` pair is consumed in order, every observability event fires as expected, no guards misfire. Catches regressions on real trajectory shapes that hand-written tapes wouldn't surface. |
 | What it doesn't prove | The session is too short (~11k token peak) to trigger A5b auto-compact. Compaction contract is asserted by the synthesized-pressure tapes in [`runner.test.ts`](../replay/runner.test.ts). |
 
+### `synthesized/stuck-loop` and `synthesized/env-error-loop`
+
+Two hand-written JSONL tapes covering safety-guard behaviours the real card_trade trajectory doesn't exercise. Small enough to inspect on PR diff (5–7 entries each); no redaction needed (no real paths or identifiers). Driven by [`src/eval/replay/synthesized.test.ts`](../replay/synthesized.test.ts).
+
+| Tape | Asserts |
+|---|---|
+| `stuck-loop` | Three identical (name, args) tool calls in a row fire `guard_triggered('stuck_loop')`. Only iters 1+2 execute — iter 3 aborts before tool execution. |
+| `env-error-loop` | Three consecutive tool results containing `EPERM` fire `guard_triggered('env_error_loop')`. All three iters execute; the guard fires AFTER the third. Args differ across iters so stuck-loop does not also fire. |
+
+### Nested compaction (programmatic, lives in `synthesized.test.ts`)
+
+The third synthesised case — two compactions in one replay, the second one nested inside the prune anchor preserved by the first — needs ≥ 500 KB of synthetic content (5 × 100 KB `read` results) to push the agent above the 75 % auto-compact threshold twice. Committing that as JSONL would bloat the repo for zero inspection value, so the tape is generated programmatically in the test. The assertion checks that the original user input survives both compactions via the verbatim-block anchor preservation in `extractOriginalTask`.
+
 ## Refreshing a tape
 
 If you change the agent loop and the `expected.json` diff is legitimate (the new event count is correct), commit the change with a brief note about *why* the count changed. Reviewers should:

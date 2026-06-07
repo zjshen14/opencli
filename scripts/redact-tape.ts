@@ -81,6 +81,42 @@ function buildRules(username: string): ReplacementRule[] {
   ];
 }
 
+/**
+ * Pre-pass: parse each line as JSON and rewrite the `cwd` field on any
+ * `session_start` entry to a generic placeholder. This catches cwds that
+ * the string-replacement rules would otherwise miss — e.g.
+ * `/Workspace/<project>` or `/opt/<project>` paths that don't contain the
+ * author's username. Non-JSON / non-session_start lines pass through
+ * untouched.
+ *
+ * Returns the rewritten content and the number of session_start entries
+ * normalised.
+ */
+function normaliseSessionStarts(input: string): { out: string; rewrites: number } {
+  let rewrites = 0;
+  const outLines = input.split("\n").map((line) => {
+    if (!line.trim()) return line;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      return line;
+    }
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      (parsed as { type?: unknown }).type === "session_start" &&
+      typeof (parsed as { cwd?: unknown }).cwd === "string"
+    ) {
+      (parsed as { cwd: string }).cwd = "/Users/REPLAY-USER/Workspace/replay-project";
+      rewrites++;
+      return JSON.stringify(parsed);
+    }
+    return line;
+  });
+  return { out: outLines.join("\n"), rewrites };
+}
+
 function redactString(input: string, rules: ReplacementRule[]): { out: string; counts: number[] } {
   let out = input;
   const counts = rules.map(() => 0);
@@ -149,9 +185,16 @@ function main(): void {
     truncation = { fromLine: from, toLine: to };
   }
 
+  // Pass 1: normalise any session_start.cwd to a generic placeholder.
+  // This catches cwds that the string-replace rules would miss (paths
+  // that don't contain the author's username).
+  const { out: normalised, rewrites: sessionStartRewrites } = normaliseSessionStarts(processInput);
+
+  // Pass 2: string-replace home paths and bare username references in
+  // every remaining byte (tool args, tool results, code content).
   const rules = buildRules(username);
-  const { out, counts } = redactString(processInput, rules);
-  const totalReplacements = counts.reduce((a, b) => a + b, 0);
+  const { out, counts } = redactString(normalised, rules);
+  const totalReplacements = counts.reduce((a, b) => a + b, 0) + sessionStartRewrites;
 
   if (totalReplacements === 0) {
     process.stderr.write(
@@ -186,6 +229,7 @@ function main(): void {
     outputBytes: out.length,
     truncation,
     totalReplacements,
+    sessionStartRewrites,
     rules: rules.map((r, i) => ({
       find: r.find,
       replace: r.replace,

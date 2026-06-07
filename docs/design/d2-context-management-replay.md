@@ -1,6 +1,6 @@
 # Design: D2 — Context-management replay (session-tape contract eval)
 
-_Status: Ready for implementation. Phase: [Roadmap D2](../roadmap.md#phase-d--evaluation). Sibling of [D1](./d1-eval-harness.md)._
+_Status: Implemented — replay harness skeleton merged in [`bb8fe3f`](https://github.com/zjshen14/opencli/commit/bb8fe3f) (#229, 2026-06-06); real card_trade tape + redaction in [`99b4905`](https://github.com/zjshen14/opencli/commit/99b4905) (#231) and [`acfd4da`](https://github.com/zjshen14/opencli/commit/acfd4da) (#232, 2026-06-07); synthesised edge-case tapes in [`cc01444`](https://github.com/zjshen14/opencli/commit/cc01444) (#233, 2026-06-07). Other D2 contract evals (sandbox / plan-mode / HITL / headless schema) tracked in [#234](https://github.com/zjshen14/opencli/issues/234). Phase: [Roadmap D2](../roadmap.md#phase-d--evaluation). Sibling of [D1](./d1-eval-harness.md)._
 
 ---
 

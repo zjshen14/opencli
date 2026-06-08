@@ -19,6 +19,11 @@ const MODEL_CONTEXT_WINDOWS: [prefix: string, tokens: number][] = [
   ["claude-", 200_000],
   ["gpt-4.1", 128_000],
   ["gpt-4o", 128_000],
+  // Mini/preview reasoning models have 128k context; must come before the base o1/o3/o4 entries.
+  ["o1-mini", 128_000],
+  ["o1-preview", 128_000],
+  ["o3-mini", 128_000],
+  ["o4-mini", 128_000],
   ["o1", 200_000],
   ["o3", 200_000],
   ["o4", 200_000],

@@ -296,6 +296,22 @@ describe("contextWindowFor", () => {
     expect(contextWindowFor("gpt-4.1")).toBe(128_000);
   });
 
+  it("returns 200_000 for o1/o3/o4 base reasoning models", () => {
+    expect(contextWindowFor("o1")).toBe(200_000);
+    expect(contextWindowFor("o3")).toBe(200_000);
+    expect(contextWindowFor("o4")).toBe(200_000);
+  });
+
+  it("returns 128_000 for o1-mini and o1-preview (smaller context than base o1)", () => {
+    expect(contextWindowFor("o1-mini")).toBe(128_000);
+    expect(contextWindowFor("o1-preview")).toBe(128_000);
+  });
+
+  it("returns 128_000 for o3-mini and o4-mini (smaller context than base models)", () => {
+    expect(contextWindowFor("o3-mini")).toBe(128_000);
+    expect(contextWindowFor("o4-mini")).toBe(128_000);
+  });
+
   it("returns 100_000 for unknown model", () => {
     expect(contextWindowFor("unknown-model-xyz")).toBe(100_000);
   });

@@ -168,18 +168,19 @@ describe("compactArg", () => {
 
 describe("summariseResult", () => {
   describe("read", () => {
-    it("counts lines correctly", () => {
-      const result = stripAnsi(summariseResult("read", "line1\nline2\nline3"));
+    it("counts lines correctly for line-numbered output", () => {
+      const result = stripAnsi(summariseResult("read", "1\tline1\n2\tline2\n3\tline3"));
       expect(result).toContain("3 lines");
     });
 
-    it("shows first line as file path preview", () => {
-      const result = stripAnsi(summariseResult("read", "src/foo.ts\nconst x = 1;"));
-      expect(result).toContain("src/foo.ts");
+    it("does not show file content as file path", () => {
+      const result = stripAnsi(summariseResult("read", "1\tconst x = 1;\n2\tconst y = 2;"));
+      expect(result).toContain("2 lines");
+      expect(result).not.toContain("const x");
     });
 
     it("handles single line", () => {
-      const result = stripAnsi(summariseResult("read", "only one line"));
+      const result = stripAnsi(summariseResult("read", "1\tonly one line"));
       expect(result).toContain("1 lines");
     });
 

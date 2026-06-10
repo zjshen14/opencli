@@ -62,7 +62,12 @@ export function truncateOutput(output: string, callId: string, tmpDir?: string):
 
 export interface ExecutionResult {
   results: FunctionResultPart[];
-  // Skill activations return no tool result — they mutate context directly
+  /** Synthetic function_results for activate_skill calls. Providers (Gemini,
+   *  Anthropic) require a functionResponse for every functionCall in the
+   *  preceding model turn — without these the next API call returns 400.
+   *  Kept separate from results so the agent loop can add them to context
+   *  without surfacing them as tool_result events. */
+  skillResults: FunctionResultPart[];
 }
 
 async function executeOneCall(
@@ -146,7 +151,7 @@ export async function executeCalls(
   const skillCalls = calls.filter((c) => c.name === "activate_skill");
   const toolCalls = calls.filter((c) => c.name !== "activate_skill");
 
-  // Handle skill activations (context mutation, no tool result needed)
+  // Handle skill activations (context mutation)
   for (const call of skillCalls) {
     const name = call.args.name as string;
     if (!deps.context.hasSkill(name)) {
@@ -156,6 +161,20 @@ export async function executeCalls(
       }
     }
   }
+
+  // Build synthetic function_results for each skill activation. Providers
+  // require a functionResponse for every functionCall in the preceding model
+  // turn — without these the next API call returns 400.
+  const skillResults: FunctionResultPart[] = skillCalls.map((call) => {
+    const sig = call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {};
+    return {
+      type: "function_result",
+      id: call.id,
+      name: call.name,
+      result: `Skill "${call.args.name as string}" activated.`,
+      ...sig,
+    };
+  });
 
   // If any call mutates state, execute all sequentially in declared order to
   // prevent race conditions (e.g. two edits to the same file, or a write
@@ -175,5 +194,5 @@ export async function executeCalls(
     results = await Promise.all(toolCalls.map((call) => executeOneCall(call, deps)));
   }
 
-  return { results };
+  return { results, skillResults };
 }

@@ -255,7 +255,7 @@ export class Agent {
         stuckCount = 1;
       }
 
-      const { results } = await executeCalls(pendingCalls, {
+      const { results, skillResults } = await executeCalls(pendingCalls, {
         tools: this.tools,
         skills: this.skills,
         context: this.context,
@@ -328,10 +328,14 @@ export class Agent {
         yield { type: "tool_result", name: result.name, result: result.result };
       }
 
-      if (results.length > 0) {
+      // skillResults are added to context for conversation well-formedness but
+      // not yielded as tool_result events — skill activation is already surfaced
+      // via the skill_activated event above.
+      const allParts = [...skillResults, ...results];
+      if (allParts.length > 0) {
         this.context.addMessage({
           role: "user",
-          parts: results,
+          parts: allParts,
         });
       }
     }

@@ -212,33 +212,39 @@ describe("executeCalls", () => {
     expect(results[0].result).toContain("Error: Exited with code 1");
   });
 
-  it("activates a skill and injects into context (no tool result)", async () => {
+  it("activates a skill, injects into context, and returns a synthetic skillResult", async () => {
     const context = new ContextManager();
     const skillRegistry = makeSkillRegistry({ review: "Review instructions." });
 
-    const { results } = await executeCalls([makeToolCall("activate_skill", { name: "review" })], {
-      tools: new ToolRegistry(),
-      skills: skillRegistry,
-      context,
-    });
+    const { results, skillResults } = await executeCalls(
+      [makeToolCall("activate_skill", { name: "review" })],
+      { tools: new ToolRegistry(), skills: skillRegistry, context },
+    );
 
-    // activate_skill does not produce a tool result
+    // No regular tool result — activate_skill is not a registry tool
     expect(results).toHaveLength(0);
+    // Synthetic result keeps the conversation well-formed (providers require a
+    // functionResponse for every functionCall in the preceding model turn).
+    expect(skillResults).toHaveLength(1);
+    expect(skillResults[0].name).toBe("activate_skill");
+    expect(skillResults[0].result).toContain("review");
     expect(context.hasSkill("review")).toBe(true);
   });
 
-  it("does not re-activate an already active skill", async () => {
+  it("does not re-activate an already active skill but still returns a synthetic skillResult", async () => {
     const context = new ContextManager();
     context.addSkillContent("review", "Already active.");
     const skillRegistry = makeSkillRegistry({ review: "Review instructions." });
 
-    await executeCalls([makeToolCall("activate_skill", { name: "review" })], {
-      tools: new ToolRegistry(),
-      skills: skillRegistry,
-      context,
-    });
+    const { skillResults } = await executeCalls(
+      [makeToolCall("activate_skill", { name: "review" })],
+      { tools: new ToolRegistry(), skills: skillRegistry, context },
+    );
 
     expect(skillRegistry.load).not.toHaveBeenCalled();
+    // functionResponse is still needed for conversation well-formedness even
+    // when the skill was already loaded.
+    expect(skillResults).toHaveLength(1);
   });
 
   it("truncates bash output exceeding the limit (middle-truncation)", async () => {

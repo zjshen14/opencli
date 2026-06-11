@@ -212,38 +212,44 @@ describe("executeCalls", () => {
     expect(results[0].result).toContain("Error: Exited with code 1");
   });
 
-  it("activates a skill, injects into context, and returns a synthetic skillResult", async () => {
+  it("activates a skill and produces a synthetic skillResult (no regular tool result)", async () => {
     const context = new ContextManager();
     const skillRegistry = makeSkillRegistry({ review: "Review instructions." });
 
     const { results, skillResults } = await executeCalls(
       [makeToolCall("activate_skill", { name: "review" })],
-      { tools: new ToolRegistry(), skills: skillRegistry, context },
+      {
+        tools: new ToolRegistry(),
+        skills: skillRegistry,
+        context,
+      },
     );
 
-    // No regular tool result — activate_skill is not a registry tool
+    // activate_skill does not produce a regular tool result
     expect(results).toHaveLength(0);
-    // Synthetic result keeps the conversation well-formed (providers require a
-    // functionResponse for every functionCall in the preceding model turn).
+    // but does produce a synthetic function_result to keep history well-formed
     expect(skillResults).toHaveLength(1);
     expect(skillResults[0].name).toBe("activate_skill");
-    expect(skillResults[0].result).toContain("review");
+    expect(skillResults[0].id).toBe("call-1");
     expect(context.hasSkill("review")).toBe(true);
   });
 
-  it("does not re-activate an already active skill but still returns a synthetic skillResult", async () => {
+  it("does not re-activate an already active skill", async () => {
     const context = new ContextManager();
     context.addSkillContent("review", "Already active.");
     const skillRegistry = makeSkillRegistry({ review: "Review instructions." });
 
     const { skillResults } = await executeCalls(
       [makeToolCall("activate_skill", { name: "review" })],
-      { tools: new ToolRegistry(), skills: skillRegistry, context },
+      {
+        tools: new ToolRegistry(),
+        skills: skillRegistry,
+        context,
+      },
     );
 
     expect(skillRegistry.load).not.toHaveBeenCalled();
-    // functionResponse is still needed for conversation well-formedness even
-    // when the skill was already loaded.
+    // synthetic function_result is still produced even when skill was already active
     expect(skillResults).toHaveLength(1);
   });
 

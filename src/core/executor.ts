@@ -62,11 +62,9 @@ export function truncateOutput(output: string, callId: string, tmpDir?: string):
 
 export interface ExecutionResult {
   results: FunctionResultPart[];
-  /** Synthetic function_results for activate_skill calls. Providers (Gemini,
-   *  Anthropic) require a functionResponse for every functionCall in the
-   *  preceding model turn — without these the next API call returns 400.
-   *  Kept separate from results so the agent loop can add them to context
-   *  without surfacing them as tool_result events. */
+  // Synthetic function_result entries for activate_skill calls — not surfaced as
+  // tool_result events but required so every functionCall has a matching
+  // functionResponse in the conversation history (Gemini/Anthropic require this).
   skillResults: FunctionResultPart[];
 }
 
@@ -151,7 +149,9 @@ export async function executeCalls(
   const skillCalls = calls.filter((c) => c.name === "activate_skill");
   const toolCalls = calls.filter((c) => c.name !== "activate_skill");
 
-  // Handle skill activations (context mutation)
+  // Handle skill activations: mutate context and build synthetic function_result
+  // entries so every functionCall has a matching functionResponse in history.
+  const skillResults: FunctionResultPart[] = [];
   for (const call of skillCalls) {
     const name = call.args.name as string;
     if (!deps.context.hasSkill(name)) {
@@ -160,21 +160,15 @@ export async function executeCalls(
         deps.context.addSkillContent(name, body);
       }
     }
-  }
-
-  // Build synthetic function_results for each skill activation. Providers
-  // require a functionResponse for every functionCall in the preceding model
-  // turn — without these the next API call returns 400.
-  const skillResults: FunctionResultPart[] = skillCalls.map((call) => {
     const sig = call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {};
-    return {
+    skillResults.push({
       type: "function_result",
       id: call.id,
       name: call.name,
-      result: `Skill "${call.args.name as string}" activated.`,
+      result: "Skill activated.",
       ...sig,
-    };
-  });
+    });
+  }
 
   // If any call mutates state, execute all sequentially in declared order to
   // prevent race conditions (e.g. two edits to the same file, or a write

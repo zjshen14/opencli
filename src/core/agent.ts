@@ -328,14 +328,11 @@ export class Agent {
         yield { type: "tool_result", name: result.name, result: result.result };
       }
 
-      // skillResults are added to context for conversation well-formedness but
-      // not yielded as tool_result events — skill activation is already surfaced
-      // via the skill_activated event above.
-      const allParts = [...skillResults, ...results];
-      if (allParts.length > 0) {
+      const allResultParts = [...skillResults, ...results];
+      if (allResultParts.length > 0) {
         this.context.addMessage({
           role: "user",
-          parts: allParts,
+          parts: allResultParts,
         });
       }
     }

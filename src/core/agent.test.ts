@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { Agent } from "./agent.js";
 import { ToolRegistry } from "../tools/registry.js";
 import { SkillRegistry } from "../skills/registry.js";
@@ -526,44 +526,6 @@ describe("Agent stuck-loop detection", () => {
   });
 });
 
-describe("Agent activate_skill — conversation well-formedness", () => {
-  it("includes a function_result for activate_skill in the next LLM call's messages", async () => {
-    // If the model calls activate_skill and no FunctionResultPart is produced,
-    // the conversation sent to the next stream() call has an orphaned functionCall
-    // with no matching functionResponse — Gemini/Anthropic return 400.
-    let callCount = 0;
-    let secondCallMessages: Message[] = [];
-
-    const client: LLMClient = {
-      async *stream(messages: Message[], _sys: string, _tools: ToolDefinition[]) {
-        callCount++;
-        if (callCount === 1) {
-          yield {
-            type: "function_call",
-            id: "skill-call-1",
-            name: "activate_skill",
-            args: { name: "review" },
-          } as StreamEvent;
-          yield { type: "done" } as StreamEvent;
-        } else {
-          secondCallMessages = messages;
-          yield { type: "text", text: "ok" } as StreamEvent;
-          yield { type: "done" } as StreamEvent;
-        }
-      },
-    };
-
-    const agent = new Agent(client, makeNoopRegistry(), new SkillRegistry());
-    await collectEvents(agent, "review the code");
-
-    expect(callCount).toBe(2);
-    const hasActivateSkillResult = secondCallMessages.some((m) =>
-      m.parts.some((p) => p.type === "function_result" && p.name === "activate_skill"),
-    );
-    expect(hasActivateSkillResult).toBe(true);
-  });
-});
-
 describe("Agent auto-compact (A5b)", () => {
   // Returns a quiet finishing client so each agent.run() emits no tool calls
   // and ends cleanly with a "done" event. The point of these tests is the
@@ -798,5 +760,50 @@ describe("Agent auto-compact (A5b)", () => {
     ]);
     await collectEvents(agent, "second");
     expect(events.filter((e) => e.type === "compact_threshold_warned")).toHaveLength(2);
+  });
+});
+
+describe("Agent activate_skill — conversation well-formedness", () => {
+  it("includes a function_result for activate_skill in the next LLM call's messages", async () => {
+    const captured: Message[][] = [];
+    let callCount = 0;
+    const client: LLMClient = {
+      async *stream(messages: Message[]) {
+        captured.push(messages);
+        callCount++;
+        if (callCount === 1) {
+          yield {
+            type: "function_call",
+            id: "skill-call-1",
+            name: "activate_skill",
+            args: { name: "review" },
+          } as StreamEvent;
+        }
+        yield { type: "done" } as StreamEvent;
+      },
+    };
+
+    const skillRegistry = {
+      load: vi.fn(async () => "Review instructions."),
+      has: vi.fn(),
+      list: vi.fn(() => []),
+      get: vi.fn(),
+      discover: vi.fn(),
+      catalogSummary: vi.fn(() => ""),
+    } as unknown as SkillRegistry;
+
+    const agent = new Agent(client, makeNoopRegistry(), skillRegistry);
+    await collectEvents(agent, "do a review");
+
+    // The second LLM call must receive a user message with a function_result
+    // for activate_skill — without it Gemini/Anthropic return 400 Bad Request.
+    expect(captured.length).toBeGreaterThanOrEqual(2);
+    const secondCallMessages = captured[1];
+    const lastUserMsg = [...secondCallMessages].reverse().find((m) => m.role === "user");
+    expect(lastUserMsg).toBeDefined();
+    const hasFnResult = lastUserMsg!.parts.some(
+      (p) => p.type === "function_result" && (p as { name: string }).name === "activate_skill",
+    );
+    expect(hasFnResult).toBe(true);
   });
 });

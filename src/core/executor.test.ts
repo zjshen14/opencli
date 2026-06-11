@@ -212,18 +212,25 @@ describe("executeCalls", () => {
     expect(results[0].result).toContain("Error: Exited with code 1");
   });
 
-  it("activates a skill and injects into context (no tool result)", async () => {
+  it("activates a skill and produces a synthetic skillResult (no regular tool result)", async () => {
     const context = new ContextManager();
     const skillRegistry = makeSkillRegistry({ review: "Review instructions." });
 
-    const { results } = await executeCalls([makeToolCall("activate_skill", { name: "review" })], {
-      tools: new ToolRegistry(),
-      skills: skillRegistry,
-      context,
-    });
+    const { results, skillResults } = await executeCalls(
+      [makeToolCall("activate_skill", { name: "review" })],
+      {
+        tools: new ToolRegistry(),
+        skills: skillRegistry,
+        context,
+      },
+    );
 
-    // activate_skill does not produce a tool result
+    // activate_skill does not produce a regular tool result
     expect(results).toHaveLength(0);
+    // but does produce a synthetic function_result to keep history well-formed
+    expect(skillResults).toHaveLength(1);
+    expect(skillResults[0].name).toBe("activate_skill");
+    expect(skillResults[0].id).toBe("call-1");
     expect(context.hasSkill("review")).toBe(true);
   });
 
@@ -232,13 +239,18 @@ describe("executeCalls", () => {
     context.addSkillContent("review", "Already active.");
     const skillRegistry = makeSkillRegistry({ review: "Review instructions." });
 
-    await executeCalls([makeToolCall("activate_skill", { name: "review" })], {
-      tools: new ToolRegistry(),
-      skills: skillRegistry,
-      context,
-    });
+    const { skillResults } = await executeCalls(
+      [makeToolCall("activate_skill", { name: "review" })],
+      {
+        tools: new ToolRegistry(),
+        skills: skillRegistry,
+        context,
+      },
+    );
 
     expect(skillRegistry.load).not.toHaveBeenCalled();
+    // synthetic function_result is still produced even when skill was already active
+    expect(skillResults).toHaveLength(1);
   });
 
   it("truncates bash output exceeding the limit (middle-truncation)", async () => {

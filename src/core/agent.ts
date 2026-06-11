@@ -255,7 +255,7 @@ export class Agent {
         stuckCount = 1;
       }
 
-      const { results } = await executeCalls(pendingCalls, {
+      const { results, skillResults } = await executeCalls(pendingCalls, {
         tools: this.tools,
         skills: this.skills,
         context: this.context,
@@ -328,10 +328,11 @@ export class Agent {
         yield { type: "tool_result", name: result.name, result: result.result };
       }
 
-      if (results.length > 0) {
+      const allResultParts = [...skillResults, ...results];
+      if (allResultParts.length > 0) {
         this.context.addMessage({
           role: "user",
-          parts: results,
+          parts: allResultParts,
         });
       }
     }

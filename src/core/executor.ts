@@ -62,7 +62,10 @@ export function truncateOutput(output: string, callId: string, tmpDir?: string):
 
 export interface ExecutionResult {
   results: FunctionResultPart[];
-  // Skill activations return no tool result — they mutate context directly
+  // Synthetic function_result entries for activate_skill calls — not surfaced as
+  // tool_result events but required so every functionCall has a matching
+  // functionResponse in the conversation history (Gemini/Anthropic require this).
+  skillResults: FunctionResultPart[];
 }
 
 async function executeOneCall(
@@ -146,7 +149,9 @@ export async function executeCalls(
   const skillCalls = calls.filter((c) => c.name === "activate_skill");
   const toolCalls = calls.filter((c) => c.name !== "activate_skill");
 
-  // Handle skill activations (context mutation, no tool result needed)
+  // Handle skill activations: mutate context and build synthetic function_result
+  // entries so every functionCall has a matching functionResponse in history.
+  const skillResults: FunctionResultPart[] = [];
   for (const call of skillCalls) {
     const name = call.args.name as string;
     if (!deps.context.hasSkill(name)) {
@@ -155,6 +160,14 @@ export async function executeCalls(
         deps.context.addSkillContent(name, body);
       }
     }
+    const sig = call.thoughtSignature ? { thoughtSignature: call.thoughtSignature } : {};
+    skillResults.push({
+      type: "function_result",
+      id: call.id,
+      name: call.name,
+      result: "Skill activated.",
+      ...sig,
+    });
   }
 
   // If any call mutates state, execute all sequentially in declared order to
@@ -175,5 +188,5 @@ export async function executeCalls(
     results = await Promise.all(toolCalls.map((call) => executeOneCall(call, deps)));
   }
 
-  return { results };
+  return { results, skillResults };
 }

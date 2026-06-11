@@ -144,6 +144,101 @@ describe("OpenAIClient message format", () => {
     expect(callArgs[0].max_tokens).toBe(16384);
   });
 
+  it("passes temperature to the API call for non-o1 models", async () => {
+    const tempClient = new OpenAIClient("fake-key", "gpt-4o", { temperature: 0.5 });
+    mockCreate.mockResolvedValue(
+      makeStream([{ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] }]),
+    );
+    for await (const e of tempClient.stream([], "sys", [])) {
+      void e;
+    }
+    const [callArgs] = mockCreate.mock.calls;
+    expect(callArgs[0].temperature).toBe(0.5);
+  });
+
+  it("passes temperature to the API call for o3-mini (supports temperature)", async () => {
+    vi.mocked(OpenAI).mockImplementation(
+      () =>
+        ({
+          chat: { completions: { create: mockCreate } },
+        }) as unknown as InstanceType<typeof OpenAI>,
+    );
+    const tempClient = new OpenAIClient("fake-key", "o3-mini", { temperature: 0.7 });
+    mockCreate.mockResolvedValue(
+      makeStream([{ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] }]),
+    );
+    for await (const e of tempClient.stream([], "sys", [])) {
+      void e;
+    }
+    const [callArgs] = mockCreate.mock.calls;
+    expect(callArgs[0].temperature).toBe(0.7);
+  });
+
+  it("omits temperature for o1 (temperature is fixed at 1)", async () => {
+    vi.mocked(OpenAI).mockImplementation(
+      () =>
+        ({
+          chat: { completions: { create: mockCreate } },
+        }) as unknown as InstanceType<typeof OpenAI>,
+    );
+    const o1Client = new OpenAIClient("fake-key", "o1", { temperature: 0.5 });
+    mockCreate.mockResolvedValue(
+      makeStream([{ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] }]),
+    );
+    for await (const e of o1Client.stream([], "sys", [])) {
+      void e;
+    }
+    const [callArgs] = mockCreate.mock.calls;
+    expect(callArgs[0].temperature).toBeUndefined();
+  });
+
+  it("omits temperature for o1-mini (temperature is fixed at 1)", async () => {
+    vi.mocked(OpenAI).mockImplementation(
+      () =>
+        ({
+          chat: { completions: { create: mockCreate } },
+        }) as unknown as InstanceType<typeof OpenAI>,
+    );
+    const o1MiniClient = new OpenAIClient("fake-key", "o1-mini", { temperature: 0.5 });
+    mockCreate.mockResolvedValue(
+      makeStream([{ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] }]),
+    );
+    for await (const e of o1MiniClient.stream([], "sys", [])) {
+      void e;
+    }
+    const [callArgs] = mockCreate.mock.calls;
+    expect(callArgs[0].temperature).toBeUndefined();
+  });
+
+  it("omits temperature for o1-preview (temperature is fixed at 1)", async () => {
+    vi.mocked(OpenAI).mockImplementation(
+      () =>
+        ({
+          chat: { completions: { create: mockCreate } },
+        }) as unknown as InstanceType<typeof OpenAI>,
+    );
+    const o1PreviewClient = new OpenAIClient("fake-key", "o1-preview", { temperature: 0.5 });
+    mockCreate.mockResolvedValue(
+      makeStream([{ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] }]),
+    );
+    for await (const e of o1PreviewClient.stream([], "sys", [])) {
+      void e;
+    }
+    const [callArgs] = mockCreate.mock.calls;
+    expect(callArgs[0].temperature).toBeUndefined();
+  });
+
+  it("omits temperature when not configured regardless of model", async () => {
+    mockCreate.mockResolvedValue(
+      makeStream([{ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] }]),
+    );
+    for await (const e of client.stream([], "sys", [])) {
+      void e;
+    }
+    const [callArgs] = mockCreate.mock.calls;
+    expect(callArgs[0].temperature).toBeUndefined();
+  });
+
   it("injects system instruction as first message", async () => {
     mockCreate.mockResolvedValue(
       makeStream([{ choices: [{ delta: { content: "hi" }, finish_reason: "stop" }] }]),

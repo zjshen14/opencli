@@ -10,6 +10,7 @@ import { resolveApiKey } from "./keys.js";
 import { runRepl } from "./repl.js";
 import { createConfirmFn } from "./confirm.js";
 import { printError, printInfo } from "./renderer.js";
+import { toJsonLine } from "./json-output.js";
 import type { ObservabilityEvent } from "../core/observability.js";
 import { createSandboxRunner } from "../tools/exec/sandbox/index.js";
 import type { SandboxMode } from "../tools/exec/sandbox/types.js";
@@ -97,7 +98,13 @@ program
   .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
   .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
   .option("--temperature <float>", "LLM temperature (use 0 for determinism)", parseTemperature)
+  .option("--output <format>", "Output format: text | json (default: text)")
   .action(async (prompt: string, opts) => {
+    const output = opts.output as string | undefined;
+    if (output !== undefined && output !== "text" && output !== "json") {
+      printError(`Invalid --output value '${output}'. Valid values: text, json`);
+      process.exit(1);
+    }
     await runSingle(
       prompt,
       opts.model,
@@ -109,6 +116,7 @@ program
       opts.provider as string | undefined,
       opts.baseUrl as string | undefined,
       opts.temperature as number | undefined,
+      output as "text" | "json" | undefined,
     );
   });
 
@@ -224,6 +232,7 @@ async function runSingle(
   providerOverride?: string,
   baseUrlOverride?: string,
   temperature?: number,
+  outputFormat?: "text" | "json",
 ): Promise<void> {
   const { agent, mcpManager } = await createAgent(
     modelOverride,
@@ -243,15 +252,23 @@ async function runSingle(
   }
   // no confirmFn → executor auto-denies tools that require confirmation
 
+  const jsonMode = outputFormat === "json";
+
   const stream = async (input: string, mode: "react" | "plan") => {
     let text = "";
     for await (const event of agent.run(input, mode)) {
-      if (event.type === "text") {
-        process.stdout.write(event.text);
-        text += event.text;
+      if (jsonMode) {
+        const line = toJsonLine(event);
+        if (line) process.stdout.write(line);
+        if (event.type === "text") text += event.text;
+      } else {
+        if (event.type === "text") {
+          process.stdout.write(event.text);
+          text += event.text;
+        }
+        if (event.type === "error") process.stderr.write(`Error: ${event.message}\n`);
+        if (event.type === "done") process.stdout.write("\n");
       }
-      if (event.type === "error") process.stderr.write(`Error: ${event.message}\n`);
-      if (event.type === "done") process.stdout.write("\n");
     }
     return text;
   };

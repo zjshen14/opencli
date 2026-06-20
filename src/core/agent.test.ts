@@ -845,10 +845,10 @@ describe("Agent periodic reminder injection", () => {
     // Only the last result (at turn PERIODIC_REMINDER_INTERVAL) carries the reminder
     const lastResult = toolResults[toolResults.length - 1];
     expect(lastResult?.result).toContain("[reminder:");
-    expect(lastResult?.result).toContain("commit only when explicitly asked");
+    expect(lastResult?.result).toContain("never commit or push without an explicit user request");
 
     for (const r of toolResults.slice(0, -1)) {
-      expect(r.result).not.toContain("commit only when explicitly asked");
+      expect(r.result).not.toContain("[reminder:");
     }
   });
 
@@ -884,7 +884,7 @@ describe("Agent periodic reminder injection", () => {
       .map((e) => e as { type: "tool_result"; result: string });
 
     for (const r of toolResults) {
-      expect(r.result).not.toContain("commit only when explicitly asked");
+      expect(r.result).not.toContain("[reminder:");
     }
   });
 
@@ -920,7 +920,7 @@ describe("Agent periodic reminder injection", () => {
       .map((e) => e as { type: "tool_result"; result: string });
 
     const reminderResults = toolResults.filter((r) =>
-      r.result.includes("commit only when explicitly asked"),
+      r.result.includes("never commit or push without an explicit user request"),
     );
     // Reminders fired at turns 5 and 10
     expect(reminderResults).toHaveLength(2);

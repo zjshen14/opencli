@@ -133,8 +133,8 @@ describe("buildPeriodicReminder", () => {
     for (const t of [PERIODIC_REMINDER_INTERVAL, PERIODIC_REMINDER_INTERVAL * 2]) {
       const r = buildPeriodicReminder(t);
       expect(r).toContain("[reminder:");
-      expect(r).toContain("commit only when explicitly asked");
-      expect(r).toContain("run tests after changes");
+      expect(r).toContain("never commit or push without an explicit user request");
+      expect(r).toContain("verify the change works");
     }
   });
 });

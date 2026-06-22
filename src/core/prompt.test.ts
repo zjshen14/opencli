@@ -7,6 +7,8 @@ import {
   DEFAULT_SYSTEM_INSTRUCTION,
   getGitContext,
   buildReminder,
+  buildPeriodicReminder,
+  PERIODIC_REMINDER_INTERVAL,
   renderSystemInstruction,
   buildPlanSuffix,
 } from "./prompt.js";
@@ -113,6 +115,27 @@ describe("buildReminder", () => {
     const calls = [{ name: "edit", args: {} }];
     expect(buildReminder(calls)).toContain("verify the change works");
     expect(buildReminder(calls)).toContain("verify the change works");
+  });
+});
+
+describe("buildPeriodicReminder", () => {
+  it("returns empty string for turn 0", () => {
+    expect(buildPeriodicReminder(0)).toBe("");
+  });
+
+  it("returns empty string for turns that are not multiples of the interval", () => {
+    for (let t = 1; t < PERIODIC_REMINDER_INTERVAL; t++) {
+      expect(buildPeriodicReminder(t)).toBe("");
+    }
+  });
+
+  it("returns a [reminder: ...] block at each multiple of the interval", () => {
+    for (const t of [PERIODIC_REMINDER_INTERVAL, PERIODIC_REMINDER_INTERVAL * 2]) {
+      const r = buildPeriodicReminder(t);
+      expect(r).toContain("[reminder:");
+      expect(r).toContain("never commit or push without an explicit user request");
+      expect(r).toContain("verify the change works");
+    }
   });
 });
 

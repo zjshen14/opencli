@@ -98,6 +98,21 @@ export function buildReminder(
   return `\n\n[reminder: ${triggered.map((r) => r.text).join("; ")}]`;
 }
 
+// ── Periodic mid-loop reminders ──────────────────────────────────────────────
+
+/** Inject a brief reminder every N tool-call turns to counter instruction drift in long sessions. */
+export const PERIODIC_REMINDER_INTERVAL = 5;
+
+// Derived from AGENT_REMINDERS so both channels stay in sync and never teach divergent rules.
+const PERIODIC_REMINDER_TEXT = AGENT_REMINDERS.map((r) => r.text).join("; ");
+
+export function buildPeriodicReminder(turn: number): string {
+  if (turn > 0 && turn % PERIODIC_REMINDER_INTERVAL === 0) {
+    return `\n\n[reminder: ${PERIODIC_REMINDER_TEXT}]`;
+  }
+  return "";
+}
+
 // ── System instruction rendering ─────────────────────────────────────────────
 
 export interface SystemInstructionContext {

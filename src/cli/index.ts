@@ -121,6 +121,7 @@ program
   .option("--model <model>", "Set the default model")
   .option("--provider <provider>", "Set the default provider: gemini | anthropic | openai")
   .option("--base-url <url>", "Set a custom base URL for proxy or local inference")
+  .option("--temperature <float>", "Set the default LLM temperature (0–2)", parseTemperature)
   .action(async (opts) => {
     if (opts.geminiApiKey) {
       await saveConfig({ geminiApiKey: opts.geminiApiKey });
@@ -146,13 +147,18 @@ program
       await saveConfig({ baseUrl: opts.baseUrl });
       printInfo(`Base URL set to ${opts.baseUrl}.`);
     }
+    if (opts.temperature !== undefined) {
+      await saveConfig({ temperature: opts.temperature as number });
+      printInfo(`Default temperature set to ${opts.temperature as number}.`);
+    }
     if (
       !opts.geminiApiKey &&
       !opts.anthropicApiKey &&
       !opts.openaiApiKey &&
       !opts.model &&
       !opts.provider &&
-      !opts.baseUrl
+      !opts.baseUrl &&
+      opts.temperature === undefined
     ) {
       const config = await loadConfig();
       console.log(
@@ -333,7 +339,7 @@ async function createAgent(
     maxTokens: config.maxTokens,
     provider,
     baseUrl,
-    temperature,
+    temperature: temperature ?? config.temperature,
   });
   const tools = createDefaultRegistry(model, runner);
 

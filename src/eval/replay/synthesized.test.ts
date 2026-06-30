@@ -119,6 +119,112 @@ describe("synthesised replay — env-error-loop guard", () => {
   });
 });
 
+describe("synthesised replay — plan-mode contract: write tool blocked", () => {
+  function planModeTape(): Tape {
+    return {
+      source: "synth-plan-mode-contract",
+      turns: [
+        {
+          userInput: "write a config file",
+          mode: "plan",
+          iterations: [
+            // The "LLM" calls write — blocked in plan mode, so no recorded result.
+            iter("", [{ name: "write", args: { file_path: "config.json", content: "{}" } }]),
+            iter("I cannot write files in plan mode. Here is my plan instead..."),
+          ],
+        },
+      ],
+    };
+  }
+
+  it("emits tool_denied(plan_mode) for the write call", async () => {
+    const r = await runTape(planModeTape(), { model: "fake-model" });
+    const denied = eventsOfType(r.observability, "tool_denied");
+    expect(denied).toHaveLength(1);
+    expect(denied[0].name).toBe("write");
+    expect(denied[0].reason).toBe("plan_mode");
+  });
+
+  it("does not execute the write tool (blocked before execute())", async () => {
+    const r = await runTape(planModeTape(), { model: "fake-model" });
+    expect(r.executionLog).toHaveLength(0);
+  });
+
+  it("exhausts the tape with no unconsumed results", async () => {
+    const r = await runTape(planModeTape(), { model: "fake-model" });
+    expect(r.tapeExhausted).toBe(true);
+    expect(r.unconsumedResults).toBe(0);
+  });
+});
+
+describe("synthesised replay — HITL contract: confirmFn gates tool execution", () => {
+  /** Tape with a bash call. Pass withResult=true when the call is expected to
+   *  execute (allow path); false when it will be denied before execute(). */
+  function hitlTape(withResult: boolean): Tape {
+    return {
+      source: "synth-hitl-contract",
+      turns: [
+        {
+          userInput: "run a command",
+          mode: "react",
+          iterations: [
+            iter(
+              "",
+              [{ name: "bash", args: { command: "echo hello" } }],
+              withResult ? [{ name: "bash", result: "hello" }] : [],
+            ),
+            iter("Done."),
+          ],
+        },
+      ],
+    };
+  }
+
+  // Forces confirmation for every tool call — TapeRegistry tools carry no
+  // requiresConfirmation predicate by design, so forcesConfirmation is the
+  // only way to exercise the HITL gate in replay.
+  const alwaysForce = (_name: string, _args: Record<string, unknown>): boolean => true;
+
+  it("deny: emits tool_denied(user_denied) and skips execute() when confirmFn returns deny", async () => {
+    const r = await runTape(hitlTape(false), {
+      model: "fake-model",
+      confirmFn: async () => "deny",
+      forcesConfirmation: alwaysForce,
+    });
+    const denied = eventsOfType(r.observability, "tool_denied");
+    expect(denied).toHaveLength(1);
+    expect(denied[0].name).toBe("bash");
+    expect(denied[0].reason).toBe("user_denied");
+    expect(r.executionLog).toHaveLength(0);
+  });
+
+  it("non-interactive: emits tool_denied(non_interactive) when no confirmFn is set", async () => {
+    const r = await runTape(hitlTape(false), {
+      model: "fake-model",
+      // no confirmFn — executor auto-denies with reason "non_interactive"
+      forcesConfirmation: alwaysForce,
+    });
+    const denied = eventsOfType(r.observability, "tool_denied");
+    expect(denied).toHaveLength(1);
+    expect(denied[0].reason).toBe("non_interactive");
+    expect(r.executionLog).toHaveLength(0);
+  });
+
+  it("allow: tool executes and no tool_denied fires when confirmFn returns allow", async () => {
+    const r = await runTape(hitlTape(true), {
+      model: "fake-model",
+      confirmFn: async () => "allow",
+      forcesConfirmation: alwaysForce,
+    });
+    expect(countOfType(r.observability, "tool_denied")).toBe(0);
+    const execStarts = eventsOfType(r.observability, "tool_exec_start");
+    expect(execStarts).toHaveLength(1);
+    expect(execStarts[0].name).toBe("bash");
+    expect(r.executionLog).toHaveLength(1);
+    expect(r.tapeExhausted).toBe(true);
+  });
+});
+
 describe("synthesised replay — nested compaction (programmatic, large payload)", () => {
   /** Three react-mode turns. Turn 1 fills context with 5 × 100 k char
    *  tool_results so post-first-compaction the tail (which always

@@ -12,6 +12,7 @@ import {
   printToolResultExpanded,
   printToolCallCompact,
   printToolResultCompact,
+  printCompactToolRow,
   printEditDiff,
   printError,
   printInfo,
@@ -314,6 +315,55 @@ describe("summariseResult", () => {
       const result = stripAnsi(summariseResult("custom", long));
       // name (padded to 6) + preview (100) + possible ANSI = reasonable bound
       expect(result.length).toBeLessThan(120);
+    });
+  });
+
+  describe("with args (combined call+result line)", () => {
+    it("read includes file_path in output", () => {
+      const result = stripAnsi(
+        summariseResult("read", "1\tline1\n2\tline2", { file_path: "src/foo.ts" }),
+      );
+      expect(result).toContain("src/foo.ts");
+      expect(result).toContain("2 lines");
+    });
+
+    it("glob includes pattern in output", () => {
+      const result = stripAnsi(summariseResult("glob", "a.ts\nb.ts\nc.ts", { pattern: "**/*.ts" }));
+      expect(result).toContain("**/*.ts");
+      expect(result).toContain("3 files");
+    });
+
+    it("grep includes pattern in output", () => {
+      const result = stripAnsi(
+        summariseResult("grep", "match1\nmatch2", { pattern: "render", path: "src/" }),
+      );
+      // path takes precedence over pattern in compactArg ordering
+      expect(result).toContain("src/");
+      expect(result).toContain("2 matches");
+    });
+
+    it("ls includes path in output", () => {
+      const result = stripAnsi(
+        summariseResult("ls", "a.ts (5 bytes)\nb.ts (10 bytes)", { path: "src/" }),
+      );
+      expect(result).toContain("src/");
+      expect(result).toContain("2 entries");
+    });
+
+    it("todo_write omits args (no file path exists)", () => {
+      const result = stripAnsi(
+        summariseResult("todo_write", "[x] 1. Done\n[ ] 2. Pending", {
+          items: [{ content: "x" }],
+        }),
+      );
+      expect(result).toContain("2 tasks");
+      expect(result).not.toContain("[{");
+    });
+
+    it("without args is unchanged from original behaviour", () => {
+      const withArgs = stripAnsi(summariseResult("read", "1\tline", {}));
+      const withoutArgs = stripAnsi(summariseResult("read", "1\tline"));
+      expect(withArgs).toBe(withoutArgs);
     });
   });
 });
@@ -619,6 +669,29 @@ describe("print functions write to stderr/stdout", () => {
     const output = stripAnsi(stderr());
     expect(output).toContain("✓");
     expect(output).not.toContain("✗");
+  });
+
+  it("printCompactToolRow writes a single ✓ line with arg and result", () => {
+    printCompactToolRow("read", { file_path: "src/foo.ts" }, "1\tline1\n2\tline2\n3\tline3");
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✓");
+    expect(output).toContain("src/foo.ts");
+    expect(output).toContain("3 lines");
+  });
+
+  it("printCompactToolRow expands on error instead of showing a misleading ✓", () => {
+    printCompactToolRow("read", { file_path: "missing.ts" }, "Error: ENOENT: no such file");
+    const output = stripAnsi(stderr());
+    expect(output).toContain("✗");
+    expect(output).not.toContain("✓");
+    expect(output).toContain("ENOENT");
+  });
+
+  it("printCompactToolRow includes pattern for glob", () => {
+    printCompactToolRow("glob", { pattern: "**/*.ts" }, "a.ts\nb.ts");
+    const output = stripAnsi(stderr());
+    expect(output).toContain("**/*.ts");
+    expect(output).toContain("2 files");
   });
 
   it("printEditDiff writes + and - lines to stderr", () => {

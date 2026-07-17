@@ -121,7 +121,7 @@ program
   .option("--model <model>", "Set the default model")
   .option("--provider <provider>", "Set the default provider: gemini | anthropic | openai")
   .option("--base-url <url>", "Set a custom base URL for proxy or local inference")
-  .option("--temperature <float>", "Set default LLM temperature (0–2)", parseTemperature)
+  .option("--temperature <float>", "Set the default LLM temperature (0–2)", parseTemperature)
   .action(async (opts) => {
     if (opts.geminiApiKey) {
       await saveConfig({ geminiApiKey: opts.geminiApiKey });

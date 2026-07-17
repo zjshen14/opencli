@@ -56,6 +56,7 @@ program
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
   .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
   .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
+  .option("--temperature <float>", "LLM temperature (use 0 for determinism)", parseTemperature)
   .action(async (opts) => {
     const sessionId = opts.session ?? (opts.resume ? "latest" : undefined);
     await startChat(
@@ -66,6 +67,7 @@ program
       opts.sandbox as string | undefined,
       opts.provider as string | undefined,
       opts.baseUrl as string | undefined,
+      opts.temperature as number | undefined,
     );
   });
 
@@ -185,6 +187,7 @@ async function startChat(
   sandboxFlag?: string,
   providerOverride?: string,
   baseUrlOverride?: string,
+  temperature?: number,
 ): Promise<void> {
   const { agent, skills, mcpManager, snapshotManager } = await createAgent(
     modelOverride,
@@ -193,6 +196,7 @@ async function startChat(
     sandboxFlag,
     providerOverride,
     baseUrlOverride,
+    temperature,
   );
 
   const cleanup = async () => {

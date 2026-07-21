@@ -11,6 +11,12 @@ function isReasoningModel(model: string): boolean {
   return /^o[134](-|$)/.test(model);
 }
 
+// o1/o1-mini/o1-preview do not accept a temperature parameter (it is fixed at 1).
+// o3 and o4 variants do support temperature; only the original o1 family is excluded.
+function lacksTemperatureSupport(model: string): boolean {
+  return /^o1(-|$)/.test(model);
+}
+
 export class OpenAIClient implements LLMClient {
   private client: OpenAI;
   private model: string;
@@ -74,7 +80,9 @@ export class OpenAIClient implements LLMClient {
       tools: openaiTools.length > 0 ? openaiTools : undefined,
       stream: true,
       stream_options: this.includeUsage ? { include_usage: true } : undefined,
-      ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
+      ...(this.temperature !== undefined && !lacksTemperatureSupport(this.model)
+        ? { temperature: this.temperature }
+        : {}),
     });
 
     const pendingCalls = new Map<number, { id: string; name: string; args: string }>();

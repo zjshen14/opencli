@@ -1,33 +1,54 @@
 import type { Provider } from "../providers/factory.js";
+import { getPreset, listProviderIds } from "../providers/registry.js";
 import type { Config } from "../state/config.js";
 
+/**
+ * Config fields holding first-party keys. These predate the registry and are kept as
+ * dedicated fields so existing ~/.opencli/config.json files keep working; newer
+ * providers use the generic `providerApiKeys` map instead.
+ */
+const CONFIG_KEY_FIELDS: Record<string, keyof Config> = {
+  gemini: "geminiApiKey",
+  anthropic: "anthropicApiKey",
+  openai: "openaiApiKey",
+};
+
+/**
+ * Resolves the API key for a provider: the preset's environment variables in declared
+ * order, then the config file, then a placeholder for providers needing no auth.
+ *
+ * Per-provider env vars are what stop OSS keys from colliding — before the registry,
+ * using Kimi meant putting a Moonshot key in OPENAI_API_KEY, which broke the moment you
+ * also wanted real OpenAI.
+ */
 export function resolveApiKey(provider: Provider, config: Config): string {
-  if (provider === "anthropic") {
-    const key = process.env.ANTHROPIC_API_KEY ?? config.anthropicApiKey;
-    if (!key)
-      throw new Error(
-        "No Anthropic API key found. Set ANTHROPIC_API_KEY or run: opencli config --anthropic-api-key <key>",
-      );
-    return key;
+  const preset = getPreset(provider);
+  if (!preset) {
+    throw new Error(
+      `Unknown provider '${provider}'. Valid values: ${listProviderIds().join(", ")}`,
+    );
   }
-  if (provider === "openai") {
-    const key = process.env.OPENAI_API_KEY ?? config.openaiApiKey;
-    if (!key)
-      throw new Error(
-        "No OpenAI API key found. Set OPENAI_API_KEY or run: opencli config --openai-api-key <key>",
-      );
-    return key;
+
+  for (const envVar of preset.apiKeyEnv) {
+    const value = process.env[envVar];
+    if (value) return value;
   }
-  if (provider === "gemini") {
-    const key = process.env.GEMINI_API_KEY ?? config.geminiApiKey;
-    if (!key)
-      throw new Error(
-        "No Gemini API key found. Set GEMINI_API_KEY or run: opencli config --gemini-api-key <key>",
-      );
-    return key;
+
+  const configField = CONFIG_KEY_FIELDS[provider];
+  if (configField) {
+    const value = config[configField];
+    if (typeof value === "string" && value) return value;
   }
-  // Exhaustiveness guard — TypeScript will error here if a new Provider value is added
-  // without updating this function.
-  const _: never = provider;
-  throw new Error(`Unknown provider: ${String(_)}`);
+
+  const custom = config.providerApiKeys?.[provider];
+  if (custom) return custom;
+
+  // Local runtimes need no auth, but SDK clients reject an empty key.
+  if (preset.placeholderKey) return preset.placeholderKey;
+
+  const envList = preset.apiKeyEnv.join(" or ");
+  throw new Error(
+    `No ${preset.keyLabel ?? preset.label} API key found. Set ${envList}, ` +
+      `or add it to ~/.opencli/config.json under providerApiKeys.${provider}`,
+  );
 }

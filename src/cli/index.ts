@@ -1,5 +1,11 @@
 import { Command, InvalidArgumentError } from "commander";
 import { createClient, createCompactionClient, detectProvider } from "../providers/factory.js";
+import {
+  isKnownProvider,
+  listProviderIds,
+  providerDetectionWarning,
+} from "../providers/registry.js";
+import { resolveContextWindow } from "./context-window.js";
 import { Agent } from "../core/agent.js";
 import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
@@ -39,7 +45,9 @@ const program = new Command();
 
 program
   .name("opencli")
-  .description("An open-source AI agent CLI — supports Gemini, Claude, and OpenAI models")
+  .description(
+    "An open-source AI agent CLI — supports Gemini, Claude, OpenAI, and OSS/local models",
+  )
   .version(pkg.version);
 
 program
@@ -54,7 +62,10 @@ program
   .option("--max-turns <n>", "Maximum agent iterations per prompt (default: 50)", parseTurns)
   .option("--debug", "Emit structured observability events to stderr as JSON")
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
-  .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
+  .option(
+    "--provider <provider>",
+    "Override provider detection (e.g. gemini, anthropic, openai, ollama, moonshot, zai)",
+  )
   .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
   .action(async (opts) => {
     const sessionId = opts.session ?? (opts.resume ? "latest" : undefined);
@@ -94,7 +105,10 @@ program
   .option("--yes", "Auto-approve all tool confirmations (skip interactive prompts)")
   .option("--debug", "Emit structured observability events to stderr as JSON")
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
-  .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
+  .option(
+    "--provider <provider>",
+    "Override provider detection (e.g. gemini, anthropic, openai, ollama, moonshot, zai)",
+  )
   .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
   .option("--temperature <float>", "LLM temperature (use 0 for determinism)", parseTemperature)
   .action(async (prompt: string, opts) => {
@@ -119,7 +133,10 @@ program
   .option("--anthropic-api-key <key>", "Set your Anthropic API key")
   .option("--openai-api-key <key>", "Set your OpenAI API key")
   .option("--model <model>", "Set the default model")
-  .option("--provider <provider>", "Set the default provider: gemini | anthropic | openai")
+  .option(
+    "--provider <provider>",
+    "Set the default provider (e.g. gemini, anthropic, openai, ollama, moonshot, zai)",
+  )
   .option("--base-url <url>", "Set a custom base URL for proxy or local inference")
   .action(async (opts) => {
     if (opts.geminiApiKey) {
@@ -294,17 +311,18 @@ function resolveSandboxMode(flagValue: string | undefined, config: Config): Sand
   throw new Error(`Invalid --sandbox value '${raw}'. Valid values: auto, strict, off`);
 }
 
-function resolveProvider(
-  flag: string | undefined,
-  config: Config,
-  model: string,
-): "gemini" | "anthropic" | "openai" {
+function resolveProvider(flag: string | undefined, config: Config, model: string): string {
   const raw = flag ?? config.provider;
   if (raw !== undefined) {
-    if (raw === "gemini" || raw === "anthropic" || raw === "openai") return raw;
-    throw new Error(`Invalid --provider value '${raw}'. Valid values: gemini, anthropic, openai`);
+    if (isKnownProvider(raw)) return raw;
+    throw new Error(
+      `Invalid --provider value '${raw}'. Valid values: ${listProviderIds().join(", ")}`,
+    );
   }
-  return detectProvider(model);
+  const detected = detectProvider(model);
+  const warning = providerDetectionWarning(model, detected);
+  if (warning) process.stderr.write(`[opencli] warn: ${warning}\n`);
+  return detected;
 }
 
 async function createAgent(
@@ -328,12 +346,15 @@ async function createAgent(
   const provider = resolveProvider(providerOverride, config, model);
   const baseUrl = baseUrlOverride ?? config.baseUrl;
   const apiKey = resolveApiKey(provider, config);
+  // Fixes #251: config.temperature was previously ignored unless --temperature was passed.
+  const effectiveTemperature = temperature ?? config.temperature;
   const client = createClient(model, apiKey, {
     includeUsage: !!debug,
     maxTokens: config.maxTokens,
     provider,
     baseUrl,
-    temperature,
+    temperature: effectiveTemperature,
+    onWarn: debug ? (msg) => process.stderr.write(`[opencli] warn: ${msg}\n`) : undefined,
   });
   const tools = createDefaultRegistry(model, runner);
 
@@ -351,13 +372,19 @@ async function createAgent(
   const snapshotManager = new SnapshotManager();
 
   const systemInstruction = await loadSystemInstruction();
-  const compactionClient = createCompactionClient(model, apiKey);
+  const compactionClient = createCompactionClient(model, apiKey, { provider, baseUrl });
+  const { contextWindow, warnings } = await resolveContextWindow(model, provider, baseUrl, config);
+  for (const warning of warnings) {
+    process.stderr.write(`[opencli] warn: ${warning}\n`);
+  }
   const agent = new Agent(client, tools, skills, systemInstruction, config.historySize, maxTurns, {
     model,
     onObservability: debug ? makeDebugHandler() : undefined,
     snapshotManager,
     compactionClient,
     autoCompact: config.autoCompact,
+    contextWindow,
+    provider,
   });
   return { agent, skills, mcpManager, snapshotManager };
 }

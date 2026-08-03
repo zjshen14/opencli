@@ -48,7 +48,7 @@ We commit to three positioning angles, in this order of weight:
 | **B3** | **Structured prompt builder** ([#39](https://github.com/zjshen14/opencli/issues/39)) | Required scaffolding for per-provider prompt variations and the architect/editor split. |
 | **B4** | **`AgentContext` as serializable value type** ([#63](https://github.com/zjshen14/opencli/issues/63)) | Required so context can flow from architect-stage to editor-stage cleanly. Replaces `reconstructMessages()`. |
 | **B5** | **Architect / editor model routing** | **Marquee Angle-1 feature.** Phase B5a: single-vendor (Aider parity). Phase B5b: cross-vendor (e.g. Opus plans, Qwen Coder edits). Nobody ships B5b well today. |
-| **B6** | **Kimi + Qwen clients** | Demonstrates "really multi-provider," not just three brands. Requires B1 plumbing. |
+| **B6** | **OSS + local model support** | _Provider registry landed 2026-08-03_ ([#296](https://github.com/zjshen14/opencli/issues/296), [design](design/b6-oss-models.md)). Presets for Ollama (local), Moonshot/Kimi, Z.ai/GLM, DeepSeek, DashScope/Qwen, OpenRouter — all through the existing OpenAI wire. Includes runtime context-window discovery for local models and a tool-call salvage layer for open-weight models that emit calls as text. |
 | **B7** | **Native web search Phase 1** ([#37](https://github.com/zjshen14/opencli/issues/37)) | Anthropic + Gemini provider-native. OpenAI Responses API via B2. |
 | **B8** | **LSP for TypeScript** | Quality differentiator for the language we self-dogfood. Bundles a tsserver client. Future: per-language plugins. |
 

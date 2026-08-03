@@ -171,6 +171,61 @@ Skills follow the [Agent Skills open standard](https://agentskills.io) and are c
 | `grep` | Regex search across file contents |
 | `bash` | Run shell commands (blocks destructive patterns) |
 
+## Models and providers
+
+OpenCLI is provider-agnostic. Alongside Gemini, Claude, and OpenAI, it ships presets for
+open-source models and local inference — pick one with `--provider`, and the base URL,
+API-key variable, and context window are configured for you.
+
+### Local models with Ollama
+
+No API key, no spend, no network:
+
+```bash
+ollama pull qwen2.5-coder:14b
+opencli --provider ollama --model qwen2.5-coder:14b
+```
+
+OpenCLI queries Ollama for each model's real context window (a stock `qwen2.5-coder:14b`
+is 32 768 tokens, not the generic default) and warns at startup if the selected model
+can't call tools. It also recovers tool calls from models that emit them as plain JSON
+text instead of structured calls — common with open-weight models, and the difference
+between an agent that connects and one that actually works.
+
+### Hosted open-source models
+
+```bash
+export MOONSHOT_API_KEY="..."   # Kimi K3 — 1M context
+opencli --provider moonshot --model kimi-k3
+
+export ZAI_API_KEY="..."        # GLM-5.2 — 1M context, MIT-licensed
+opencli --provider zai --model glm-5.2
+
+export DEEPSEEK_API_KEY="..."   # DeepSeek V4
+opencli --provider deepseek --model deepseek-v4-pro
+```
+
+| Provider | `--provider` | Example model | Key env |
+|---|---|---|---|
+| Google Gemini | `gemini` | `gemini-3.1-flash-lite-preview` | `GEMINI_API_KEY` |
+| Anthropic | `anthropic` | `claude-opus-5` | `ANTHROPIC_API_KEY` |
+| OpenAI | `openai` | `gpt-4o` | `OPENAI_API_KEY` |
+| Ollama (local) | `ollama` | `qwen2.5-coder:14b` | _(none)_ |
+| Moonshot (Kimi) | `moonshot` | `kimi-k3` | `MOONSHOT_API_KEY` |
+| Z.ai (GLM) | `zai` | `glm-5.2` | `ZAI_API_KEY` |
+| DeepSeek | `deepseek` | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` |
+| Qwen (DashScope) | `dashscope` | `qwen3.7-max` | `DASHSCOPE_API_KEY` |
+| OpenRouter | `openrouter` | _(any gateway model)_ | `OPENROUTER_API_KEY` |
+
+Any other OpenAI-compatible endpoint (LiteLLM, vLLM, a corporate proxy) works via
+`--provider openai --base-url <url>`. Override a context window when a proxy truncates it
+or a local Modelfile raises it:
+
+```jsonc
+// ~/.opencli/config.json
+{ "modelOverrides": { "qwen2.5-coder:14b": { "contextWindow": 65536 } } }
+```
+
 ## Configuration
 
 Config is stored at `~/.opencli/config.json`.
@@ -190,6 +245,12 @@ Environment variables take precedence over config file:
 |----------|-------------|
 | `GEMINI_API_KEY` | Gemini API key |
 | `ANTHROPIC_API_KEY` | Anthropic API key |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `MOONSHOT_API_KEY` | Moonshot / Kimi API key |
+| `ZAI_API_KEY` | Z.ai / GLM API key |
+| `DEEPSEEK_API_KEY` | DeepSeek API key |
+| `DASHSCOPE_API_KEY` | Alibaba DashScope / Qwen API key |
+| `OPENROUTER_API_KEY` | OpenRouter gateway API key |
 | `OPENCLI_MODEL` | Model override (beats `--model` and config) |
 | `OPENCLI_SANDBOX` | Sandbox mode override: `auto` \| `strict` \| `off` |
 | `OPENCLI_SNAPSHOT` | Set to `off` to disable git snapshot/rewind |

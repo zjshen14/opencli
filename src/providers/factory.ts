@@ -2,19 +2,23 @@ import { GeminiClient } from "./gemini.js";
 import { AnthropicClient } from "./anthropic.js";
 import { OpenAIClient } from "./openai.js";
 import type { LLMClient } from "./client.js";
+import {
+  PRESETS,
+  getPreset,
+  detectProviderFromRegistry,
+  findModelInfo,
+  listProviderIds,
+} from "./registry.js";
 
-export type Provider = "gemini" | "anthropic" | "openai";
+/**
+ * Provider ids come from the registry rather than a closed union, so adding an OSS
+ * provider is a data change instead of a type change. The three first-party ids are
+ * spelled out so existing call sites keep their literal types and editor completion.
+ */
+export type Provider = "gemini" | "anthropic" | "openai" | (string & {});
 
 export function detectProvider(model: string): Provider {
-  if (model.startsWith("claude-")) return "anthropic";
-  if (
-    model.startsWith("gpt-") ||
-    model.startsWith("o1") ||
-    model.startsWith("o3") ||
-    model.startsWith("o4")
-  )
-    return "openai";
-  return "gemini";
+  return detectProviderFromRegistry(model);
 }
 
 /**
@@ -22,11 +26,9 @@ export function detectProvider(model: string): Provider {
  * making a separate `think` tool redundant.
  */
 export function hasNativeThinking(model: string): boolean {
-  // Gemini thinking models (e.g. gemini-3.1-flash-thinking, gemini-2.5-flash)
+  // An explicitly named thinking variant wins regardless of registry entries.
   if (/thinking/i.test(model)) return true;
-  // Gemini 2.5+ models have native thinking enabled by default
-  if (/gemini-2\.5/i.test(model) || /gemini-3/i.test(model)) return true;
-  return false;
+  return findModelInfo(model)?.nativeThinking ?? false;
 }
 
 const COMPACTION_MODELS: Record<string, string> = {
@@ -35,10 +37,20 @@ const COMPACTION_MODELS: Record<string, string> = {
   openai: "gpt-4.1-mini",
 };
 
-export function createCompactionClient(sessionModel: string, apiKey: string): LLMClient {
-  const provider = detectProvider(sessionModel);
+/**
+ * Picks a cheap model for context compaction. OSS and local providers have no reliable
+ * cheap-tier equivalent, so they compact using the session model itself. The base URL
+ * must be threaded through, or a local session would try to compact against a cloud
+ * endpoint it has no key for.
+ */
+export function createCompactionClient(
+  sessionModel: string,
+  apiKey: string,
+  options?: { provider?: Provider; baseUrl?: string },
+): LLMClient {
+  const provider = options?.provider ?? detectProvider(sessionModel);
   const model = COMPACTION_MODELS[provider] ?? sessionModel;
-  return createClient(model, apiKey, { provider });
+  return createClient(model, apiKey, { provider, baseUrl: options?.baseUrl });
 }
 
 export function createClient(
@@ -50,12 +62,37 @@ export function createClient(
     provider?: Provider;
     baseUrl?: string;
     temperature?: number;
+    /** Non-fatal diagnostics sink, injected by the CLI. */
+    onWarn?: (message: string) => void;
   },
 ): LLMClient {
-  const provider = options?.provider ?? detectProvider(model);
-  const baseUrl = options?.baseUrl;
-  if (provider === "anthropic")
+  const providerId = options?.provider ?? detectProvider(model);
+  const preset = getPreset(providerId);
+
+  if (options?.provider !== undefined && preset === undefined) {
+    throw new Error(
+      `Unknown provider '${providerId}'. Valid values: ${listProviderIds().join(", ")}`,
+    );
+  }
+
+  // An explicit --base-url always overrides the preset's default endpoint.
+  const baseUrl = options?.baseUrl ?? preset?.baseUrl;
+  const wire = preset?.wire ?? "gemini";
+
+  if (wire === "anthropic") {
     return new AnthropicClient(apiKey, model, options?.maxTokens, baseUrl, options?.temperature);
-  if (provider === "openai") return new OpenAIClient(apiKey, model, { ...options, baseUrl });
+  }
+  if (wire === "openai") {
+    return new OpenAIClient(apiKey, model, {
+      includeUsage: options?.includeUsage,
+      maxTokens: options?.maxTokens,
+      temperature: options?.temperature,
+      baseUrl,
+      salvage: preset?.salvageToolCalls ?? false,
+      onWarn: options?.onWarn,
+    });
+  }
   return new GeminiClient(apiKey, model, options?.maxTokens, baseUrl, options?.temperature);
 }
+
+export { PRESETS, getPreset, listProviderIds };

@@ -51,6 +51,69 @@ export function createForcesConfirmationFn(
   };
 }
 
+// Commands that are never auto-approved under `--yes`, even if the user's deny list
+// does not cover them. These are catastrophic and not reliably listed by every user;
+// bias toward blocking (a false positive is recoverable by running without --yes;
+// a false negative is not). See GHSA-hx58-45j4-fr7m.
+const NEVER_AUTO_APPROVE_RULES: Array<{ tool: "bash"; re: RegExp; label: string }> = [
+  // Whole-root or whole-home recursive forced deletion. The target must be the
+  // complete token /, ~, or $HOME (followed by whitespace or end) — subdirectories
+  // like /tmp/x or ~/src are not matched. An optional `--` separator is allowed.
+  {
+    tool: "bash",
+    re: /\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|--force\b[\s\S]*?--recursive\b|--recursive\b[\s\S]*?--force\b)\s+(?:--\s+)?(?:\/|~|\$HOME)(?=\s|$)/,
+    label: "rm -rf / | ~ | $HOME",
+  },
+  // Pipe-to-shell remote execution.
+  {
+    tool: "bash",
+    re: /\b(?:curl|wget)\b[^|]*\|\s*(?:sh|bash)\b/,
+    label: "curl/wget | sh",
+  },
+  // Classic fork bomb.
+  {
+    tool: "bash",
+    re: /:\s*\(\s*\)\s*\{\s*:\s*\|:/,
+    label: "fork bomb",
+  },
+];
+
+/** True if a call must never be auto-approved (built-in blocklist). */
+export function matchesNeverAutoApprove(toolName: string, args: Record<string, unknown>): boolean {
+  if (toolName !== "bash") return false;
+  const cmd = String(args.command ?? "");
+  return NEVER_AUTO_APPROVE_RULES.some((r) => r.re.test(cmd));
+}
+
+/**
+ * Pure decision for the `--yes` / auto-approve path. Returns "deny" when the call
+ * matches the built-in catastrophic blocklist OR the user's deny patterns; otherwise
+ * "allow". This exists so deny rules and the blocklist cannot be bypassed by --yes
+ * (GHSA-hx58-45j4-fr7m).
+ */
+export function decideAutoApprove(
+  toolName: string,
+  args: Record<string, unknown>,
+  denyPatterns: string[],
+): "allow" | "deny" {
+  if (matchesNeverAutoApprove(toolName, args)) return "deny";
+  if (denyPatterns.length > 0 && matchesDenyPattern(denyPatterns, toolName, args)) return "deny";
+  return "allow";
+}
+
+/**
+ * Build a confirmFn for the `--yes` auto-approve path. Unlike the interactive
+ * createConfirmFn, this never prompts — it allows everything EXCEPT calls that match
+ * the user's deny patterns (global + project) or the built-in catastrophic blocklist.
+ * This ensures `permissions.deny` is honoured even when --yes replaces the
+ * interactive confirmFn (GHSA-hx58-45j4-fr7m).
+ */
+export async function createAutoApproveConfirmFn(): Promise<ConfirmFn> {
+  const [config, settings] = await Promise.all([loadConfig(), loadSettings()]);
+  const denyPatterns = [...(config.permissions?.deny ?? []), ...(settings.permissions?.deny ?? [])];
+  return (toolName, args) => Promise.resolve(decideAutoApprove(toolName, args, denyPatterns));
+}
+
 export interface ConfirmBundle {
   confirmFn: ConfirmFn;
   /** Returns true if the tool call matches an `ask` pattern and must be confirmed

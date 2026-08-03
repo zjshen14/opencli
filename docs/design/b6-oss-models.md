@@ -1,6 +1,6 @@
 # Design: B6 — First-class OSS model support
 
-_Status: Implemented — under review in [#297](https://github.com/zjshen14/opencli/pull/297); flip to `merged in <sha> (<date>)` on merge. Phase: [Roadmap B6](../roadmap.md). Tracking issue: [#296](https://github.com/zjshen14/opencli/issues/296)._
+_Status: Implemented — merged in f41a1ec (2026-08-03). Phase: [Roadmap B6](../roadmap.md). Tracking issue: [#296](https://github.com/zjshen14/opencli/issues/296)._
 
 ---
 
@@ -176,8 +176,8 @@ intended as illustration, will be executed — subject to confirmation. That is 
 failure mode as a model genuinely deciding to call the tool, and it is not distinguishable
 from one. We accept it.
 
-Salvage is opt-in per provider (`ollama`, `openrouter` — see §1), so first-party providers
-are entirely unaffected.
+Salvage is opt-in per provider — on for every OSS/local preset and no first-party one, for
+the reasons set out in §1 — so first-party providers are entirely unaffected.
 
 ### Streaming cost
 

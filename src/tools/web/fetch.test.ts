@@ -1,15 +1,37 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// Hoisted, typed mock for dns.promises.lookup so the SSRF guard never hits the real
+// network in tests. Per-test, the default resolves any host to a public address.
+const { lookupMock } = vi.hoisted(() => ({
+  lookupMock:
+    vi.fn<
+      (host: string, opts?: { all?: boolean }) => Promise<{ address: string; family: number }[]>
+    >(),
+}));
+
+vi.mock("node:dns/promises", () => ({ lookup: lookupMock }));
+
 import { webFetchTool } from "./fetch.js";
+import { assertSafeUrl } from "./fetch.js";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", undefined);
+  lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
 
 function mockFetch(body: string, contentType = "text/plain", ok = true, status = 200) {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(body));
+      controller.close();
+    },
+  });
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue({
@@ -17,6 +39,7 @@ function mockFetch(body: string, contentType = "text/plain", ok = true, status =
       status,
       statusText: ok ? "OK" : "Not Found",
       headers: { get: () => contentType },
+      body: stream,
       text: async () => body,
     }),
   );
@@ -61,5 +84,89 @@ describe("webFetchTool", () => {
     const result = await webFetchTool.execute({ url: "https://example.com/" });
     expect(result.success).toBe(false);
     expect(result.error).toContain("network error");
+  });
+});
+
+describe("webFetchTool SSRF guard (GHSA-9gqj-5w58-2j6v)", () => {
+  it("refuses a non-http(s) scheme and never calls fetch", async () => {
+    mockFetch("should not be reached");
+    const fetchSpy = vi.mocked(fetch);
+    const result = await webFetchTool.execute({ url: "file:///etc/passwd" });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/scheme/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses the AWS metadata endpoint IP (169.254.169.254) and never calls fetch", async () => {
+    lookupMock.mockResolvedValue([{ address: "169.254.169.254", family: 4 }]);
+    mockFetch("should not be reached");
+    const fetchSpy = vi.mocked(fetch);
+    const result = await webFetchTool.execute({ url: "http://169.254.169.254/latest/meta-data/" });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SSRF|private|link-local/i);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses localhost and 127.0.0.1", async () => {
+    lookupMock.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+    mockFetch("should not be reached");
+    expect((await webFetchTool.execute({ url: "http://localhost:8080/admin" })).success).toBe(
+      false,
+    );
+    expect((await webFetchTool.execute({ url: "http://127.0.0.1/x" })).success).toBe(false);
+  });
+
+  it("refuses RFC1918 private ranges", async () => {
+    lookupMock.mockResolvedValue([{ address: "10.0.0.5", family: 4 }]);
+    mockFetch("x");
+    expect((await webFetchTool.execute({ url: "http://internal.corp/secret" })).success).toBe(
+      false,
+    );
+  });
+
+  it("refuses IPv6 loopback ::1", async () => {
+    lookupMock.mockResolvedValue([{ address: "::1", family: 6 }]);
+    mockFetch("x");
+    expect((await webFetchTool.execute({ url: "http://[::1]/" })).success).toBe(false);
+  });
+
+  it("allows a public host and calls fetch", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    mockFetch("public content");
+    const fetchSpy = vi.mocked(fetch);
+    const result = await webFetchTool.execute({ url: "https://example.com/" });
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("public content");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows private hosts when OPENCLI_WEB_FETCH_ALLOW_PRIVATE=1", async () => {
+    vi.stubEnv("OPENCLI_WEB_FETCH_ALLOW_PRIVATE", "1");
+    lookupMock.mockResolvedValue([{ address: "169.254.169.254", family: 4 }]);
+    mockFetch("metadata");
+    try {
+      const result = await webFetchTool.execute({ url: "http://169.254.169.254/" });
+      expect(result.success).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("aborts a response that exceeds the size cap", async () => {
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const big = "x".repeat(6_000_000);
+    mockFetch(big);
+    const result = await webFetchTool.execute({ url: "https://example.com/big" });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/exceeded|aborted/i);
+  });
+});
+
+describe("assertSafeUrl", () => {
+  it("rejects an invalid URL", async () => {
+    await expect(assertSafeUrl("not a url")).rejects.toThrow(/Invalid URL/);
+  });
+  it("rejects an ftp scheme", async () => {
+    await expect(assertSafeUrl("ftp://example.com/x")).rejects.toThrow(/scheme/i);
   });
 });

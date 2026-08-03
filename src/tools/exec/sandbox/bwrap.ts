@@ -10,11 +10,13 @@ const BWRAP_CANDIDATES = ["/usr/bin/bwrap", "/usr/local/bin/bwrap"];
 
 // Common dev-tooling dot-dirs bound writable in auto mode. Pre-created at
 // runner construction so bwrap's --bind doesn't fail when a path is absent.
-// See docs/design/a7-sandbox-loosen-auto.md.
+// ~/.config and ~/.local are intentionally EXCLUDED: they sit on the user's shell
+// $PATH / rc-load path (~/.local/bin, ~/.config/fish, ~/.config/npm, ...) so a
+// sandboxed command could plant an executable or rc backdoor that runs UNSANDBOXED
+// later — a persistence/escape vector. See #299. Package caches below are not on
+// $PATH and are safe(r) to expose. See docs/design/a7-sandbox-loosen-auto.md.
 const AUTO_HOME_DIRS = [
   ".cache",
-  ".config",
-  ".local",
   ".npm",
   ".cargo",
   ".yarn",

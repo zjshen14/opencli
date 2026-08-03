@@ -95,6 +95,24 @@ describe.skipIf(!isMacOS)("SandboxExecRunner (macOS only)", () => {
     expect(result.exitCode).toBe(0);
   });
 
+  it("blocks writes to ~/.config (persistence vector, #299)", async () => {
+    const testFile = join(HOME, ".config", `.sandbox-test-${Date.now()}`);
+    const result = await runner.exec(
+      `mkdir -p ~/.config && touch "${testFile}" 2>&1; rm -f "${testFile}" 2>/dev/null; exit $?`,
+      { cwd: process.cwd() },
+    );
+    expect(result.stderr + result.stdout).toMatch(/permitted|denied/i);
+  });
+
+  it("blocks writes to ~/.local (persistence vector, #299)", async () => {
+    const testFile = join(HOME, ".local", `.sandbox-test-${Date.now()}`);
+    const result = await runner.exec(
+      `mkdir -p ~/.local && touch "${testFile}" 2>&1; rm -f "${testFile}" 2>/dev/null; exit $?`,
+      { cwd: process.cwd() },
+    );
+    expect(result.stderr + result.stdout).toMatch(/permitted|denied/i);
+  });
+
   it("blocks writes to ~/.ssh (credential path)", async () => {
     const testFile = join(HOME, ".ssh", `.sandbox-test-${Date.now()}`);
     const result = await runner.exec(

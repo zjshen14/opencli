@@ -113,10 +113,12 @@ function buildAutoProfile(cwd: string, home: string): string {
   (literal "/dev/urandom")
   (literal "/dev/random"))
 
-; XDG base directories
+; XDG cache and package-manager dot-dirs. ~/.config and ~/.local are intentionally
+; NOT writable here: they sit on the shell $PATH / rc-load path (~/.local/bin,
+; ~/.config/fish, ~/.config/npm, ...), so a sandboxed command could plant an
+; executable or rc backdoor that runs UNSANDBOXED later (persistence/escape).
+; See #299.
 (allow file-write* (subpath "${home}/.cache"))
-(allow file-write* (subpath "${home}/.config"))
-(allow file-write* (subpath "${home}/.local"))
 
 ; Package-manager dot-dirs
 (allow file-write* (subpath "${home}/.npm"))

@@ -23,6 +23,14 @@ describe("loadSystemInstruction", () => {
     expect(result).toBe(DEFAULT_SYSTEM_INSTRUCTION);
   });
 
+  it("includes untrusted-content framing in the default instruction (GHSA-v5f9-ffp2-x7p3)", async () => {
+    // Soft defense against prompt injection: tool output must be framed as data,
+    // not instructions. The structural defenses live in companion PRs; this asserts
+    // the framing text is present.
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toMatch(/Untrusted content/i);
+    expect(DEFAULT_SYSTEM_INSTRUCTION).toMatch(/prompt injection/i);
+  });
+
   it("loads from file when OPENCLI_SYSTEM_MD is set", async () => {
     const path = join(tmpdir(), `prompt-test-${Date.now()}.md`);
     await writeFile(path, "Custom prompt for testing.");

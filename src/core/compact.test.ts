@@ -462,3 +462,22 @@ describe("contextWindowFor — OSS models and overrides", () => {
     expect(contextWindowFor("claude-opus-5", -1)).toBe(200_000);
   });
 });
+
+describe("contextWindowFor — provider scoping", () => {
+  it("does not let a local model inherit another provider's window", () => {
+    // A local glm-5.2 served by Ollama whose discovery came back empty must fall back to
+    // the conservative default, NOT Z.ai's 1M. Inheriting 1M would silently disable
+    // auto-compact — the same invisible over-estimation this milestone exists to prevent.
+    expect(contextWindowFor("glm-5.2")).toBe(1_000_000);
+    expect(contextWindowFor("glm-5.2", undefined, "ollama")).toBe(100_000);
+  });
+
+  it("still resolves the window when the provider matches", () => {
+    expect(contextWindowFor("glm-5.2", undefined, "zai")).toBe(1_000_000);
+    expect(contextWindowFor("claude-opus-5", undefined, "anthropic")).toBe(200_000);
+  });
+
+  it("lets an explicit override win over provider scoping", () => {
+    expect(contextWindowFor("glm-5.2", 32_768, "ollama")).toBe(32_768);
+  });
+});

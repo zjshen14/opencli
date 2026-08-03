@@ -104,10 +104,16 @@ function extractOriginalTask(messages: Message[]): string {
  * The override channel matters most for local models, whose windows are per-install and
  * frequently *smaller* than the default — a stock qwen2.5-coder:14b reports 32 768, so
  * without an override auto-compact would never fire before the model truncates.
+ *
+ * `providerId` scopes the static lookup to one provider's table. Passing it matters:
+ * unscoped, a local `glm-5.2` served by Ollama whose runtime discovery came back empty
+ * would inherit Z.ai's 1 000 000 rather than falling back to the conservative default,
+ * and auto-compact would never fire. That is the same invisible over-estimation this
+ * whole change exists to prevent, so callers that know the provider must pass it.
  */
-export function contextWindowFor(model: string, override?: number): number {
+export function contextWindowFor(model: string, override?: number, providerId?: string): number {
   if (override !== undefined && override > 0) return override;
-  return findModelInfo(model)?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  return findModelInfo(model, providerId)?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
 }
 
 function extractErrorResults(messages: Message[]): string[] {

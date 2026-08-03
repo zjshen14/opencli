@@ -84,6 +84,9 @@ export class Agent {
       /** Overrides the registry's static context window. Supplied by the CLI from
        *  config.modelOverrides or Ollama runtime discovery. */
       contextWindow?: number;
+      /** Scopes the static context-window lookup to one provider's table, so a model
+       *  name that also exists under another provider cannot inherit its window. */
+      provider?: string;
     },
   ) {
     this.context = new ContextManager(systemInstruction, maxHistoryMessages);
@@ -93,7 +96,7 @@ export class Agent {
     this.snapshotManager = options?.snapshotManager;
     this.compactionClient = options?.compactionClient ?? client;
     this.autoCompact = options?.autoCompact !== false;
-    this.contextWindow = contextWindowFor(this.model, options?.contextWindow);
+    this.contextWindow = contextWindowFor(this.model, options?.contextWindow, options?.provider);
   }
 
   setConfirmFn(fn: ConfirmFn): void {

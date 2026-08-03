@@ -46,6 +46,17 @@ export interface ProviderPreset {
 }
 
 /**
+ * `salvageToolCalls` is enabled for every OSS/local preset and no first-party one.
+ *
+ * Whether hosted OSS endpoints (Moonshot, Z.ai, DeepSeek, DashScope) need it is
+ * unverified — we have no keys to test against, and their behaviour may differ per model
+ * and change over time. The default is chosen on which error is recoverable: salvage
+ * enabled but unnecessary costs bounded buffering (see MAX_SALVAGE_BUFFER) and carries a
+ * structurally tiny misfire risk, because a payload must be the *entire* response AND
+ * name a tool that was actually offered. Salvage disabled but necessary means the agent
+ * loop sees no calls and silently does nothing — the exact failure this change exists to
+ * fix. We take the recoverable side and revisit if a hosted endpoint proves it is moot.
+ *
  * Context windows and model IDs verified 2026-08-02 against provider documentation.
  * These are *defaults* — always overridable via `config.modelOverrides`, since a proxy
  * may truncate a window or a local Modelfile may raise it.
@@ -232,6 +243,48 @@ export function detectProviderFromRegistry(model: string): string {
     }
   }
   return bestId;
+}
+
+/**
+ * Ollama-style `name:tag` (qwen2.5-coder:14b, llama3.1:8b, gpt-oss:20b). Hosted model
+ * ids do not use a colon, so this is a reliable signal that a name is local.
+ */
+const LOCAL_NAME_RE = /^[^\s/:]+:[^\s/:]+$/;
+
+export function looksLikeLocalModelName(model: string): boolean {
+  return LOCAL_NAME_RE.test(model);
+}
+
+/**
+ * Explains a provider guess when it is likely wrong, for the CLI to surface.
+ *
+ * Name-prefix detection cannot classify local models: their names are arbitrary, so
+ * `llama3.1:8b` silently falls back to the default provider and `qwen2.5-coder:14b`
+ * matches the hosted `qwen` prefix and routes to DashScope. Both then fail with an error
+ * that says nothing about the real cause. The fallback itself is deliberate (see
+ * `detectProviderFromRegistry`) — what was wrong was doing it silently.
+ *
+ * Returns undefined when detection is trustworthy.
+ */
+export function providerDetectionWarning(model: string, detected: string): string | undefined {
+  if (looksLikeLocalModelName(model) && detected !== "ollama") {
+    return (
+      `Model '${model}' looks like a local Ollama model, but no provider was specified ` +
+      `so it was routed to '${detected}'. If you meant to run it locally, pass --provider ollama.`
+    );
+  }
+
+  const matchedAPrefix = Object.values(PRESETS).some((preset) =>
+    (preset.detectPrefixes ?? []).some((prefix) => model.startsWith(prefix)),
+  );
+  if (!matchedAPrefix) {
+    return (
+      `Model '${model}' matches no known provider prefix; defaulting to '${detected}'. ` +
+      `Pass --provider <${listProviderIds().join("|")}> if that is not what you want.`
+    );
+  }
+
+  return undefined;
 }
 
 /**

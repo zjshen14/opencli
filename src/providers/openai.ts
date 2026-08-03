@@ -7,6 +7,19 @@ import { salvageToolCalls, contentIsOnlyToolCalls } from "./salvage.js";
 
 const DEFAULT_MAX_TOKENS = 8096;
 
+/**
+ * Upper bound on text held back for salvage inspection.
+ *
+ * `couldBeToolCall()` stays true indefinitely for content opening with `{` or `[`, so a
+ * legitimate JSON answer ("write me a tsconfig") would otherwise stream nothing and land
+ * as one block at the end — a real streaming regression on exactly the providers whose
+ * responses are slowest. Past this many characters the content is no longer a plausible
+ * tool call, so we release it and stream normally for the rest of the turn.
+ *
+ * Sized to still accommodate a `write` call carrying a substantial file body.
+ */
+const MAX_SALVAGE_BUFFER = 32_768;
+
 // o1/o3/o4 reasoning models use "developer" role instead of "system"
 function isReasoningModel(model: string): boolean {
   return /^o[134](-|$)/.test(model);
@@ -50,6 +63,7 @@ export class OpenAIClient implements LLMClient {
   private maxTokens: number;
   private temperature: number | undefined;
   private salvage: boolean;
+  private onWarn?: (message: string) => void;
 
   constructor(
     apiKey: string,
@@ -61,6 +75,9 @@ export class OpenAIClient implements LLMClient {
       temperature?: number;
       /** Recover tool calls emitted as plain text. Enabled for OSS/local presets. */
       salvage?: boolean;
+      /** Non-fatal diagnostics. Injected so this layer stays free of direct stderr
+       *  writes, which `core/` and `providers/` must not perform. */
+      onWarn?: (message: string) => void;
     },
   ) {
     this.client = new OpenAI({ apiKey, ...(options?.baseUrl ? { baseURL: options.baseUrl } : {}) });
@@ -69,6 +86,7 @@ export class OpenAIClient implements LLMClient {
     this.maxTokens = options?.maxTokens ?? DEFAULT_MAX_TOKENS;
     this.temperature = options?.temperature;
     this.salvage = options?.salvage ?? false;
+    this.onWarn = options?.onWarn;
   }
 
   async *stream(
@@ -145,8 +163,9 @@ export class OpenAIClient implements LLMClient {
       if (delta.content) {
         if (buffering) {
           buffered += delta.content;
-          if (!couldBeToolCall(buffered)) {
-            // Proved to be prose — release what we held and stream the rest live.
+          // Release once it proves to be prose, or once it grows past any plausible
+          // tool call — whichever comes first.
+          if (!couldBeToolCall(buffered) || buffered.length > MAX_SALVAGE_BUFFER) {
             buffering = false;
             yield { type: "text", text: buffered };
             buffered = "";
@@ -172,7 +191,7 @@ export class OpenAIClient implements LLMClient {
       }
 
       if (finish_reason === "tool_calls") {
-        for (const call of drainCalls(pendingCalls)) {
+        for (const call of drainCalls(pendingCalls, this.onWarn)) {
           emittedCalls++;
           yield call;
         }
@@ -181,7 +200,7 @@ export class OpenAIClient implements LLMClient {
 
     // Many OpenAI-compatible servers report finish_reason "stop" even when tool calls are
     // present, which would strand them in pendingCalls. Flush anything left over.
-    for (const call of drainCalls(pendingCalls)) {
+    for (const call of drainCalls(pendingCalls, this.onWarn)) {
       emittedCalls++;
       yield call;
     }
@@ -218,6 +237,7 @@ export class OpenAIClient implements LLMClient {
 /** Drains accumulated streaming tool calls in index order, emptying the map. */
 function* drainCalls(
   pending: Map<number, { id: string; name: string; args: string }>,
+  onWarn?: (message: string) => void,
 ): Generator<StreamEvent> {
   const entries = [...pending.entries()].sort(([a], [b]) => a - b);
   pending.clear();
@@ -229,8 +249,10 @@ function* drainCalls(
     } catch {
       // A truncated or malformed argument blob would otherwise throw and abort the whole
       // stream, losing any well-formed calls alongside it. Surface it as an empty call so
-      // the agent loop can report a tool error instead of crashing.
+      // the agent loop can report a tool error instead of crashing — but say why, or the
+      // model just sees "missing required parameter" with no trace of the real cause.
       args = {};
+      onWarn?.(`Discarded malformed arguments for tool '${tc.name}': ${truncate(tc.args, 200)}`);
     }
     yield {
       type: "function_call",
@@ -239,6 +261,10 @@ function* drainCalls(
       args,
     };
   }
+}
+
+function truncate(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}… (${text.length} chars)` : text;
 }
 
 function messagesToOpenAIParams(

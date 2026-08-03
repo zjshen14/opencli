@@ -6,6 +6,8 @@ import {
   isKnownProvider,
   detectProviderFromRegistry,
   findModelInfo,
+  providerDetectionWarning,
+  looksLikeLocalModelName,
   DEFAULT_PROVIDER,
 } from "./registry.js";
 
@@ -125,5 +127,69 @@ describe("native thinking metadata", () => {
 
   it("leaves Claude unmarked — extended thinking is opt-in via API config", () => {
     expect(findModelInfo("claude-opus-5")?.nativeThinking).toBeFalsy();
+  });
+});
+
+describe("providerDetectionWarning", () => {
+  it("flags an Ollama-style name:tag routed somewhere other than ollama", () => {
+    // qwen2.5-coder:14b matches the hosted `qwen` prefix and lands on DashScope, which
+    // then fails with "No DashScope API key found" — saying nothing about the real cause.
+    const warning = providerDetectionWarning("qwen2.5-coder:14b", "dashscope");
+    expect(warning).toContain("looks like a local Ollama model");
+    expect(warning).toContain("--provider ollama");
+  });
+
+  it("flags a local name that fell back to the default provider", () => {
+    const warning = providerDetectionWarning("llama3.1:8b", "gemini");
+    expect(warning).toContain("--provider ollama");
+  });
+
+  it("flags an unrecognised name defaulting to gemini", () => {
+    // The silent version of this is defect #1 verbatim.
+    const warning = providerDetectionWarning("mistral-small", "gemini");
+    expect(warning).toContain("matches no known provider prefix");
+    expect(warning).toContain("gemini");
+  });
+
+  it("stays silent when a hosted prefix matched", () => {
+    expect(providerDetectionWarning("claude-opus-5", "anthropic")).toBeUndefined();
+    expect(providerDetectionWarning("gpt-4o", "openai")).toBeUndefined();
+    expect(providerDetectionWarning("kimi-k3", "moonshot")).toBeUndefined();
+    expect(providerDetectionWarning("glm-5.2", "zai")).toBeUndefined();
+    expect(providerDetectionWarning("gemini-3.1-flash", "gemini")).toBeUndefined();
+  });
+
+  it("stays silent for a local name correctly routed to ollama", () => {
+    expect(providerDetectionWarning("qwen2.5-coder:14b", "ollama")).toBeUndefined();
+  });
+});
+
+describe("looksLikeLocalModelName", () => {
+  it("recognises the Ollama name:tag shape", () => {
+    expect(looksLikeLocalModelName("qwen2.5-coder:14b")).toBe(true);
+    expect(looksLikeLocalModelName("llama3.1:8b")).toBe(true);
+    expect(looksLikeLocalModelName("gpt-oss:20b")).toBe(true);
+  });
+
+  it("does not misclassify hosted model ids", () => {
+    expect(looksLikeLocalModelName("claude-opus-5")).toBe(false);
+    expect(looksLikeLocalModelName("glm-5.2")).toBe(false);
+    expect(looksLikeLocalModelName("gpt-4o")).toBe(false);
+  });
+});
+
+describe("salvage policy", () => {
+  it("enables salvage for every OSS/local preset and no first-party one", () => {
+    // The policy is deliberate and asymmetric — see the PRESETS doc comment. Pin it so a
+    // future edit has to be intentional rather than incidental.
+    const salvaging = Object.values(PRESETS)
+      .filter((p) => p.salvageToolCalls)
+      .map((p) => p.id)
+      .sort();
+    expect(salvaging).toEqual(["dashscope", "deepseek", "moonshot", "ollama", "openrouter", "zai"]);
+
+    for (const id of ["gemini", "anthropic", "openai"]) {
+      expect(PRESETS[id].salvageToolCalls).toBeFalsy();
+    }
   });
 });

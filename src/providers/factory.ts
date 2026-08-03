@@ -62,6 +62,8 @@ export function createClient(
     provider?: Provider;
     baseUrl?: string;
     temperature?: number;
+    /** Non-fatal diagnostics sink, injected by the CLI. */
+    onWarn?: (message: string) => void;
   },
 ): LLMClient {
   const providerId = options?.provider ?? detectProvider(model);
@@ -87,6 +89,7 @@ export function createClient(
       temperature: options?.temperature,
       baseUrl,
       salvage: preset?.salvageToolCalls ?? false,
+      onWarn: options?.onWarn,
     });
   }
   return new GeminiClient(apiKey, model, options?.maxTokens, baseUrl, options?.temperature);

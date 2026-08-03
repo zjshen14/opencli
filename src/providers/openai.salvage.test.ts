@@ -239,3 +239,88 @@ describe("OpenAIClient tool-call robustness", () => {
     expect(calls[0].args).toEqual({});
   });
 });
+
+describe("salvage buffering is bounded", () => {
+  it("streams a long JSON answer instead of holding it to end-of-stream", async () => {
+    // couldBeToolCall() stays true forever for content opening with `{`, so without a cap
+    // "write me a tsconfig" would stream nothing and land as one block — a real streaming
+    // regression on exactly the providers whose responses are slowest.
+    const chunk = '{"a":"' + "x".repeat(4000) + '"},';
+    const deltas = Array.from({ length: 12 }, () => chunk);
+    mockCreate.mockResolvedValue(textStream(...deltas));
+    const client = new OpenAIClient("k", "local", { salvage: true });
+
+    const events = await collect(client);
+    const textEvents = events.filter((e) => e.type === "text");
+
+    // Released mid-stream rather than emitted as a single terminal block.
+    expect(textEvents.length).toBeGreaterThan(1);
+
+    const text = textEvents
+      .filter((e): e is Extract<StreamEvent, { type: "text" }> => e.type === "text")
+      .map((e) => e.text)
+      .join("");
+    expect(text).toBe(deltas.join(""));
+  });
+
+  it("still salvages a normal-sized call after the bound was added", async () => {
+    mockCreate.mockResolvedValue(textStream('{"name": "ls", "arguments": {"path": "/tmp"}}'));
+    const client = new OpenAIClient("k", "local", { salvage: true });
+
+    const calls = (await collect(client)).filter((e) => e.type === "function_call");
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("malformed tool-call diagnostics", () => {
+  it("reports why arguments were discarded", async () => {
+    // Without this the model just sees "missing required parameter" with no trace of the
+    // real cause.
+    const warnings: string[] = [];
+    mockCreate.mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "c1", function: { name: "ls", arguments: "{broken" } },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        };
+        yield { choices: [{ delta: {}, finish_reason: "tool_calls" }] };
+      },
+    });
+    const client = new OpenAIClient("k", "local", { onWarn: (m) => warnings.push(m) });
+
+    await collect(client);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("malformed arguments");
+    expect(warnings[0]).toContain("ls");
+  });
+
+  it("stays quiet when no sink is injected", async () => {
+    mockCreate.mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield {
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  { index: 0, id: "c1", function: { name: "ls", arguments: "{broken" } },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        };
+        yield { choices: [{ delta: {}, finish_reason: "tool_calls" }] };
+      },
+    });
+    const client = new OpenAIClient("k", "local");
+    await expect(collect(client)).resolves.toBeDefined();
+  });
+});

@@ -1,11 +1,11 @@
 import { Command, InvalidArgumentError } from "commander";
 import { createClient, createCompactionClient, detectProvider } from "../providers/factory.js";
-import { getPreset, isKnownProvider, listProviderIds } from "../providers/registry.js";
 import {
-  getOllamaModels,
-  findOllamaModel,
-  toolSupportWarning,
-} from "../providers/ollama-discovery.js";
+  isKnownProvider,
+  listProviderIds,
+  providerDetectionWarning,
+} from "../providers/registry.js";
+import { resolveContextWindow } from "./context-window.js";
 import { Agent } from "../core/agent.js";
 import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
@@ -45,7 +45,9 @@ const program = new Command();
 
 program
   .name("opencli")
-  .description("An open-source AI agent CLI — supports Gemini, Claude, and OpenAI models")
+  .description(
+    "An open-source AI agent CLI — supports Gemini, Claude, OpenAI, and OSS/local models",
+  )
   .version(pkg.version);
 
 program
@@ -60,7 +62,10 @@ program
   .option("--max-turns <n>", "Maximum agent iterations per prompt (default: 50)", parseTurns)
   .option("--debug", "Emit structured observability events to stderr as JSON")
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
-  .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
+  .option(
+    "--provider <provider>",
+    "Override provider detection (e.g. gemini, anthropic, openai, ollama, moonshot, zai)",
+  )
   .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
   .action(async (opts) => {
     const sessionId = opts.session ?? (opts.resume ? "latest" : undefined);
@@ -100,7 +105,10 @@ program
   .option("--yes", "Auto-approve all tool confirmations (skip interactive prompts)")
   .option("--debug", "Emit structured observability events to stderr as JSON")
   .option("--sandbox <mode>", "Sandbox mode for bash tool: auto | strict | off (default: auto)")
-  .option("--provider <provider>", "Override provider detection: gemini | anthropic | openai")
+  .option(
+    "--provider <provider>",
+    "Override provider detection (e.g. gemini, anthropic, openai, ollama, moonshot, zai)",
+  )
   .option("--base-url <url>", "Custom base URL for proxy or local inference (e.g. LiteLLM)")
   .option("--temperature <float>", "LLM temperature (use 0 for determinism)", parseTemperature)
   .action(async (prompt: string, opts) => {
@@ -125,7 +133,10 @@ program
   .option("--anthropic-api-key <key>", "Set your Anthropic API key")
   .option("--openai-api-key <key>", "Set your OpenAI API key")
   .option("--model <model>", "Set the default model")
-  .option("--provider <provider>", "Set the default provider: gemini | anthropic | openai")
+  .option(
+    "--provider <provider>",
+    "Set the default provider (e.g. gemini, anthropic, openai, ollama, moonshot, zai)",
+  )
   .option("--base-url <url>", "Set a custom base URL for proxy or local inference")
   .action(async (opts) => {
     if (opts.geminiApiKey) {
@@ -308,36 +319,10 @@ function resolveProvider(flag: string | undefined, config: Config, model: string
       `Invalid --provider value '${raw}'. Valid values: ${listProviderIds().join(", ")}`,
     );
   }
-  return detectProvider(model);
-}
-
-/**
- * Resolves the context window for a model, consulting config overrides and — for local
- * runtimes — the provider itself. Ollama models carry per-install windows that no static
- * table can know, and a stock qwen2.5-coder:14b (32 768) is well *under* the default, so
- * without this auto-compact would never fire before the model silently truncates.
- *
- * Always best-effort: if Ollama is unreachable we fall through to the static default.
- */
-async function resolveContextWindow(
-  model: string,
-  provider: string,
-  baseUrl: string | undefined,
-  config: Config,
-): Promise<number | undefined> {
-  const configured = config.modelOverrides?.[model]?.contextWindow;
-  if (configured) return configured;
-
-  const preset = getPreset(provider);
-  if (preset?.runtimeDiscovery !== "ollama") return undefined;
-
-  const models = await getOllamaModels(baseUrl ?? preset.baseUrl ?? "");
-  if (models.length === 0) return undefined;
-
-  const warning = toolSupportWarning(models, model);
+  const detected = detectProvider(model);
+  const warning = providerDetectionWarning(model, detected);
   if (warning) process.stderr.write(`[opencli] warn: ${warning}\n`);
-
-  return findOllamaModel(models, model)?.contextWindow;
+  return detected;
 }
 
 async function createAgent(
@@ -369,6 +354,7 @@ async function createAgent(
     provider,
     baseUrl,
     temperature: effectiveTemperature,
+    onWarn: debug ? (msg) => process.stderr.write(`[opencli] warn: ${msg}\n`) : undefined,
   });
   const tools = createDefaultRegistry(model, runner);
 
@@ -387,7 +373,10 @@ async function createAgent(
 
   const systemInstruction = await loadSystemInstruction();
   const compactionClient = createCompactionClient(model, apiKey, { provider, baseUrl });
-  const contextWindow = await resolveContextWindow(model, provider, baseUrl, config);
+  const { contextWindow, warnings } = await resolveContextWindow(model, provider, baseUrl, config);
+  for (const warning of warnings) {
+    process.stderr.write(`[opencli] warn: ${warning}\n`);
+  }
   const agent = new Agent(client, tools, skills, systemInstruction, config.historySize, maxTurns, {
     model,
     onObservability: debug ? makeDebugHandler() : undefined,
@@ -395,6 +384,7 @@ async function createAgent(
     compactionClient,
     autoCompact: config.autoCompact,
     contextWindow,
+    provider,
   });
   return { agent, skills, mcpManager, snapshotManager };
 }

@@ -1,6 +1,6 @@
 # Design: B6 — First-class OSS model support
 
-_Status: Ready for implementation. Phase: [Roadmap B6](../roadmap.md). Tracking issue: [#296](https://github.com/zjshen14/opencli/issues/296)._
+_Status: Implemented — under review in [#297](https://github.com/zjshen14/opencli/pull/297); flip to `merged in <sha> (<date>)` on merge. Phase: [Roadmap B6](../roadmap.md). Tracking issue: [#296](https://github.com/zjshen14/opencli/issues/296)._
 
 ---
 
@@ -65,12 +65,25 @@ export interface ProviderPreset {
 | `gemini` | gemini | _(SDK default)_ | `GEMINI_API_KEY` | first-party |
 | `anthropic` | anthropic | _(SDK default)_ | `ANTHROPIC_API_KEY` | first-party |
 | `openai` | openai | _(SDK default)_ | `OPENAI_API_KEY` | first-party |
-| `ollama` | openai | `http://localhost:11434/v1` | _(none)_ | runtime discovery; salvage on |
-| `moonshot` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` | `kimi-k3`, 1M, thinking always-on |
-| `zai` | openai | `https://api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY`, `Z_AI_API_KEY` | `glm-5.2`, 1M, MIT-licensed |
-| `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` / `-flash`, 1M |
-| `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` | `qwen3.7-max` / `-plus`, 1M |
-| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | gateway; no static models |
+| `ollama` | openai | `http://localhost:11434/v1` | _(none)_ | runtime discovery; salvage |
+| `moonshot` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` | `kimi-k3`, 1M, thinking always-on; salvage |
+| `zai` | openai | `https://api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY`, `Z_AI_API_KEY` | `glm-5.2`, 1M, MIT-licensed; salvage |
+| `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` / `-flash`, 1M; salvage |
+| `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` | `qwen3.7-max` / `-plus`, 1M; salvage |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | gateway; no static models; salvage |
+
+**Salvage is on for every OSS/local preset and no first-party one.** Whether the hosted
+OSS endpoints actually need it is **unverified** — we have no keys to test against, and
+behaviour may vary per model and drift over time. Rather than guess, the default is chosen
+on which error is recoverable:
+
+- *Enabled but unnecessary* — bounded buffering (§4) plus a structurally tiny misfire risk,
+  since a payload must be the entire response **and** name a tool that was offered.
+- *Disabled but necessary* — the agent loop sees no calls and silently does nothing, which
+  is the precise failure this milestone exists to fix.
+
+We take the recoverable side. If a hosted endpoint is shown to always emit structured
+calls, turning its flag off is a one-line change.
 
 Context windows are sourced as of 2026-08-02 and carry a comment recording that date. They are a *default*, always overridable — see §5.
 
@@ -134,9 +147,50 @@ The agentic loop sees zero function calls and terminates the turn. Without handl
 4. Requires `name` to match a tool **actually offered in this request**, and `arguments` to be an object.
 5. Promotes matches to `function_call` stream events with a synthetic id.
 
-Guard rails: salvage never runs when structured calls were present, and an unmatched name is left as ordinary text. A model legitimately *discussing* a tool call in prose is not silently converted into an execution — the name-must-match-an-offered-tool check is what makes this safe rather than reckless.
+### What actually makes this safe
 
-This is opt-in per provider, so first-party providers are entirely unaffected.
+Be precise about this, because the obvious answer is wrong. The name-match check (step 4)
+does **not** prevent a model from having an *illustrative* call executed. Verified against
+the built code:
+
+```
+content: {"name":"bash","arguments":{"command":"rm -rf /tmp/x"}}   offered: [bash, read]
+→ salvaged: [{"name":"bash","args":{"command":"rm -rf /tmp/x"}}]
+```
+
+That is a real tool with a real name, so step 4 passes it. Three other properties are what
+actually contain the risk:
+
+- **The whole-content requirement.** `parseCandidate()` bails unless the cleaned content
+  *starts* with `{` or `[`, so any leading prose defeats salvage entirely. Verified:
+  `"Sure, here is what a call looks like:\n{…}"` → `[]`. This is the real guard, and it is
+  why the start-of-content check must not be relaxed into a "find JSON anywhere" scan.
+- **The no-structured-calls precondition.** A model that called tools properly and also
+  wrote JSON prose never has that prose reinterpreted.
+- **The HITL confirmation gate.** A salvaged `bash` or `write` passes through
+  `requiresConfirmation()` exactly like any other call. Salvage promotes an *intent*; it
+  does not bypass approval.
+
+Residual risk: a model whose entire response is a well-formed call for an offered tool,
+intended as illustration, will be executed — subject to confirmation. That is the same
+failure mode as a model genuinely deciding to call the tool, and it is not distinguishable
+from one. We accept it.
+
+Salvage is opt-in per provider (`ollama`, `openrouter` — see §1), so first-party providers
+are entirely unaffected.
+
+### Streaming cost
+
+Salvage needs the full text before it can classify it, but buffering every response would
+destroy streaming. The client holds output back only while it could still be a tool call,
+releasing it the moment the content proves to be prose. Two bounds keep this honest:
+
+- Content opening with `{` or `[` stays ambiguous indefinitely, so the buffer is capped at
+  `MAX_SALVAGE_BUFFER` (32 KB). Past that it is no longer a plausible tool call and is
+  released, restoring streaming for the rest of the turn. Sized to still admit a `write`
+  call carrying a substantial file body.
+- A fence (```` ```json ````) is not itself a decision — the classifier waits for the first
+  character inside it, since models fence both tool calls and ordinary code blocks.
 
 ---
 

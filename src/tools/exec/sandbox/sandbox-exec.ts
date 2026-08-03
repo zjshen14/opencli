@@ -8,6 +8,18 @@ import type { SandboxExecOptions, SandboxExecResult, SandboxMode, SandboxRunner 
 
 const SANDBOX_EXEC_BIN = "/usr/bin/sandbox-exec";
 
+// Characters that break out of the sandbox-exec profile string literal `"..."`.
+// A working directory or home whose absolute path contains either cannot be safely
+// interpolated into the profile — a malicious directory name like
+// `/tmp/x") (allow file-write* (subpath "/etc` would inject profile directives.
+// See GHSA-99pr-w6qj-549x. Parens and spaces are safe inside the quoted literal.
+const UNSAFE_PROFILE_PATH_RE = /["\\]/;
+
+/** True if a path can be safely interpolated into a sandbox-exec profile string. */
+export function isSafeProfilePath(p: string): boolean {
+  return !UNSAFE_PROFILE_PATH_RE.test(p);
+}
+
 function buildStrictProfile(cwd: string): string {
   return `(version 1)
 
@@ -148,6 +160,21 @@ export class SandboxExecRunner implements SandboxRunner {
     this.mode = mode;
 
     const home = process.env.HOME ?? homedir();
+
+    // Refuse to sandbox when cwd or home contains a character that breaks out of the
+    // profile string literal. Falling back to passthrough (with a warning) is safe;
+    // emitting an attacker-influenced profile is not. See GHSA-99pr-w6qj-549x.
+    const unsafePath = !isSafeProfilePath(cwd) ? cwd : !isSafeProfilePath(home) ? home : null;
+    if (unsafePath !== null) {
+      this.profilePath = "";
+      this.warning =
+        `working directory or home contains a character ('"' or '\\') that is unsafe in ` +
+        `the sandbox-exec profile ('${unsafePath}'); running without isolation`;
+      this.fallback = new PassthroughRunner(mode, this.warning);
+      this.ready = Promise.resolve();
+      return;
+    }
+
     this.profilePath = join("/tmp", `opencli-sandbox-${randomUUID()}.sb`);
     const profile = mode === "strict" ? buildStrictProfile(cwd) : buildAutoProfile(cwd, home);
 
@@ -158,7 +185,7 @@ export class SandboxExecRunner implements SandboxRunner {
     });
 
     process.on("exit", () => {
-      unlink(this.profilePath).catch(() => {});
+      if (this.profilePath) unlink(this.profilePath).catch(() => {});
     });
   }
 

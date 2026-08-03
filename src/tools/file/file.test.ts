@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { writeFile, mkdir, mkdtemp, rm, readFile } from "node:fs/promises";
+import { writeFile, mkdir, mkdtemp, rm, readFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { readTool } from "./read.js";
@@ -276,4 +276,29 @@ describe("multiEditTool", () => {
     expect(multiEditTool.singleConfirmation).toBe(true);
     expect(multiEditTool.composedOf).toEqual(["edit"]);
   });
+});
+
+// --- walker symlink/depth guards (#300) ---
+
+describe("glob/grep walker DoS guards (#300)", () => {
+  it("glob does not hang on a symlink cycle and skips symlinked entries", async () => {
+    await writeFile(join(tmpDir, "real.ts"), "export const x = 1;");
+    // A directory symlink loop: tmpDir/loop -> tmpDir
+    await symlink(tmpDir, join(tmpDir, "loop"));
+    // A file symlink (should be skipped, not followed)
+    await symlink(join(tmpDir, "real.ts"), join(tmpDir, "link.ts"));
+    const result = await globTool.execute({ pattern: "**/*.ts", path: tmpDir });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("real.ts");
+    // The walker skipped symlinks, so it didn't recurse infinitely or list the link.
+    expect(result.output).not.toContain("link.ts");
+  });
+
+  it("grep does not hang on a symlink cycle", async () => {
+    await writeFile(join(tmpDir, "needle.ts"), "UNIQUE_MARKER_12345");
+    await symlink(tmpDir, join(tmpDir, "loopdir"));
+    const result = await grepTool.execute({ pattern: "UNIQUE_MARKER_12345", path: tmpDir });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain("needle.ts");
+  }, 15_000);
 });

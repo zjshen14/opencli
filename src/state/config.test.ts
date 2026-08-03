@@ -34,6 +34,33 @@ describe("loadConfig", () => {
     expect(config.historySize).toBe(100);
     expect(config.temperature).toBe(0.7); // default preserved
   });
+
+  it("strips prototype-hijacking keys from a crafted config file (#301)", async () => {
+    // Write a config that attempts to pollute Object.prototype via __proto__.
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const cfgDir = join(tmpHome, ".opencli");
+    await mkdir(cfgDir, { recursive: true });
+    await writeFile(
+      join(cfgDir, "config.json"),
+      JSON.stringify({
+        __proto__: { polluted: true },
+        constructor: { prototype: { polluted2: true } },
+        model: "gemini-2.5-flash",
+      }),
+    );
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const before: any = {};
+    expect(before.polluted).toBeUndefined(); // sanity: not yet polluted
+    const config = await loadConfig();
+    // Legitimate field still loaded
+    expect(config.model).toBe("gemini-2.5-flash");
+    // Prototype was NOT polluted
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(({} as any).polluted).toBeUndefined();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(({} as any).polluted2).toBeUndefined();
+  });
 });
 
 describe("saveConfig", () => {

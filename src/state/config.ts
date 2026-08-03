@@ -47,10 +47,25 @@ const DEFAULTS: Config = {
   historySize: 50,
 };
 
+// Object keys that can hijack the prototype chain via JSON.parse + spread. A crafted
+// ~/.opencli/config.json (or a future path that writes config from untrusted input)
+// could otherwise pollute Object.prototype. See #301.
+const POISON_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Return a copy of `obj` with prototype-hijacking keys removed. */
+function stripPoisonKeys(obj: Record<string, unknown>): Record<string, unknown> {
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (POISON_KEYS.has(k)) continue;
+    clean[k] = v;
+  }
+  return clean;
+}
+
 export async function loadConfig(): Promise<Config> {
   try {
     const raw = await readFile(CONFIG_FILE, "utf8");
-    const saved = JSON.parse(raw) as Record<string, unknown>;
+    const saved = stripPoisonKeys(JSON.parse(raw) as Record<string, unknown>);
     // Migrate legacy apiKey → geminiApiKey
     if (typeof saved["apiKey"] === "string" && !saved["geminiApiKey"]) {
       saved["geminiApiKey"] = saved["apiKey"];

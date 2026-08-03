@@ -1,6 +1,7 @@
 import { writeFile, mkdir } from "node:fs/promises";
-import { resolve, dirname, sep } from "node:path";
+import { resolve, dirname } from "node:path";
 import type { Tool } from "../base.js";
+import { escapesCwdSync } from "./paths.js";
 
 export const writeTool: Tool = {
   name: "write",
@@ -15,9 +16,10 @@ export const writeTool: Tool = {
     required: ["file_path", "content"],
   },
   requiresConfirmation(args): boolean {
-    const absPath = resolve(args.file_path as string);
-    const cwd = process.cwd();
-    return !(absPath === cwd || absPath.startsWith(cwd + sep));
+    // Symlink-aware containment check: a symlink inside the project that points
+    // outside (e.g. ./link -> ~/.ssh/authorized_keys) must still trigger a prompt.
+    // See GHSA-5v6f-c99j-7m36.
+    return escapesCwdSync(args.file_path as string);
   },
   async execute({ file_path, content }) {
     const absPath = resolve(file_path as string);

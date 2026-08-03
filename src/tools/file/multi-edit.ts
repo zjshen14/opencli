@@ -1,5 +1,6 @@
-import { resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import type { Tool } from "../base.js";
+import { escapesCwdSync } from "./paths.js";
 
 export const multiEditTool: Tool = {
   name: "multi_edit",
@@ -30,9 +31,9 @@ export const multiEditTool: Tool = {
     required: ["file_path", "edits"],
   },
   requiresConfirmation(args): boolean {
-    const absPath = resolve(args.file_path as string);
-    const cwd = process.cwd();
-    return !(absPath === cwd || absPath.startsWith(cwd + sep));
+    // Symlink-aware containment (see GHSA-5v6f-c99j-7m36). Delegates to edit,
+    // which re-checks on each sub-call, but the parent gates the whole batch.
+    return escapesCwdSync(args.file_path as string);
   },
   async execute({ file_path, edits }, ctx) {
     if (!ctx) {

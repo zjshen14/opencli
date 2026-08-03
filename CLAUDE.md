@@ -54,10 +54,15 @@ src/
   providers/      # LLM clients — no CLI/state imports
     types.ts        # Shared types: Message, StreamEvent, ToolDefinition, ToolResult, thoughtSignature
     client.ts       # LLMClient interface — the provider plug point
+    registry.ts     # PRESETS — single source of truth for provider wire format, base URL, key env
+                    #   vars, context windows, capabilities. Adding a provider is a data change.
     gemini.ts       # GeminiClient implements LLMClient; Gemini-specific schema conversion internal
     anthropic.ts    # AnthropicClient implements LLMClient; translates role/tool formats internally
-    openai.ts       # OpenAIClient implements LLMClient; translates role/tool formats internally
-    factory.ts      # createClient(model, apiKey) — picks provider by model name prefix
+    openai.ts       # OpenAIClient implements LLMClient; also serves every OpenAI-compatible OSS
+                    #   provider and local Ollama
+    salvage.ts      # Recovers tool calls OSS models emit as text instead of structured tool_calls
+    ollama-discovery.ts # Best-effort /api/tags query — local context window + tool capability
+    factory.ts      # createClient(model, apiKey) — picks provider via the registry
     schema.ts       # Generic toolToDefinition() + activateSkillDefinition (plain JSONSchema, no provider deps)
     retry.ts        # withRetry() — shared exponential-backoff retry wrapper for provider streams
     errors.ts       # toFriendlyError() — normalises provider errors to human-readable messages
@@ -104,7 +109,9 @@ src/
 
 **Plan mode** (`Agent.run(input, "plan")`): restricts tools to `read/glob/grep/think`, appends a plan-specific system prompt suffix, and sets `readOnly` on the executor so write tools are blocked at two layers. The REPL's `/plan <task>` command runs a plan pass, then shows `[@clack/prompts select]` Approve / Edit / Cancel before switching to react mode for execution.
 
-**Provider abstraction**: `LLMClient` (in `providers/client.ts`) is the single interface the Agent Core depends on. `schema.ts` converts `Tool` objects to generic `ToolDefinition` (plain JSONSchema). Each provider client translates `ToolDefinition[]` and `Message[]` into its own wire format internally — Gemini converts types to uppercase and uses `functionCall`/`functionResponse`; Anthropic maps `role: "model"` → `"assistant"` and uses `tool_use`/`tool_result` blocks. The provider is selected by `createClient(model, apiKey)` in `factory.ts` based on model name prefix (`claude-` → Anthropic, otherwise Gemini). API key resolution (env vars + config file) happens in `cli/index.ts` — the library layer never reads `process.env` or config files.
+**Provider abstraction**: `LLMClient` (in `providers/client.ts`) is the single interface the Agent Core depends on. `schema.ts` converts `Tool` objects to generic `ToolDefinition` (plain JSONSchema). Each provider client translates `ToolDefinition[]` and `Message[]` into its own wire format internally — Gemini converts types to uppercase and uses `functionCall`/`functionResponse`; Anthropic maps `role: "model"` → `"assistant"` and uses `tool_use`/`tool_result` blocks. `providers/registry.ts` holds the `PRESETS` table describing every provider (wire format, base URL, API-key env vars, model context windows, capabilities); `createClient()` and `detectProvider()` read from it, so **adding a provider means editing one table, not four call sites**. API key resolution (env vars + config file) happens in `cli/keys.ts` — the library layer never reads `process.env` or config files.
+
+**OSS + local models (B6)**: Kimi, GLM, DeepSeek, Qwen, OpenRouter, and Ollama all reuse the OpenAI wire client. Two behaviours are specific to them and opt-in per preset: `salvage.ts` recovers tool calls that open-weight models emit as bare or fenced JSON in message content (only when a turn produced no structured calls, and only for a name that was actually offered), and `ollama-discovery.ts` queries `/api/tags` for a local model's true context window, which is routinely *smaller* than the static default. See [`docs/design/b6-oss-models.md`](docs/design/b6-oss-models.md).
 
 **Thinking models + `thoughtSignature`**: Gemini thinking models (e.g. `gemini-3.1-*`) require `thoughtSignature` to be captured from each `functionCall` part and echoed back in the corresponding `functionResponse`. This is threaded through `FunctionCallPart` → `FunctionResultPart` → the API request in `gemini.ts`. The Anthropic client ignores this field.
 

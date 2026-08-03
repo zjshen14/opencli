@@ -96,3 +96,56 @@ describe("resolveApiKey — gemini", () => {
     expect(() => resolveApiKey("gemini", BASE_CONFIG)).toThrow("No Gemini API key");
   });
 });
+
+describe("resolveApiKey — OSS providers", () => {
+  it("reads each provider's own env var, so keys cannot collide", () => {
+    // The pre-registry workaround was stuffing a Moonshot key into OPENAI_API_KEY,
+    // which broke as soon as real OpenAI was also in use. These must stay separate.
+    withEnv({ MOONSHOT_API_KEY: "moon-key", OPENAI_API_KEY: "oai-key" }, () => {
+      expect(resolveApiKey("moonshot", BASE_CONFIG)).toBe("moon-key");
+      expect(resolveApiKey("openai", BASE_CONFIG)).toBe("oai-key");
+    });
+  });
+
+  it("supports alternate env var names in declared order", () => {
+    withEnv({ Z_AI_API_KEY: "alt-key" }, () => {
+      expect(resolveApiKey("zai", BASE_CONFIG)).toBe("alt-key");
+    });
+    withEnv({ ZAI_API_KEY: "primary", Z_AI_API_KEY: "alt" }, () => {
+      expect(resolveApiKey("zai", BASE_CONFIG)).toBe("primary");
+    });
+  });
+
+  it("falls back to the providerApiKeys config map", () => {
+    const config = { ...BASE_CONFIG, providerApiKeys: { deepseek: "cfg-deepseek" } };
+    expect(resolveApiKey("deepseek", config)).toBe("cfg-deepseek");
+  });
+
+  it("prefers the env var over the config map", () => {
+    const config = { ...BASE_CONFIG, providerApiKeys: { deepseek: "cfg" } };
+    withEnv({ DEEPSEEK_API_KEY: "env" }, () => {
+      expect(resolveApiKey("deepseek", config)).toBe("env");
+    });
+  });
+
+  it("names the right env var when a key is missing", () => {
+    expect(() => resolveApiKey("dashscope", BASE_CONFIG)).toThrow("DASHSCOPE_API_KEY");
+  });
+
+  it("throws a listing error for an unknown provider", () => {
+    expect(() => resolveApiKey("nonesuch", BASE_CONFIG)).toThrow("Unknown provider 'nonesuch'");
+  });
+});
+
+describe("resolveApiKey — ollama needs no key", () => {
+  it("returns a placeholder so the SDK accepts the client", () => {
+    // Ollama requires no auth, but the OpenAI SDK rejects an empty API key.
+    expect(resolveApiKey("ollama", BASE_CONFIG)).toBe("ollama");
+  });
+
+  it("still honours OLLAMA_API_KEY when the user fronts it with a proxy", () => {
+    withEnv({ OLLAMA_API_KEY: "proxy-key" }, () => {
+      expect(resolveApiKey("ollama", BASE_CONFIG)).toBe("proxy-key");
+    });
+  });
+});

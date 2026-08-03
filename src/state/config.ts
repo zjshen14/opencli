@@ -23,10 +23,16 @@ export interface Config {
   permissions?: Permissions;
   /** Sandbox mode for the bash tool. Absence is treated as "auto" by the CLI layer. */
   sandbox?: "auto" | "strict" | "off";
-  /** Explicit provider override — takes precedence over model-name detection. */
-  provider?: "gemini" | "anthropic" | "openai";
+  /** Explicit provider override — takes precedence over model-name detection.
+   *  Any id registered in src/providers/registry.ts is valid (e.g. "ollama", "zai"). */
+  provider?: string;
   /** Custom base URL for proxy or local inference setups (e.g. LiteLLM, Ollama). */
   baseUrl?: string;
+  /** API keys for providers without a dedicated field above, keyed by provider id. */
+  providerApiKeys?: Record<string, string>;
+  /** Per-model metadata overrides. Context windows in the registry are defaults — a
+   *  proxy may truncate one, or a local Modelfile may raise it via num_ctx. */
+  modelOverrides?: Record<string, { contextWindow?: number }>;
   /** Auto-compact context at the 75% token threshold (A5b). Defaults to true
    *  when absent. Set to false to disable; manual /compact still works. */
   autoCompact?: boolean;

@@ -220,32 +220,69 @@ src/providers/
   client.ts      LLMClient interface — the sole abstraction the Agent Core depends on.
   types.ts       Shared types: Message, StreamEvent, ToolDefinition, FunctionCallPart,
                  FunctionResultPart, thoughtSignature.
+  registry.ts    Provider presets + model metadata — single source of truth for wire
+                 format, base URL, API-key env vars, context windows, capabilities.
   factory.ts     createClient(model, apiKey, options) — provider detection + client
-                 construction. detectProvider() + hasNativeThinking() helpers.
+                 construction. detectProvider() + hasNativeThinking() read the registry.
   gemini.ts      GeminiClient — Gemini wire format, thoughtSignature threading,
                  uppercase type conversion.
   anthropic.ts   AnthropicClient — Anthropic wire format, tool_use/tool_result blocks,
                  role mapping (model → assistant).
-  openai.ts      OpenAIClient — OpenAI Chat Completions wire format.
+  openai.ts      OpenAIClient — OpenAI Chat Completions wire format; also serves every
+                 OpenAI-compatible OSS provider and local Ollama.
+  salvage.ts     Recovers tool calls that OSS models emit as text instead of structured
+                 tool_calls. Opt-in per preset.
+  ollama-discovery.ts
+                 Best-effort /api/tags query for locally installed models — context
+                 window and tool-calling capability.
   retry.ts       withRetry<T>() — generic async generator retry with exponential
                  backoff; shared by all provider clients.
   schema.ts      toolToDefinition() — converts Tool → plain-JSONSchema ToolDefinition.
                  activateSkillDefinition — the activate_skill pseudo-tool definition.
 ```
 
-#### Provider detection (`factory.ts`)
+#### Provider registry (`registry.ts`)
 
-`detectProvider(model)` infers the provider from the model name prefix:
+`PRESETS` is the single table describing every provider. Adding one is a data change, not
+a code change — before this existed, `detectProvider()`, `contextWindowFor()`,
+`hasNativeThinking()`, and `resolveApiKey()` each kept their own hardcoded list, and
+forgetting one produced silent misbehaviour.
 
-| Prefix | Provider | Client |
-|---|---|---|
-| `claude-` | `anthropic` | `AnthropicClient` |
-| `gpt-`, `o1`, `o3`, `o4` | `openai` | `OpenAIClient` |
-| anything else | `gemini` | `GeminiClient` (default) |
+| Preset | Wire | Base URL | Key env |
+|---|---|---|---|
+| `gemini` | gemini | _(SDK default)_ | `GEMINI_API_KEY` |
+| `anthropic` | anthropic | _(SDK default)_ | `ANTHROPIC_API_KEY` |
+| `openai` | openai | _(SDK default)_ | `OPENAI_API_KEY` |
+| `ollama` | openai | `http://localhost:11434/v1` | _(none needed)_ |
+| `moonshot` | openai | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` |
+| `zai` | openai | `https://api.z.ai/api/coding/paas/v4` | `ZAI_API_KEY` |
+| `deepseek` | openai | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` |
+| `dashscope` | openai | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` |
+| `openrouter` | openai | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
 
-`hasNativeThinking(model)` returns true for Gemini thinking / 2.5+ / 3.x models, causing `createDefaultRegistry()` to omit the `think` tool (avoids double-paying for reasoning).
+`detectProvider(model)` maps a model name to a preset by longest-matching prefix
+(`claude-` → anthropic, `kimi-` → moonshot, `glm-` → zai, …), falling back to `gemini`
+for unrecognised names so that custom proxy aliases keep working.
 
-**Known limitation:** prefix detection breaks for proxies, fine-tunes, and custom aliases. Tracked as [#54](https://github.com/zjshen14/opencli/issues/54) — Phase B2 adds explicit `provider` override + `--base-url` to the config.
+`hasNativeThinking(model)` reads `ModelInfo.nativeThinking`, causing
+`createDefaultRegistry()` to omit the `think` tool (avoids double-paying for reasoning).
+
+#### Local models (`ollama-discovery.ts`, `salvage.ts`)
+
+Two properties of local inference need explicit handling:
+
+1. **Context windows are per-install.** A stock `qwen2.5-coder:14b` reports 32 768 — well
+   *under* the 100 000 static default, so without discovery auto-compact never fires and
+   the model silently truncates. `/api/tags` supplies the real value; failures degrade to
+   the static default rather than crashing.
+2. **Tool calls arrive as text.** Open-weight models frequently ignore their chat
+   template's `<tool_call>` wrapper and emit bare or fenced JSON into message content, so
+   the agent loop sees no calls and ends the turn. `salvage.ts` promotes such payloads
+   back to function calls, but only when the turn produced no structured calls *and* the
+   name matches a tool actually offered — a model discussing a tool in prose is never
+   silently executed.
+
+See [`docs/design/b6-oss-models.md`](design/b6-oss-models.md) for the full rationale.
 
 #### Tool definitions vs. tool execution
 

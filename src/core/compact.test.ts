@@ -434,3 +434,31 @@ describe("compactHistory — original task preservation", () => {
     expect(summaryText).not.toContain("**Original task** (verbatim):");
   });
 });
+
+describe("contextWindowFor — OSS models and overrides", () => {
+  it("returns 1M for hosted OSS models instead of the 100k default", () => {
+    // Before the registry these fell through to DEFAULT_CONTEXT_WINDOW, firing
+    // auto-compact ~13x too early and destroying context for no reason.
+    expect(contextWindowFor("kimi-k3")).toBe(1_000_000);
+    expect(contextWindowFor("glm-5.2")).toBe(1_000_000);
+    expect(contextWindowFor("deepseek-v4-pro")).toBe(1_000_000);
+    expect(contextWindowFor("qwen3.7-max")).toBe(1_000_000);
+  });
+
+  it("honours an explicit override ahead of the static table", () => {
+    expect(contextWindowFor("claude-opus-5", 50_000)).toBe(50_000);
+    expect(contextWindowFor("kimi-k3", 200_000)).toBe(200_000);
+  });
+
+  it("applies an override for a local model the static table cannot know", () => {
+    // A stock qwen2.5-coder:14b reports 32768 — well under the 100k default, so
+    // without the override auto-compact would never fire before truncation.
+    expect(contextWindowFor("qwen2.5-coder:14b")).toBe(100_000);
+    expect(contextWindowFor("qwen2.5-coder:14b", 32_768)).toBe(32_768);
+  });
+
+  it("ignores a zero or negative override", () => {
+    expect(contextWindowFor("claude-opus-5", 0)).toBe(200_000);
+    expect(contextWindowFor("claude-opus-5", -1)).toBe(200_000);
+  });
+});

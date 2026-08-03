@@ -61,6 +61,8 @@ export class Agent {
   private snapshotManager?: SnapshotManager;
   private compactionClient: LLMClient;
   private autoCompact: boolean;
+  /** Resolved context window, overriding the registry default when the CLI supplied one. */
+  private contextWindow: number;
   /** Whether the 60% notice has fired this session; resets on clearHistory()
    *  and on successful compaction. */
   private warnedAt60 = false;
@@ -79,6 +81,9 @@ export class Agent {
       compactionClient?: LLMClient;
       /** When true (default), auto-compact at turn boundary above 75% token ratio. */
       autoCompact?: boolean;
+      /** Overrides the registry's static context window. Supplied by the CLI from
+       *  config.modelOverrides or Ollama runtime discovery. */
+      contextWindow?: number;
     },
   ) {
     this.context = new ContextManager(systemInstruction, maxHistoryMessages);
@@ -88,6 +93,7 @@ export class Agent {
     this.snapshotManager = options?.snapshotManager;
     this.compactionClient = options?.compactionClient ?? client;
     this.autoCompact = options?.autoCompact !== false;
+    this.contextWindow = contextWindowFor(this.model, options?.contextWindow);
   }
 
   setConfirmFn(fn: ConfirmFn): void {
@@ -380,7 +386,7 @@ export class Agent {
     const estimatedTokens = Math.round(
       (JSON.stringify(messages).length + systemInstruction.length) / 4,
     );
-    const effectiveWindow = Math.min(contextWindowFor(this.model), COMPACTION_TARGET_TOKENS);
+    const effectiveWindow = Math.min(this.contextWindow, COMPACTION_TARGET_TOKENS);
     const ratio = estimatedTokens / effectiveWindow;
 
     if (ratio < AUTO_COMPACT_WARN_RATIO) return [];
@@ -442,7 +448,7 @@ export class Agent {
     return {
       messageCount: this.context.messageCount,
       estimatedTokens: Math.round(JSON.stringify(messages).length / 4),
-      contextWindow: contextWindowFor(this.model),
+      contextWindow: this.contextWindow,
       maxHistoryMessages: this.context.maxMessages,
     };
   }

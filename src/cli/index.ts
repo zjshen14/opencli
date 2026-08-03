@@ -1,5 +1,11 @@
 import { Command, InvalidArgumentError } from "commander";
 import { createClient, createCompactionClient, detectProvider } from "../providers/factory.js";
+import { getPreset, isKnownProvider, listProviderIds } from "../providers/registry.js";
+import {
+  getOllamaModels,
+  findOllamaModel,
+  toolSupportWarning,
+} from "../providers/ollama-discovery.js";
 import { Agent } from "../core/agent.js";
 import { createDefaultRegistry } from "../tools/index.js";
 import { SkillRegistry } from "../skills/registry.js";
@@ -294,17 +300,44 @@ function resolveSandboxMode(flagValue: string | undefined, config: Config): Sand
   throw new Error(`Invalid --sandbox value '${raw}'. Valid values: auto, strict, off`);
 }
 
-function resolveProvider(
-  flag: string | undefined,
-  config: Config,
-  model: string,
-): "gemini" | "anthropic" | "openai" {
+function resolveProvider(flag: string | undefined, config: Config, model: string): string {
   const raw = flag ?? config.provider;
   if (raw !== undefined) {
-    if (raw === "gemini" || raw === "anthropic" || raw === "openai") return raw;
-    throw new Error(`Invalid --provider value '${raw}'. Valid values: gemini, anthropic, openai`);
+    if (isKnownProvider(raw)) return raw;
+    throw new Error(
+      `Invalid --provider value '${raw}'. Valid values: ${listProviderIds().join(", ")}`,
+    );
   }
   return detectProvider(model);
+}
+
+/**
+ * Resolves the context window for a model, consulting config overrides and — for local
+ * runtimes — the provider itself. Ollama models carry per-install windows that no static
+ * table can know, and a stock qwen2.5-coder:14b (32 768) is well *under* the default, so
+ * without this auto-compact would never fire before the model silently truncates.
+ *
+ * Always best-effort: if Ollama is unreachable we fall through to the static default.
+ */
+async function resolveContextWindow(
+  model: string,
+  provider: string,
+  baseUrl: string | undefined,
+  config: Config,
+): Promise<number | undefined> {
+  const configured = config.modelOverrides?.[model]?.contextWindow;
+  if (configured) return configured;
+
+  const preset = getPreset(provider);
+  if (preset?.runtimeDiscovery !== "ollama") return undefined;
+
+  const models = await getOllamaModels(baseUrl ?? preset.baseUrl ?? "");
+  if (models.length === 0) return undefined;
+
+  const warning = toolSupportWarning(models, model);
+  if (warning) process.stderr.write(`[opencli] warn: ${warning}\n`);
+
+  return findOllamaModel(models, model)?.contextWindow;
 }
 
 async function createAgent(
@@ -328,12 +361,14 @@ async function createAgent(
   const provider = resolveProvider(providerOverride, config, model);
   const baseUrl = baseUrlOverride ?? config.baseUrl;
   const apiKey = resolveApiKey(provider, config);
+  // Fixes #251: config.temperature was previously ignored unless --temperature was passed.
+  const effectiveTemperature = temperature ?? config.temperature;
   const client = createClient(model, apiKey, {
     includeUsage: !!debug,
     maxTokens: config.maxTokens,
     provider,
     baseUrl,
-    temperature,
+    temperature: effectiveTemperature,
   });
   const tools = createDefaultRegistry(model, runner);
 
@@ -351,13 +386,15 @@ async function createAgent(
   const snapshotManager = new SnapshotManager();
 
   const systemInstruction = await loadSystemInstruction();
-  const compactionClient = createCompactionClient(model, apiKey);
+  const compactionClient = createCompactionClient(model, apiKey, { provider, baseUrl });
+  const contextWindow = await resolveContextWindow(model, provider, baseUrl, config);
   const agent = new Agent(client, tools, skills, systemInstruction, config.historySize, maxTurns, {
     model,
     onObservability: debug ? makeDebugHandler() : undefined,
     snapshotManager,
     compactionClient,
     autoCompact: config.autoCompact,
+    contextWindow,
   });
   return { agent, skills, mcpManager, snapshotManager };
 }

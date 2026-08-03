@@ -1,6 +1,7 @@
 import type { LLMClient } from "../providers/client.js";
 import type { Message } from "../providers/types.js";
 import type { ContextManager } from "./context.js";
+import { findModelInfo, DEFAULT_CONTEXT_WINDOW } from "../providers/registry.js";
 
 export interface CompactResult {
   messagesRemoved: number;
@@ -10,26 +11,12 @@ export interface CompactResult {
 const KEEP_RECENT = 10;
 const COMPACT_MIN_MESSAGES = 4;
 
-// Longest-prefix-first; order matters — more specific prefixes must come before shorter ones.
-const MODEL_CONTEXT_WINDOWS: [prefix: string, tokens: number][] = [
-  ["gemini-2.5", 1_048_576],
-  ["gemini-2.0", 1_048_576],
-  ["gemini-1.5", 1_048_576],
-  ["gemini-3", 1_048_576],
-  ["claude-", 200_000],
-  ["gpt-4.1", 128_000],
-  ["gpt-4o", 128_000],
-  // Mini/preview reasoning models have 128k context; must come before the base o1/o3/o4 entries.
-  ["o1-mini", 128_000],
-  ["o1-preview", 128_000],
-  ["o3-mini", 128_000],
-  ["o4-mini", 128_000],
-  ["o1", 200_000],
-  ["o3", 200_000],
-  ["o4", 200_000],
-];
-
-const DEFAULT_CONTEXT_WINDOW = 100_000;
+/**
+ * Context windows live in the provider registry alongside the rest of each model's
+ * metadata, so a new provider is one table entry rather than edits in four files.
+ * See src/providers/registry.ts and docs/design/b6-oss-models.md.
+ */
+export { DEFAULT_CONTEXT_WINDOW } from "../providers/registry.js";
 
 /**
  * Cap on the effective compaction window. Auto-compact's trigger uses
@@ -108,11 +95,19 @@ function extractOriginalTask(messages: Message[]): string {
   return "";
 }
 
-export function contextWindowFor(model: string): number {
-  for (const [prefix, size] of MODEL_CONTEXT_WINDOWS) {
-    if (model.startsWith(prefix)) return size;
-  }
-  return DEFAULT_CONTEXT_WINDOW;
+/**
+ * Resolves a model's context window, first hit wins:
+ *   1. explicit override (config.modelOverrides, or Ollama runtime discovery)
+ *   2. static registry entry, longest-prefix match
+ *   3. DEFAULT_CONTEXT_WINDOW
+ *
+ * The override channel matters most for local models, whose windows are per-install and
+ * frequently *smaller* than the default — a stock qwen2.5-coder:14b reports 32 768, so
+ * without an override auto-compact would never fire before the model truncates.
+ */
+export function contextWindowFor(model: string, override?: number): number {
+  if (override !== undefined && override > 0) return override;
+  return findModelInfo(model)?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
 }
 
 function extractErrorResults(messages: Message[]): string[] {

@@ -100,8 +100,10 @@ API keys go in `.env` only (which is gitignored).
 <optional body explaining why, not what>
 
 Closes #<issue_number>
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-Authored-By: <assistant/model> <noreply@...>
 ```
+
+Name the **actual** assistant + model used (see [Engineering Practices → Git](engineering-practices.md#git-branching--issue-management)). Don't hardcode a tool you didn't use.
 
 Examples:
 ```
@@ -117,7 +119,7 @@ refactor: extract duplicate retry loop into shared withRetry utility
 Reduces duplication across Gemini, Anthropic, OpenAI clients without changing behavior.
 
 Closes #75
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-Authored-By: Codex <noreply@openai.com>
 ```
 
 **Use `Closes` if the commit fully resolves the issue.** Use `Part of` or `References` if it's partial work.
@@ -168,7 +170,7 @@ This keeps the issue as the canonical record of progress and makes it easy to re
 - [ ] <manual testing steps if UI/behavior changes>
 - [ ] <edge cases or regressions to check>
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+🤖 Generated with an AI assistant
 ```
 
 **What to explain in the description:**

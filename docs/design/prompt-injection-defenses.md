@@ -19,8 +19,8 @@ The only mitigation prior to this work was a soft system-prompt rule ("Never rea
 
 This advisory lands the prompt-level framing and documents the layered strategy. The structural layers — which actually bound the blast radius independent of the model — ship in companion advisories:
 
-1. **Read-path restriction** (GHSA-5v6f-c99j-7m36): `read` now requires confirmation for paths outside cwd or for credential basenames; `write`/`edit`/`multi_edit` use symlink-aware containment. An injected agent cannot silently read `~/.ssh/id_rsa`.
-2. **`web_fetch` host guard** (GHSA-9gqj-5w58-2j6v): SSRF/private/loopback/link-local hosts are blocked, closing both the cloud-metadata read and the exfiltration channel.
+1. **Read-path restriction** (GHSA-5v6f-c99j-7m36): `read`, `grep`, `glob`, and `ls` all require confirmation for paths outside cwd or for credential basenames; `write`/`edit`/`multi_edit` use symlink-aware containment. An injected agent cannot silently read `~/.ssh/id_rsa` — and `grep` is gated the same way, because it returns matching *lines* and is therefore an equivalent exfiltration primitive.
+2. **`web_fetch` host guard** (GHSA-9gqj-5w58-2j6v): SSRF/private/loopback/link-local hosts are blocked, and HTTP redirects are re-validated per hop, closing the cloud-metadata and internal-service **read** vector. This does **not** close exfiltration — see "Open problem: exfiltration" below.
 3. **`--yes` deny + blocklist** (GHSA-hx58-45j4-fr7m): catastrophic commands and the user's deny list are honoured even under `--yes`.
 4. **Session-log redaction** (GHSA-x245-5r32-45m5): secrets that do reach the log are masked.
 5. **System-prompt framing** (this advisory, soft): tell the model tool output is data. Reinforces 1–4 but is not relied upon alone.
@@ -28,6 +28,12 @@ This advisory lands the prompt-level framing and documents the layered strategy.
 ## What landed here
 
 - A new `## Untrusted content` section in `DEFAULT_SYSTEM_INSTRUCTION` (`src/core/prompt.ts`) that frames tool output as data, names prompt injection, and instructs the model to surface — not obey — actions requested only by untrusted content.
+
+> ⚠ This is prompt text. Its effectiveness is **model-dependent** and is **not** verified by the unit test, which only asserts the text is *present*. Do not mistake the passing test for evidence that the framing actually changes model behaviour. The structural layers (1–4) are what bound the blast radius; this layer is reinforcement only.
+
+## Open problem: exfiltration is still open
+
+After all four structural layers land, an injected agent that does obtain a secret (e.g. from a project file it was legitimately asked to read) can still **exfiltrate** it: `web_fetch` to a *public* attacker-controlled host is allowed by design, and the `auto` sandbox permits outbound network. None of the current layers gate "send data out". The provenance-tracking bump below is the mechanism that would actually address it — a `web_fetch` (or `bash` with `curl`) immediately after untrusted content was consumed is precisely the signal worth gating. Until that ships, exfiltration to public hosts is the open gap; the layers here bound the secret-read, private-endpoint, and destruction surfaces, not the outbound channel.
 
 ## Follow-up: provenance-tracking confirmation bump (ready for implementation)
 
@@ -43,7 +49,7 @@ Implementation notes:
 - The provenance tag belongs on `FunctionResultPart` (`src/providers/types.ts`), added when the executor builds results, and read back at the top of the next turn.
 - Keep the flag scoped to "since the last user message" so a legitimate multi-step task that reads external docs early doesn't stay elevated forever.
 
-This is deliberately a follow-up rather than part of this advisory: it touches the executor and the message types, and deserves its own review + tests. The companion layers above already close the practical exfiltration/destruction paths; the bump adds defense-in-depth against novel routes.
+This is deliberately a follow-up rather than part of this advisory: it touches the executor and the message types, and deserves its own review + tests. The companion layers close the destructive paths and the secret-read / private-endpoint paths; the bump is what would constrain exfiltration to public hosts (see "Open problem" above).
 
 ## What is out of scope
 

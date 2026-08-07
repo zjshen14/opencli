@@ -105,9 +105,14 @@ Current docs:
 
 **Never commit secrets.** `.env` is gitignored. API keys go in `.env` only. Run `git diff --cached | grep -i "AIza\|api_key\|secret"` before committing if unsure.
 
-**Always include the co-author trailer:**
+**Always include a co-author trailer on AI-assisted commits**, naming the actual
+assistant and model that produced the change. This keeps the human- vs. AI-authored
+audit trail accurate for reviewers and future contributors. Use the real tool +
+model — do not attribute work to a tool that wasn't used.
 ```
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+Co-Authored-By: Codex <noreply@openai.com>
+Co-Authored-By: opencode/glm-5.2 <noreply@opencode.ai>
 ```
 
 ---

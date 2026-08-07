@@ -20,6 +20,29 @@ export function isSafeProfilePath(p: string): boolean {
   return !UNSAFE_PROFILE_PATH_RE.test(p);
 }
 
+/**
+ * A SandboxRunner that refuses to run anything — every exec fails closed. Used in
+ * `strict` mode when no safe profile can be built: the user explicitly asked for
+ * isolation, so silently degrading to no sandbox (PassthroughRunner) would invert
+ * that request. Failing the command is the safe choice. See GHSA-99pr-w6qj-549x.
+ */
+class DenyRunner implements SandboxRunner {
+  readonly mode: SandboxMode;
+  readonly warning: string | null;
+  constructor(mode: SandboxMode, warning: string) {
+    this.mode = mode;
+    this.warning = warning;
+  }
+  async exec(_command: string, _opts: SandboxExecOptions): Promise<SandboxExecResult> {
+    return {
+      stdout: "",
+      stderr: this.warning ?? "sandbox unavailable; command refused",
+      // 126 = "command invoked cannot execute" (permission/refused convention).
+      exitCode: 126,
+    };
+  }
+}
+
 function buildStrictProfile(cwd: string): string {
   return `(version 1)
 
@@ -154,7 +177,7 @@ export class SandboxExecRunner implements SandboxRunner {
 
   private profilePath: string;
   private ready: Promise<void>;
-  private fallback: PassthroughRunner | null = null;
+  private fallback: SandboxRunner | null = null;
 
   constructor(mode: SandboxMode, cwd: string) {
     this.mode = mode;
@@ -162,15 +185,23 @@ export class SandboxExecRunner implements SandboxRunner {
     const home = process.env.HOME ?? homedir();
 
     // Refuse to sandbox when cwd or home contains a character that breaks out of the
-    // profile string literal. Falling back to passthrough (with a warning) is safe;
-    // emitting an attacker-influenced profile is not. See GHSA-99pr-w6qj-549x.
+    // profile string literal. In `auto` (best-effort) we fall back to passthrough with
+    // a warning; in `strict` the user explicitly asked for isolation, so degrading to
+    // no sandbox would invert that request — fail closed (deny every exec) instead.
+    // See GHSA-99pr-w6qj-549x.
     const unsafePath = !isSafeProfilePath(cwd) ? cwd : !isSafeProfilePath(home) ? home : null;
     if (unsafePath !== null) {
       this.profilePath = "";
       this.warning =
         `working directory or home contains a character ('"' or '\\') that is unsafe in ` +
-        `the sandbox-exec profile ('${unsafePath}'); running without isolation`;
-      this.fallback = new PassthroughRunner(mode, this.warning);
+        `the sandbox-exec profile ('${unsafePath}'); ` +
+        (mode === "strict"
+          ? "strict isolation unavailable — commands refused"
+          : "running without isolation");
+      this.fallback =
+        mode === "strict"
+          ? new DenyRunner(mode, this.warning)
+          : new PassthroughRunner(mode, this.warning);
       this.ready = Promise.resolve();
       return;
     }

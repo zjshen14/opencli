@@ -215,4 +215,23 @@ describe.skipIf(!isMacOS)("SandboxExecRunner profile-injection guard (macOS only
     const runner = new SandboxExecRunner("auto", "/Users/someone/my project (copy)");
     expect(runner.warning ?? "").not.toMatch(/unsafe in the sandbox-exec profile/);
   });
+
+  it("fails CLOSED in strict mode when the path is unsafe (no silent passthrough)", async () => {
+    // strict asked for isolation; if a safe profile can't be built, the runner must
+    // deny the command rather than run it unsandboxed. See GHSA-99pr-w6qj-549x.
+    const runner = new SandboxExecRunner("strict", '/tmp/x") (allow file-write* (subpath "/etc');
+    expect(runner.warning ?? "").toMatch(/strict isolation unavailable|refused/i);
+    const result = await runner.exec("echo should-not-run", { cwd: process.cwd() });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr + result.stdout).toMatch(/refused|unavailable|unsafe/i);
+  });
+
+  it("still falls back to passthrough in auto mode when the path is unsafe", async () => {
+    const runner = new SandboxExecRunner("auto", "/tmp/evil\\path");
+    expect(runner.warning ?? "").toMatch(/without isolation/i);
+    // auto is best-effort: the command runs (passthrough), not denied
+    const result = await runner.exec("echo runs", { cwd: process.cwd() });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("runs");
+  });
 });

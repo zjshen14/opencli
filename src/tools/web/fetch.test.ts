@@ -125,9 +125,99 @@ describe("webFetchTool SSRF guard (GHSA-9gqj-5w58-2j6v)", () => {
   });
 
   it("refuses IPv6 loopback ::1", async () => {
-    lookupMock.mockResolvedValue([{ address: "::1", family: 6 }]);
+    vi.mocked(lookupMock).mockResolvedValue([{ address: "::1", family: 6 }]);
     mockFetch("x");
     expect((await webFetchTool.execute({ url: "http://[::1]/" })).success).toBe(false);
+  });
+
+  it("refuses IPv6 unique-local fc00::/7 (the v6 RFC1918)", async () => {
+    vi.mocked(lookupMock).mockResolvedValue([{ address: "fd00::1", family: 6 }]);
+    mockFetch("x");
+    expect((await webFetchTool.execute({ url: "http://ula.example/" })).success).toBe(false);
+  });
+
+  it("refuses CGNAT 100.64.0.0/10", async () => {
+    vi.mocked(lookupMock).mockResolvedValue([{ address: "100.64.0.5", family: 4 }]);
+    mockFetch("x");
+    expect((await webFetchTool.execute({ url: "http://cgnet.example/" })).success).toBe(false);
+  });
+
+  it("refuses benchmarking 198.18.0.0/15", async () => {
+    vi.mocked(lookupMock).mockResolvedValue([{ address: "198.18.0.1", family: 4 }]);
+    mockFetch("x");
+    expect((await webFetchTool.execute({ url: "http://bench.example/" })).success).toBe(false);
+  });
+
+  it("refuses Oracle Cloud IMDS 192.0.0.192", async () => {
+    vi.mocked(lookupMock).mockResolvedValue([{ address: "192.0.0.192", family: 4 }]);
+    mockFetch("x");
+    expect((await webFetchTool.execute({ url: "http://oracle-imds.example/" })).success).toBe(
+      false,
+    );
+  });
+
+  it("refuses a redirect from a public host to a private metadata host (GHSA-9gqj)", async () => {
+    // Initial host resolves public; the server 302s inward to the metadata service.
+    vi.mocked(lookupMock).mockImplementation(async (host: string) =>
+      host === "169.254.169.254"
+        ? [{ address: "169.254.169.254", family: 4 }]
+        : [{ address: "93.184.216.34", family: 4 }],
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 302,
+        statusText: "Found",
+        headers: {
+          get: (h: string) =>
+            h.toLowerCase() === "location" ? "http://169.254.169.254/latest/meta-data/" : null,
+        },
+        body: new ReadableStream({ start: (c: ReadableStreamDefaultController) => c.close() }),
+        text: async (): Promise<string> => "",
+      })),
+    );
+    const result = await webFetchTool.execute({ url: "https://evil.example/redir" });
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/SSRF|private|link-local/i);
+  });
+
+  it("follows a redirect to another public host", async () => {
+    vi.mocked(lookupMock).mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        call++;
+        if (call === 1) {
+          return {
+            ok: false,
+            status: 302,
+            statusText: "Found",
+            headers: { get: (h: string) => (h === "location" ? "https://other.example/x" : null) },
+            body: new ReadableStream({ start: (c: ReadableStreamDefaultController) => c.close() }),
+            text: async (): Promise<string> => "",
+          };
+        }
+        const enc = new TextEncoder();
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          headers: { get: () => "text/plain" },
+          body: new ReadableStream({
+            start: (c: ReadableStreamDefaultController) => {
+              c.enqueue(enc.encode("arrived"));
+              c.close();
+            },
+          }),
+          text: async (): Promise<string> => "arrived",
+        };
+      }),
+    );
+    const result = await webFetchTool.execute({ url: "https://example.com/redir" });
+    expect(result.success).toBe(true);
+    expect(result.output).toBe("arrived");
   });
 
   it("allows a public host and calls fetch", async () => {

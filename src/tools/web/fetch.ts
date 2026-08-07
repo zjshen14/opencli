@@ -19,12 +19,22 @@ const allowPrivate = (): boolean => process.env.OPENCLI_WEB_FETCH_ALLOW_PRIVATE 
 // 169.254.169.254), and the unspecified address, for both IPv4 and IPv6.
 const SSRF_BLOCKLIST = new BlockList();
 SSRF_BLOCKLIST.addSubnet("0.0.0.0", 8, "ipv4"); // unspecified
-SSRF_BLOCKLIST.addSubnet("10.0.0.0", 8, "ipv4"); // private
+SSRF_BLOCKLIST.addSubnet("10.0.0.0", 8, "ipv4"); // private (RFC1918)
+SSRF_BLOCKLIST.addSubnet("100.64.0.0", 10, "ipv4"); // carrier-grade NAT (e.g. Tailscale)
 SSRF_BLOCKLIST.addSubnet("127.0.0.0", 8, "ipv4"); // loopback
 SSRF_BLOCKLIST.addSubnet("169.254.0.0", 16, "ipv4"); // link-local (cloud IMDS)
-SSRF_BLOCKLIST.addSubnet("172.16.0.0", 12, "ipv4"); // private
-SSRF_BLOCKLIST.addSubnet("192.168.0.0", 16, "ipv4"); // private
+SSRF_BLOCKLIST.addSubnet("172.16.0.0", 12, "ipv4"); // private (RFC1918)
+SSRF_BLOCKLIST.addSubnet("192.0.0.192", 32, "ipv4"); // Oracle Cloud IMDS
+SSRF_BLOCKLIST.addSubnet("192.0.2.0", 24, "ipv4"); // TEST-NET-1 (documentation)
+SSRF_BLOCKLIST.addSubnet("192.168.0.0", 16, "ipv4"); // private (RFC1918)
+SSRF_BLOCKLIST.addSubnet("198.18.0.0", 15, "ipv4"); // benchmarking
+SSRF_BLOCKLIST.addSubnet("198.51.100.0", 24, "ipv4"); // TEST-NET-2
+SSRF_BLOCKLIST.addSubnet("203.0.113.0", 24, "ipv4"); // TEST-NET-3
+SSRF_BLOCKLIST.addSubnet("240.0.0.0", 4, "ipv4"); // reserved / future (incl. broadcast)
 SSRF_BLOCKLIST.addSubnet("::1", 128, "ipv6"); // loopback
+SSRF_BLOCKLIST.addSubnet("64:ff9b::", 96, "ipv6"); // NAT64 well-known prefix
+SSRF_BLOCKLIST.addSubnet("2001:db8::", 32, "ipv6"); // documentation
+SSRF_BLOCKLIST.addSubnet("fc00::", 7, "ipv6"); // unique local (IPv6 private — the v6 RFC1918)
 SSRF_BLOCKLIST.addSubnet("fe80::", 10, "ipv6"); // link-local
 SSRF_BLOCKLIST.addSubnet("::", 128, "ipv6"); // unspecified
 
@@ -88,6 +98,32 @@ export async function assertSafeUrl(rawUrl: string): Promise<void> {
   }
 }
 
+/** Maximum HTTP redirects followed, each re-validated against the SSRF guard. */
+const MAX_REDIRECTS = 5;
+
+/**
+ * Fetch with SSRF-safe redirect handling. `fetch` follows redirects by default, and
+ * assertSafeUrl only checks the *initial* URL — so a public host that 302s inward to
+ * 169.254.169.254 / 127.0.0.1 would bypass the guard entirely. This follows redirects
+ * manually, re-running assertSafeUrl on every hop (resolved relative to the current URL),
+ * bounded by MAX_REDIRECTS. See GHSA-9gqj-5w58-2j6v.
+ */
+async function safeFetch(url: string, init: RequestInit): Promise<Response> {
+  let current = url;
+  for (let i = 0; i <= MAX_REDIRECTS; i++) {
+    await assertSafeUrl(current);
+    const res = await fetch(current, { ...init, redirect: "manual" });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get("location");
+      if (!location) return res; // malformed redirect — return as-is for the caller to handle
+      current = new URL(location, current).toString(); // resolve relative redirects
+      continue;
+    }
+    return res;
+  }
+  throw new Error(`Too many redirects (>${MAX_REDIRECTS}) fetching ${url}`);
+}
+
 /** Read up to maxBytes from a Response body, aborting if the stream exceeds it. */
 async function readCapped(res: Response, maxBytes: number): Promise<string> {
   if (!res.body) return await res.text();
@@ -123,8 +159,7 @@ export const webFetchTool: Tool = {
   },
   async execute({ url }) {
     try {
-      await assertSafeUrl(url as string);
-      const res = await fetch(url as string, {
+      const res = await safeFetch(url as string, {
         headers: { "User-Agent": "opencli/1.0 (https://github.com/zjshen14/opencli)" },
         signal: AbortSignal.timeout(15_000),
       });

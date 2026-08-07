@@ -55,34 +55,56 @@ export function createForcesConfirmationFn(
 // does not cover them. These are catastrophic and not reliably listed by every user;
 // bias toward blocking (a false positive is recoverable by running without --yes;
 // a false negative is not). See GHSA-hx58-45j4-fr7m.
-const NEVER_AUTO_APPROVE_RULES: Array<{ tool: "bash"; re: RegExp; label: string }> = [
-  // Whole-root or whole-home recursive forced deletion. The target must be the
-  // complete token /, ~, or $HOME (followed by whitespace or end) — subdirectories
-  // like /tmp/x or ~/src are not matched. An optional `--` separator is allowed.
-  {
-    tool: "bash",
-    re: /\brm\s+(?:-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r|--force\b[\s\S]*?--recursive\b|--recursive\b[\s\S]*?--force\b)\s+(?:--\s+)?(?:\/|~|\$HOME)(?=\s|$)/,
-    label: "rm -rf / | ~ | $HOME",
-  },
-  // Pipe-to-shell remote execution.
-  {
-    tool: "bash",
-    re: /\b(?:curl|wget)\b[^|]*\|\s*(?:sh|bash)\b/,
-    label: "curl/wget | sh",
-  },
-  // Classic fork bomb.
-  {
-    tool: "bash",
-    re: /:\s*\(\s*\)\s*\{\s*:\s*\|:/,
-    label: "fork bomb",
-  },
-];
+//
+// The rm rule NORMALISES the target rather than matching its spelling: any suffix
+// (rm -rf /*, ~/, //, /. , '/', ${HOME}) still designates the whole root/home and is
+// blocked, while /tmp/build and ~/src keep a path component and are left alone.
+// Matching spelling instead (e.g. a `(?=\s|$)` lookahead) left 11 bypasses.
 
-/** True if a call must never be auto-approved (built-in blocklist). */
+/** Recursive+force `rm`, short (-rf/-fr, any order) or long form. `[rR]`: both
+ *  spellings mean recursive, so a lowercase-only pattern lets `rm -Rf /` through. */
+const RM_RECURSIVE_FORCE =
+  /\brm\s+(?:(?:-[a-zA-Z]*[rR][a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*[rR])\b|(?:--force\b[\s\S]*?--recursive\b|--recursive\b[\s\S]*?--force\b))/;
+
+/** True if a recursive-force `rm` targets the filesystem root or the whole home
+ *  directory, however it is spelled. Quotes are stripped, `~`/`$HOME`/`${HOME}`
+ *  collapse to a single marker, and trailing `/`, `.`, `*` are removed before the
+ *  check — so `/`, `//`, `/.`, `/*`, `'/'` all reduce to the root, while
+ *  `/tmp/build` and `~/src` retain a component and are correctly left alone. */
+function rmTargetsRootOrHome(cmd: string): boolean {
+  const idx = cmd.search(RM_RECURSIVE_FORCE);
+  if (idx < 0) return false;
+  for (const rawTok of cmd.slice(idx).split(/\s+/).slice(1)) {
+    const unquoted = rawTok.replace(/^['"]|['"]$/g, "");
+    if (unquoted === "" || unquoted === "--" || unquoted.startsWith("-")) continue;
+    const homeNormalised = unquoted.replace(/^\$\{HOME\}|^\$HOME|^~/, "/HOME");
+    // Strip trailing glob/dot/slash noise that still designates the whole target.
+    const stripped = homeNormalised.replace(/[/*.]+$/g, "");
+    if (stripped === "" || stripped === "/HOME") return true;
+  }
+  return false;
+}
+
+/** Remote code piped into a shell. Tolerates an interposed command (e.g. `| sudo sh`)
+ *  and covers interpreters beyond sh/bash. */
+const PIPE_TO_SHELL =
+  /\b(?:curl|wget)\b[^|]*\|\s*(?:\w+\s+)*(?:sh|bash|zsh|dash|ksh|fish|python[0-9.]*|perl|ruby|node)\b/;
+
+/** Classic fork bomb. */
+const FORK_BOMB = /:\s*\(\s*\)\s*\{\s*:\s*\|:/;
+
+/**
+ * True if a call must never be auto-approved (built-in blocklist).
+ *
+ * Known and accepted conservative match: a dangerous command quoted inside another
+ * command (e.g. `echo 'rm -rf /' >> notes.txt`) is also blocked. Separating a quoted
+ * occurrence from a real invocation needs shell parsing; per this list's stated policy
+ * a false positive is recoverable (re-run without --yes) while a false negative is not.
+ */
 export function matchesNeverAutoApprove(toolName: string, args: Record<string, unknown>): boolean {
   if (toolName !== "bash") return false;
   const cmd = String(args.command ?? "");
-  return NEVER_AUTO_APPROVE_RULES.some((r) => r.re.test(cmd));
+  return rmTargetsRootOrHome(cmd) || PIPE_TO_SHELL.test(cmd) || FORK_BOMB.test(cmd);
 }
 
 /**

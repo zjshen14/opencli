@@ -55,6 +55,25 @@ export function redactSecrets(text: string): string {
   return out;
 }
 
+/**
+ * Recursively apply `redactSecrets` to every string value in a structure. Redaction
+ * MUST run on the raw field values BEFORE JSON.stringify, not on the serialized line:
+ * post-serialisation redaction both corrupts the JSON (the generic rule's trailing
+ * `["']?` consumes a structural quote and the replacement doesn't restore it) and
+ * fails to match values whose leading char became `\` after escaping (e.g.
+ * `\"sk-1234...\"`). See GHSA-x245-5r32-45m5.
+ */
+function redactStringsDeep(value: unknown): unknown {
+  if (typeof value === "string") return redactSecrets(value);
+  if (Array.isArray(value)) return value.map(redactStringsDeep);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = redactStringsDeep(v);
+    return out;
+  }
+  return value;
+}
+
 function makeSessionId(): string {
   return new Date().toISOString().slice(0, 23).replace(/[:.]/g, "-");
 }
@@ -388,10 +407,11 @@ export class Session {
 
   async log(entry: WithoutTimestamp<SessionEntry>): Promise<void> {
     try {
-      // Redact high-confidence secrets before the line touches disk, so a secret the
-      // agent read (e.g. a PEM key) is not persisted in plaintext. See GHSA-x245-5r32-45m5.
-      const line =
-        redactSecrets(JSON.stringify({ ...entry, timestamp: new Date().toISOString() })) + "\n";
+      // Redact high-confidence secrets in the entry's string VALUES before
+      // serialising — never on the finished JSON line, which corrupts the JSON and
+      // misses escape-mangled values (see redactStringsDeep). See GHSA-x245-5r32-45m5.
+      const redacted = redactStringsDeep(entry) as WithoutTimestamp<SessionEntry>;
+      const line = JSON.stringify({ ...redacted, timestamp: new Date().toISOString() }) + "\n";
       await appendFile(this.logPath, line, "utf8");
     } catch {
       // Non-fatal — session logging should never crash the agent

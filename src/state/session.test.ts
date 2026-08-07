@@ -585,4 +585,38 @@ describe("Session logging hygiene (GHSA-x245-5r32-45m5)", () => {
     expect(raw).not.toContain("AKIAIOSFODNN7EXAMPLE");
     expect(raw).toContain("[REDACTED");
   });
+
+  it("every written line is valid JSON (no redaction-induced corruption, GHSA-x245)", async () => {
+    const session = await Session.create(CWD);
+    // Entries whose values previously produced corrupt JSONL when redacted
+    // post-serialisation (generic rule consumed the trailing structural quote).
+    await session.log({ type: "user", content: "password=supersecretvalue123" });
+    await session.log({ type: "tool_result", name: "bash", result: "MY_TOKEN: abcdefghijklmnop" });
+    await session.log({
+      type: "tool_result",
+      name: "read",
+      result: 'api_key = "sk-1234567890abcdef"',
+    });
+    const dir = join(tmpHome, ".opencli", "projects", Buffer.from(CWD).toString("base64url"));
+    const raw = await readFile(join(dir, `${session.id}.jsonl`), "utf8");
+    for (const line of raw.split("\n")) {
+      if (line.trim() === "") continue;
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+  });
+
+  it("redacts a quoted api_key value via the real session.log path (GHSA-x245)", async () => {
+    // Previously this leaked: after JSON.stringify the value started with `\`,
+    // which the generic rule's char class excludes, so it was written in plaintext.
+    const session = await Session.create(CWD);
+    await session.log({
+      type: "tool_result",
+      name: "bash",
+      result: 'config: api_key = "sk-1234567890abcdef" done',
+    });
+    const dir = join(tmpHome, ".opencli", "projects", Buffer.from(CWD).toString("base64url"));
+    const raw = await readFile(join(dir, `${session.id}.jsonl`), "utf8");
+    expect(raw).not.toContain("sk-1234567890abcdef");
+    expect(raw).toContain("[REDACTED]");
+  });
 });

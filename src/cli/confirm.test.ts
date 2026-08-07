@@ -5,6 +5,7 @@ import {
   createForcesConfirmationFn,
   buildPermissionSources,
   decideConfirmation,
+  ignoredProjectAllowWarning,
 } from "./confirm.js";
 import type { Config } from "../state/config.js";
 import type { Settings } from "../state/settings.js";
@@ -240,5 +241,25 @@ describe("decideConfirmation", () => {
     // provided allow entries), the call must not be auto-approved.
     expect(decideConfirmation(new Set(), [], "bash", { command: "rm -rf /" }, true)).toBe("ask");
     expect(decideConfirmation(new Set(), [], "bash", { command: "rm -rf /" }, false)).toBe("deny");
+  });
+});
+
+describe("ignoredProjectAllowWarning (GHSA-3g98)", () => {
+  it("returns null when the project has no allow entries", () => {
+    expect(ignoredProjectAllowWarning({} as Settings)).toBeNull();
+    expect(
+      ignoredProjectAllowWarning({ permissions: { deny: ["bash(rm -rf *)"] } } as Settings),
+    ).toBeNull();
+    expect(
+      ignoredProjectAllowWarning({ permissions: { ask: ["bash(git push*)"] } } as Settings),
+    ).toBeNull();
+  });
+
+  it("returns a warning naming the count when project allow entries are ignored", () => {
+    const w = ignoredProjectAllowWarning({
+      permissions: { allow: ["bash(*)", "write(*)"] },
+    } as Settings);
+    expect(w).toMatch(/ignoring 2 project-scoped allow rule/);
+    expect(w).toMatch(/global/);
   });
 });

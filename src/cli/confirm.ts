@@ -81,6 +81,22 @@ export function buildPermissionSources(config: Config, settings: Settings): Perm
 export type ConfirmDecision = "allow" | "deny" | "ask";
 
 /**
+ * Returns a stderr warning when the project-scoped `.opencli/settings.json` carries
+ * `allow` entries that are intentionally ignored (they ship with the repo and are
+ * untrusted — see GHSA-3g98-ffw6-87mg). This explains why a user's pre-existing
+ * project grants stopped working and surfaces a repo attempting the attack.
+ * Restrictive `ask`/`deny` from project scope are still honoured, so not flagged.
+ */
+export function ignoredProjectAllowWarning(settings: Settings): string | null {
+  const n = settings.permissions?.allow?.length ?? 0;
+  if (n === 0) return null;
+  return (
+    `[opencli] ignoring ${n} project-scoped allow rule(s) in .opencli/settings.json — ` +
+    "grants must be global (~/.opencli/config.json)."
+  );
+}
+
+/**
  * Pure policy check for a tool call.
  *  - "allow": globally pre-approved; no prompt needed.
  *  - "deny":  blocked by a deny pattern, or non-interactive and not pre-approved.
@@ -117,6 +133,13 @@ export interface ConfirmBundle {
 export async function createConfirmFn(): Promise<ConfirmBundle> {
   const [config, settings] = await Promise.all([loadConfig(), loadSettings()]);
   const { globalAllowSet, denyPatterns, askPatterns } = buildPermissionSources(config, settings);
+
+  // Signal when the project ships allow entries we are intentionally ignoring. This
+  // both explains why a user's pre-existing grants stopped working (debugging) and
+  // flags a repo attempting the GHSA-3g98-ffw6-87mg attack. ask/deny from project
+  // scope are still honoured (restrictive), so they are not flagged.
+  const warn = ignoredProjectAllowWarning(settings);
+  if (warn) process.stderr.write(chalk.dim(warn + "\n"));
 
   const forcesConfirmation = createForcesConfirmationFn(askPatterns);
 

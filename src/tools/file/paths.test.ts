@@ -91,6 +91,16 @@ describe("isCredentialPath", () => {
     expect(isCredentialPath(join(project, ".pypirc"))).toBe(true);
   });
 
+  it("flags credentials/.netrc/kubeconfig and *.pem/*.key (GHSA-5v6f)", () => {
+    expect(isCredentialPath(join(project, "credentials"))).toBe(true);
+    expect(isCredentialPath(join(project, ".netrc"))).toBe(true);
+    expect(isCredentialPath(join(project, ".git-credentials"))).toBe(true);
+    expect(isCredentialPath(join(project, ".envrc"))).toBe(true);
+    expect(isCredentialPath(join(project, "kubeconfig"))).toBe(true);
+    expect(isCredentialPath(join(project, "server.pem"))).toBe(true);
+    expect(isCredentialPath(join(project, "tls.key"))).toBe(true);
+  });
+
   it("does not flag regular source files", () => {
     expect(isCredentialPath(join(project, "src", "index.ts"))).toBe(false);
     expect(isCredentialPath(join(project, "README.md"))).toBe(false);

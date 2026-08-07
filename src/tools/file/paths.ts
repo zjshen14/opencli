@@ -53,13 +53,18 @@ export function escapesCwdSync(p: string, cwd: string = process.cwd()): boolean 
 // these should always require confirmation so a prompt-injected agent cannot
 // silently slurp them up and exfiltrate them. Public key files (`*.pub`) are
 // intentionally excluded.
-const CREDENTIAL_BASENAME_RE = /^(\.env(\..+)?|id_(rsa|dsa|ecdsa|ed25519)|\.npmrc|\.pypirc)$/;
+const CREDENTIAL_BASENAME_RE =
+  /^(\.env(\..+)?|id_(rsa|dsa|ecdsa|ed25519)|\.npmrc|\.pypirc|\.netrc|\.git-credentials|\.envrc|\.dockercfg|kubeconfig|credentials)$/;
+// Extensions that are unambiguously private-key/cert material.
+const CREDENTIAL_EXTENSION_RE = /\.(pem|key)$/;
 
 /**
  * True if the path points at an obvious credential/secret file by basename
- * (e.g. `.env`, `id_rsa`, `.npmrc`). Used to force a confirmation even when the
- * file lives inside the project, so reading it is never silent.
+ * (e.g. `.env`, `id_rsa`, `.npmrc`, `credentials`, `*.pem`, `*.key`). Used to force
+ * a confirmation even when the file lives inside the project, so reading it is
+ * never silent.
  */
 export function isCredentialPath(p: string): boolean {
-  return CREDENTIAL_BASENAME_RE.test(basename(resolve(p)));
+  const base = basename(resolve(p));
+  return CREDENTIAL_BASENAME_RE.test(base) || CREDENTIAL_EXTENSION_RE.test(base);
 }

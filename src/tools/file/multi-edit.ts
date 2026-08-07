@@ -31,8 +31,8 @@ export const multiEditTool: Tool = {
     required: ["file_path", "edits"],
   },
   requiresConfirmation(args): boolean {
-    // Symlink-aware containment (see GHSA-5v6f-c99j-7m36). Delegates to edit,
-    // which re-checks on each sub-call, but the parent gates the whole batch.
+    // Symlink-aware containment on the single file_path this batch targets
+    // (see GHSA-5v6f-c99j-7m36). One check covers the whole batch.
     return escapesCwdSync(args.file_path as string);
   },
   async execute({ file_path, edits }, ctx) {

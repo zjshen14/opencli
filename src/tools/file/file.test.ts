@@ -8,6 +8,7 @@ import { editTool } from "./edit.js";
 import { multiEditTool } from "./multi-edit.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
+import { lsTool } from "./ls.js";
 import { ToolRegistry } from "../registry.js";
 
 let tmpDir: string;
@@ -319,5 +320,26 @@ describe("requiresConfirmation guards", () => {
 
   it("read does not require confirmation for a regular project file", () => {
     expect(readTool.requiresConfirmation?.({ file_path: "src/index.ts" })).toBe(false);
+  });
+
+  it("grep requires confirmation for a path outside cwd (read-gate parity, GHSA-5v6f)", () => {
+    expect(grepTool.requiresConfirmation?.({ pattern: "x", path: join(tmpdir(), "secret") })).toBe(
+      true,
+    );
+    // defaults to cwd → no prompt
+    expect(grepTool.requiresConfirmation?.({ pattern: "x" })).toBe(false);
+  });
+
+  it("grep requires confirmation for a credential file path even inside cwd", () => {
+    expect(grepTool.requiresConfirmation?.({ pattern: "x", path: ".env" })).toBe(true);
+    expect(grepTool.requiresConfirmation?.({ pattern: "x", path: "id_rsa" })).toBe(true);
+  });
+
+  it("glob and ls require confirmation for a path outside cwd", () => {
+    expect(globTool.requiresConfirmation?.({ pattern: "*", path: join(tmpdir(), "x") })).toBe(true);
+    expect(lsTool.requiresConfirmation?.({ path: join(tmpdir(), "x") })).toBe(true);
+    // defaults to cwd → no prompt
+    expect(globTool.requiresConfirmation?.({ pattern: "*" })).toBe(false);
+    expect(lsTool.requiresConfirmation?.({})).toBe(false);
   });
 });

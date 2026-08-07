@@ -1,6 +1,7 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { Tool } from "../base.js";
+import { escapesCwdSync, isCredentialPath } from "./paths.js";
 
 export const grepTool: Tool = {
   name: "grep",
@@ -20,6 +21,13 @@ export const grepTool: Tool = {
       case_insensitive: { type: "boolean" as never, description: "Case-insensitive search" },
     },
     required: ["pattern"],
+  },
+  // grep returns matching LINES, so it is an equivalent exfiltration primitive to
+  // read — gate it the same way: confirm when the search path escapes cwd or is a
+  // credential file (e.g. grep on ~/.aws/credentials). See GHSA-5v6f-c99j-7m36.
+  requiresConfirmation(args): boolean {
+    const p = (args.path as string | undefined) ?? process.cwd();
+    return escapesCwdSync(p) || isCredentialPath(p);
   },
   async execute({ pattern, path: searchPath, glob: globFilter, case_insensitive }) {
     const baseDir = (searchPath as string | undefined) ?? process.cwd();

@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import type { Tool } from "../base.js";
+import { escapesCwdSync } from "./paths.js";
 
 export const lsTool: Tool = {
   name: "ls",
@@ -16,6 +17,11 @@ export const lsTool: Tool = {
       },
     },
     required: [],
+  },
+  // Listing outside the project leaks the host's layout (e.g. ls ~/.ssh). Confirm
+  // when the path escapes cwd. See GHSA-5v6f-c99j-7m36.
+  requiresConfirmation(args): boolean {
+    return escapesCwdSync((args.path as string | undefined) ?? process.cwd());
   },
   async execute({ path: dirPath }) {
     const absPath = resolve((dirPath as string | undefined) ?? process.cwd());

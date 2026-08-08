@@ -31,8 +31,8 @@ describe("loadSystemInstruction", () => {
     const result = await loadSystemInstruction();
     // Custom content is honoured ...
     expect(result).toContain("Custom prompt for testing.");
-    // ... but the non-overridable safety footer is still appended (#302).
-    expect(result).toContain("Safety invariants (non-overridable)");
+    // ... but the non-omittable safety footer is still appended (#302).
+    expect(result).toContain("Safety invariants (always apply)");
     expect(result).toContain("Never read, log, or expose credentials");
 
     await rm(path);

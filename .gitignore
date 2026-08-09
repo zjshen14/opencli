@@ -6,6 +6,3 @@ coverage/
 .claude/
 .gemini-agent/tmp/
 .opencli/tmp/
-
-# Local security-review scratch (reviewer artifacts, not for commit)
-.security-review/

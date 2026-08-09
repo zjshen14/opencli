@@ -2,6 +2,10 @@
 
 _Status: Phase 1 Implemented — merged in PR [#148](https://github.com/zjshen14/opencli/pull/148) (2026-05-23). Phase 2 Implemented — merged via [#149](https://github.com/zjshen14/opencli/issues/149) (2026-05-24)._
 
+> **Amendment — issue [#299](https://github.com/zjshen14/opencli/issues/299) / PR [#305](https://github.com/zjshen14/opencli/pull/305):** `~/.config` and `~/.local` were later REMOVED from the auto write-set. The distinction that matters is not "dot-dir in home" but **"on a path that gets executed or sourced later"** — `~/.local/bin` is on `$PATH` and `~/.config/{fish,npm,...}` is an rc-load location, so a sandboxed write there becomes UNSANDBOXED execution on the user's next shell, a persistence/escape vector that defeats the sandbox. Package caches that are not on `$PATH` (`~/.npm`, `~/.cargo/registry`, `~/.cache`, …) remain writable. (The body below still shows the original Phase-1 set for historical accuracy.)
+>
+> Residual, deliberately-accepted risk: `~/.cargo/bin` and `~/.yarn/bin` are on `$PATH` for some users, yet `.cargo`/`.yarn` are still bound writable. Excluding just the `bin` subdirectory is the targeted fix if that becomes a real vector. Users who need `~/.config` writes in `auto` currently have no option short of `--sandbox off` (a targeted allowlist knob is the better future answer).
+
 ---
 
 ## Problem

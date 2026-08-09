@@ -8,6 +8,7 @@ import { editTool } from "./edit.js";
 import { multiEditTool } from "./multi-edit.js";
 import { globTool } from "./glob.js";
 import { grepTool } from "./grep.js";
+import { lsTool } from "./ls.js";
 import { ToolRegistry } from "../registry.js";
 
 let tmpDir: string;
@@ -275,5 +276,70 @@ describe("multiEditTool", () => {
   it("reports singleConfirmation and composedOf metadata", () => {
     expect(multiEditTool.singleConfirmation).toBe(true);
     expect(multiEditTool.composedOf).toEqual(["edit"]);
+  });
+});
+
+// --- requiresConfirmation (GHSA-5v6f-c99j-7m36) ---
+// Symlink-following logic itself is unit-tested in paths.test.ts; these assert
+// each tool wires requiresConfirmation to the shared guard.
+
+describe("requiresConfirmation guards", () => {
+  it("write does not require confirmation for a project file", () => {
+    expect(writeTool.requiresConfirmation?.({ file_path: "src/index.ts" })).toBe(false);
+  });
+
+  it("write requires confirmation for a path outside cwd", () => {
+    expect(writeTool.requiresConfirmation?.({ file_path: join(tmpdir(), "evil.txt") })).toBe(true);
+  });
+
+  it("edit requires confirmation for a path outside cwd", () => {
+    expect(
+      editTool.requiresConfirmation?.({
+        file_path: join(tmpdir(), "evil.txt"),
+        old_string: "a",
+        new_string: "b",
+      }),
+    ).toBe(true);
+  });
+
+  it("multi_edit requires confirmation for a path outside cwd", () => {
+    expect(
+      multiEditTool.requiresConfirmation?.({ file_path: join(tmpdir(), "evil.txt"), edits: [] }),
+    ).toBe(true);
+  });
+
+  it("read requires confirmation for a path outside cwd", () => {
+    expect(readTool.requiresConfirmation?.({ file_path: join(tmpdir(), "secret") })).toBe(true);
+  });
+
+  it("read requires confirmation for credential basenames even inside cwd", () => {
+    expect(readTool.requiresConfirmation?.({ file_path: ".env" })).toBe(true);
+    expect(readTool.requiresConfirmation?.({ file_path: "id_rsa" })).toBe(true);
+    expect(readTool.requiresConfirmation?.({ file_path: ".npmrc" })).toBe(true);
+  });
+
+  it("read does not require confirmation for a regular project file", () => {
+    expect(readTool.requiresConfirmation?.({ file_path: "src/index.ts" })).toBe(false);
+  });
+
+  it("grep requires confirmation for a path outside cwd (read-gate parity, GHSA-5v6f)", () => {
+    expect(grepTool.requiresConfirmation?.({ pattern: "x", path: join(tmpdir(), "secret") })).toBe(
+      true,
+    );
+    // defaults to cwd → no prompt
+    expect(grepTool.requiresConfirmation?.({ pattern: "x" })).toBe(false);
+  });
+
+  it("grep requires confirmation for a credential file path even inside cwd", () => {
+    expect(grepTool.requiresConfirmation?.({ pattern: "x", path: ".env" })).toBe(true);
+    expect(grepTool.requiresConfirmation?.({ pattern: "x", path: "id_rsa" })).toBe(true);
+  });
+
+  it("glob and ls require confirmation for a path outside cwd", () => {
+    expect(globTool.requiresConfirmation?.({ pattern: "*", path: join(tmpdir(), "x") })).toBe(true);
+    expect(lsTool.requiresConfirmation?.({ path: join(tmpdir(), "x") })).toBe(true);
+    // defaults to cwd → no prompt
+    expect(globTool.requiresConfirmation?.({ pattern: "*" })).toBe(false);
+    expect(lsTool.requiresConfirmation?.({})).toBe(false);
   });
 });

@@ -43,6 +43,9 @@ describe("Agent + real file tool round-trip (E2E)", () => {
       };
 
       const agent = new Agent(client, createDefaultRegistry(), new SkillRegistry());
+      // read now requires confirmation for paths outside cwd (the temp file is),
+      // so auto-allow it — this test covers the read round-trip, not the gate.
+      agent.setConfirmFn(async () => "allow");
       const events: AnyEvent[] = [];
       for await (const e of agent.run("read the file")) {
         events.push(e as AnyEvent);

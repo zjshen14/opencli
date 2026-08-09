@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Tool } from "../base.js";
+import { escapesCwdSync, isCredentialPath } from "./paths.js";
 
 export const readTool: Tool = {
   name: "read",
@@ -15,6 +16,15 @@ export const readTool: Tool = {
       limit: { type: "number", description: "Maximum number of lines to read" },
     },
     required: ["file_path"],
+  },
+  requiresConfirmation(args): boolean {
+    // The read tool previously had no path check at all, so the agent could read
+    // any absolute path (e.g. ~/.ssh/id_rsa, ~/.aws/credentials) silently. Force
+    // a confirmation when the resolved path escapes the project root (symlink-
+    // aware) or when the basename is an obvious credential file, so reading
+    // sensitive files is never silent. See GHSA-5v6f-c99j-7m36.
+    const p = args.file_path as string;
+    return escapesCwdSync(p) || isCredentialPath(p);
   },
   async execute({ file_path, offset, limit }) {
     const absPath = resolve(file_path as string);

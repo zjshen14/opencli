@@ -1,6 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { Tool } from "../base.js";
+import { escapesCwdSync } from "./paths.js";
 
 export const globTool: Tool = {
   name: "glob",
@@ -21,6 +22,11 @@ export const globTool: Tool = {
       },
     },
     required: ["pattern"],
+  },
+  // Enumeration outside the project is an information leak (e.g. glob ~/.ssh).
+  // Confirm when the search path escapes cwd. See GHSA-5v6f-c99j-7m36.
+  requiresConfirmation(args): boolean {
+    return escapesCwdSync((args.path as string | undefined) ?? process.cwd());
   },
   async execute({ pattern, path: searchPath }) {
     const baseDir = (searchPath as string | undefined) ?? process.cwd();

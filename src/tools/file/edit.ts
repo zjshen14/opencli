@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import type { Tool } from "../base.js";
+import { escapesCwdSync } from "./paths.js";
 
 export const editTool: Tool = {
   name: "edit",
@@ -16,9 +17,10 @@ export const editTool: Tool = {
     required: ["file_path", "old_string", "new_string"],
   },
   requiresConfirmation(args): boolean {
-    const absPath = resolve(args.file_path as string);
-    const cwd = process.cwd();
-    return !(absPath === cwd || absPath.startsWith(cwd + sep));
+    // Symlink-aware containment: edit also reads through the symlink before
+    // writing, so the real (symlink-resolved) target must be checked.
+    // See GHSA-5v6f-c99j-7m36.
+    return escapesCwdSync(args.file_path as string);
   },
   async execute({ file_path, old_string, new_string }) {
     const absPath = resolve(file_path as string);

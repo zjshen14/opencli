@@ -46,6 +46,9 @@ describe("Observability full event sequence (E2E)", () => {
         50,
         { model: "test-model", onObservability: (e) => obsEvents.push(e) },
       );
+      // read now requires confirmation for paths outside cwd (the temp file is);
+      // auto-allow it — this test covers the event sequence, not the gate.
+      agent.setConfirmFn(async () => "allow");
 
       for await (const _e of agent.run("read the file")) {
         void _e;

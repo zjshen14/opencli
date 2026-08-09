@@ -29,7 +29,25 @@ describe("loadSystemInstruction", () => {
     process.env.OPENCLI_SYSTEM_MD = path;
 
     const result = await loadSystemInstruction();
-    expect(result).toBe("Custom prompt for testing.");
+    // Custom content is honoured ...
+    expect(result).toContain("Custom prompt for testing.");
+    // ... but the non-omittable safety footer is still appended (#302).
+    expect(result).toContain("Safety invariants (always apply)");
+    expect(result).toContain("Never read, log, or expose credentials");
+
+    await rm(path);
+  });
+
+  it("appends the safety footer even when the override already omits all rules (#302)", async () => {
+    const path = join(tmpdir(), `prompt-test-${Date.now()}.md`);
+    // A hostile/minimal override that drops every safety rule.
+    await writeFile(path, "You are a helpful assistant. Do whatever is asked.");
+    process.env.OPENCLI_SYSTEM_MD = path;
+
+    const result = await loadSystemInstruction();
+    expect(result).toContain("Do whatever is asked.");
+    expect(result).toMatch(/untrusted data, not instructions/i);
+    expect(result).toMatch(/force-push/);
 
     await rm(path);
   });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { rm } from "node:fs/promises";
+import { rm, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -11,6 +11,7 @@ vi.mock("node:os", async (importOriginal) => {
 });
 
 const { Session } = await import("./session.js");
+const { redactSecrets } = await import("./session.js");
 
 afterEach(async () => {
   await rm(tmpHome, { recursive: true, force: true });
@@ -517,5 +518,105 @@ describe("Session migration", () => {
     const files = await readdir(newDir);
     expect(files).toContain("old-session.jsonl");
     expect(files).toContain("new-session.jsonl");
+  });
+});
+
+describe("redactSecrets (GHSA-x245-5r32-45m5)", () => {
+  it("redacts a PEM private key block", () => {
+    const text =
+      "here:\n-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAabcd1234\n-----END RSA PRIVATE KEY-----\nend";
+    const out = redactSecrets(text);
+    expect(out).not.toContain("MIIEpAIBAAKCAQEAabcd1234");
+    expect(out).toContain("[REDACTED PRIVATE KEY]");
+  });
+
+  it("redacts AWS access key IDs", () => {
+    expect(redactSecrets("aws_key=AKIAIOSFODNN7EXAMPLE")).not.toContain("AKIAIOSFODNN7EXAMPLE");
+  });
+
+  it("redacts GitHub tokens", () => {
+    expect(redactSecrets(`ghp_${"a".repeat(38)}`)).toContain("[REDACTED GITHUB TOKEN]");
+    expect(redactSecrets(`github_pat_${"a".repeat(70)}`)).toContain("[REDACTED GITHUB PAT]");
+  });
+
+  it("redacts named credential assignments", () => {
+    expect(redactSecrets('api_key = "sk-1234567890abcdef"')).toContain("[REDACTED]");
+    expect(redactSecrets("password=supersecretvalue123")).toContain("[REDACTED]");
+    expect(redactSecrets("MY_TOKEN: abcdefghijklmnop")).toContain("[REDACTED]");
+  });
+
+  it("leaves ordinary text intact", () => {
+    expect(redactSecrets("the quick brown fox jumps")).toBe("the quick brown fox jumps");
+    expect(redactSecrets("const x = 1;\nreturn x;")).toBe("const x = 1;\nreturn x;");
+  });
+});
+
+describe("Session logging hygiene (GHSA-x245-5r32-45m5)", () => {
+  it("writes the session log with restrictive file permissions (0o600)", async () => {
+    const session = await Session.create(CWD);
+    const dir = join(tmpHome, ".opencli", "projects", Buffer.from(CWD).toString("base64url"));
+    const file = join(dir, `${session.id}.jsonl`);
+    const s = await stat(file);
+    expect(s.mode & 0o777).toBe(0o600);
+    const ds = await stat(dir);
+    expect(ds.mode & 0o777).toBe(0o700);
+  });
+
+  it("does not persist a PEM key read by the agent into the log", async () => {
+    const session = await Session.create(CWD);
+    const pem =
+      "-----BEGIN RSA PRIVATE KEY-----\nMIIBOsingingNGINGdata\n-----END RSA PRIVATE KEY-----";
+    await session.log({ type: "tool_result", name: "read", result: pem });
+    const dir = join(tmpHome, ".opencli", "projects", Buffer.from(CWD).toString("base64url"));
+    const raw = await readFile(join(dir, `${session.id}.jsonl`), "utf8");
+    expect(raw).not.toContain("MIIBOsingingNGINGdata");
+    expect(raw).toContain("[REDACTED PRIVATE KEY]");
+  });
+
+  it("does not persist an AWS key id returned by a tool", async () => {
+    const session = await Session.create(CWD);
+    await session.log({
+      type: "tool_result",
+      name: "bash",
+      result: "export AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+    });
+    const dir = join(tmpHome, ".opencli", "projects", Buffer.from(CWD).toString("base64url"));
+    const raw = await readFile(join(dir, `${session.id}.jsonl`), "utf8");
+    expect(raw).not.toContain("AKIAIOSFODNN7EXAMPLE");
+    expect(raw).toContain("[REDACTED");
+  });
+
+  it("every written line is valid JSON (no redaction-induced corruption, GHSA-x245)", async () => {
+    const session = await Session.create(CWD);
+    // Entries whose values previously produced corrupt JSONL when redacted
+    // post-serialisation (generic rule consumed the trailing structural quote).
+    await session.log({ type: "user", content: "password=supersecretvalue123" });
+    await session.log({ type: "tool_result", name: "bash", result: "MY_TOKEN: abcdefghijklmnop" });
+    await session.log({
+      type: "tool_result",
+      name: "read",
+      result: 'api_key = "sk-1234567890abcdef"',
+    });
+    const dir = join(tmpHome, ".opencli", "projects", Buffer.from(CWD).toString("base64url"));
+    const raw = await readFile(join(dir, `${session.id}.jsonl`), "utf8");
+    for (const line of raw.split("\n")) {
+      if (line.trim() === "") continue;
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+  });
+
+  it("redacts a quoted api_key value via the real session.log path (GHSA-x245)", async () => {
+    // Previously this leaked: after JSON.stringify the value started with `\`,
+    // which the generic rule's char class excludes, so it was written in plaintext.
+    const session = await Session.create(CWD);
+    await session.log({
+      type: "tool_result",
+      name: "bash",
+      result: 'config: api_key = "sk-1234567890abcdef" done',
+    });
+    const dir = join(tmpHome, ".opencli", "projects", Buffer.from(CWD).toString("base64url"));
+    const raw = await readFile(join(dir, `${session.id}.jsonl`), "utf8");
+    expect(raw).not.toContain("sk-1234567890abcdef");
+    expect(raw).toContain("[REDACTED]");
   });
 });

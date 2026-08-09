@@ -11,7 +11,7 @@
  * millisecond precision to prevent collisions.
  */
 
-import { mkdir, appendFile, readdir, readFile, stat, rename } from "node:fs/promises";
+import { mkdir, appendFile, readdir, readFile, stat, rename, chmod } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
@@ -20,6 +20,58 @@ import type { FunctionCallPart, FunctionResultPart, Message } from "../providers
 
 function encodeProjectPath(cwd: string): string {
   return Buffer.from(cwd).toString("base64url");
+}
+
+// High-confidence secret patterns that must never be persisted verbatim to a session
+// log. Applied to the whole serialized JSON line so secrets in tool args, tool
+// results, or assistant text are all masked before touching disk. See
+// GHSA-x245-5r32-45m5. False-positive risk is kept low by using specific formats
+// (PEM blocks, AKIA, GitHub token shapes) and, for the generic assignment rule,
+// requiring a secret-suggestive key name plus a 12+ char value.
+const SECRET_REDACTORS: ReadonlyArray<{ re: RegExp; replacement: string }> = [
+  // PEM private key blocks (RSA, EC, OPENSSH, PGP, ENCRYPTED, etc.)
+  {
+    re: /-----BEGIN(?:\s[\w-]+)?\sPRIVATE KEY-----[\s\S]*?-----END(?:\s[\w-]+)?\sPRIVATE KEY-----/g,
+    replacement: "[REDACTED PRIVATE KEY]",
+  },
+  // AWS access key IDs
+  { re: /\bAKIA[0-9A-Z]{16}\b/g, replacement: "[REDACTED AWS ACCESS KEY ID]" },
+  // GitHub tokens (classic ghp/ghs/gho/ghu/ghr, fine-grained github_pat_)
+  { re: /\bgh[pousr]_[A-Za-z0-9]{36,}\b/g, replacement: "[REDACTED GITHUB TOKEN]" },
+  { re: /\bgithub_pat_[A-Za-z0-9_]{60,}\b/g, replacement: "[REDACTED GITHUB PAT]" },
+  // Generic credential assignment: secret-suggestive key name = a long value.
+  {
+    re: /\b([\w-]*(?:secret|password|passwd|api[_-]?key|access[_-]?key|token)[\w-]*)\s*[:=]\s*["']?[A-Za-z0-9/+_=.-]{12,}["']?/gi,
+    replacement: "$1=[REDACTED]",
+  },
+];
+
+/** Mask high-confidence secret patterns in an arbitrary string. Exported for tests. */
+export function redactSecrets(text: string): string {
+  let out = text;
+  for (const { re, replacement } of SECRET_REDACTORS) {
+    out = out.replace(re, replacement);
+  }
+  return out;
+}
+
+/**
+ * Recursively apply `redactSecrets` to every string value in a structure. Redaction
+ * MUST run on the raw field values BEFORE JSON.stringify, not on the serialized line:
+ * post-serialisation redaction both corrupts the JSON (the generic rule's trailing
+ * `["']?` consumes a structural quote and the replacement doesn't restore it) and
+ * fails to match values whose leading char became `\` after escaping (e.g.
+ * `\"sk-1234...\"`). See GHSA-x245-5r32-45m5.
+ */
+function redactStringsDeep(value: unknown): unknown {
+  if (typeof value === "string") return redactSecrets(value);
+  if (Array.isArray(value)) return value.map(redactStringsDeep);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = redactStringsDeep(v);
+    return out;
+  }
+  return value;
 }
 
 function makeSessionId(): string {
@@ -270,10 +322,14 @@ export class Session {
   static async create(cwd: string = process.cwd()): Promise<Session> {
     const id = makeSessionId();
     const dir = await sessionProjectDir(cwd);
-    await mkdir(dir, { recursive: true });
+    // Restrictive perms: session logs may contain secrets read by the agent. mkdir's
+    // mode only applies when the dir is created, so also chmod to cover existing dirs.
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await chmod(dir, 0o700).catch(() => {});
     const logPath = join(dir, `${id}.jsonl`);
     const session = new Session(id, cwd, logPath);
     await session.log({ type: "session_start", cwd });
+    await chmod(logPath, 0o600).catch(() => {});
     return session;
   }
 
@@ -351,7 +407,11 @@ export class Session {
 
   async log(entry: WithoutTimestamp<SessionEntry>): Promise<void> {
     try {
-      const line = JSON.stringify({ ...entry, timestamp: new Date().toISOString() }) + "\n";
+      // Redact high-confidence secrets in the entry's string VALUES before
+      // serialising — never on the finished JSON line, which corrupts the JSON and
+      // misses escape-mangled values (see redactStringsDeep). See GHSA-x245-5r32-45m5.
+      const redacted = redactStringsDeep(entry) as WithoutTimestamp<SessionEntry>;
+      const line = JSON.stringify({ ...redacted, timestamp: new Date().toISOString() }) + "\n";
       await appendFile(this.logPath, line, "utf8");
     } catch {
       // Non-fatal — session logging should never crash the agent

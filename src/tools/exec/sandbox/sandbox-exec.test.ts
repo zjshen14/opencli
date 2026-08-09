@@ -1,10 +1,28 @@
 import { describe, it, expect } from "vitest";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { SandboxExecRunner } from "./sandbox-exec.js";
+import { SandboxExecRunner, isSafeProfilePath } from "./sandbox-exec.js";
 
 const isMacOS = process.platform === "darwin";
 const HOME = process.env.HOME ?? homedir();
+
+describe("isSafeProfilePath (GHSA-99pr-w6qj-549x)", () => {
+  it("rejects a path containing a double-quote (the injection char)", () => {
+    expect(isSafeProfilePath('/tmp/x") (allow file-write* (subpath "/etc')).toBe(false);
+  });
+
+  it("rejects a path containing a backslash", () => {
+    expect(isSafeProfilePath("/tmp/evil\\path")).toBe(false);
+  });
+
+  it("accepts a normal absolute path", () => {
+    expect(isSafeProfilePath("/Users/someone/projects/opencli")).toBe(true);
+  });
+
+  it("accepts spaces and parens (common in macOS directory names)", () => {
+    expect(isSafeProfilePath("/Users/someone/my project (copy)")).toBe(true);
+  });
+});
 
 describe.skipIf(!isMacOS)("SandboxExecRunner (macOS only)", () => {
   const runner = new SandboxExecRunner("auto", process.cwd());
@@ -197,5 +215,41 @@ describe.skipIf(!isMacOS)("SandboxExecRunner strict mode (macOS only)", () => {
     });
     expect(result.stdout).toContain("ok true");
     expect(result.exitCode).toBe(0);
+  });
+});
+
+describe.skipIf(!isMacOS)("SandboxExecRunner profile-injection guard (macOS only)", () => {
+  it("falls back to passthrough when cwd contains a double-quote", () => {
+    const runner = new SandboxExecRunner("auto", '/tmp/x") (allow file-write* (subpath "/etc');
+    expect(runner.warning).toMatch(/unsafe in the sandbox-exec profile|without isolation/i);
+  });
+
+  it("falls back to passthrough when cwd contains a backslash", () => {
+    const runner = new SandboxExecRunner("auto", "/tmp/evil\\path");
+    expect(runner.warning).toMatch(/unsafe in the sandbox-exec profile|without isolation/i);
+  });
+
+  it("does not trip the injection guard for a path with spaces or parens", () => {
+    const runner = new SandboxExecRunner("auto", "/Users/someone/my project (copy)");
+    expect(runner.warning ?? "").not.toMatch(/unsafe in the sandbox-exec profile/);
+  });
+
+  it("fails CLOSED in strict mode when the path is unsafe (no silent passthrough)", async () => {
+    // strict asked for isolation; if a safe profile can't be built, the runner must
+    // deny the command rather than run it unsandboxed. See GHSA-99pr-w6qj-549x.
+    const runner = new SandboxExecRunner("strict", '/tmp/x") (allow file-write* (subpath "/etc');
+    expect(runner.warning ?? "").toMatch(/strict isolation unavailable|refused/i);
+    const result = await runner.exec("echo should-not-run", { cwd: process.cwd() });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr + result.stdout).toMatch(/refused|unavailable|unsafe/i);
+  });
+
+  it("still falls back to passthrough in auto mode when the path is unsafe", async () => {
+    const runner = new SandboxExecRunner("auto", "/tmp/evil\\path");
+    expect(runner.warning ?? "").toMatch(/without isolation/i);
+    // auto is best-effort: the command runs (passthrough), not denied
+    const result = await runner.exec("echo runs", { cwd: process.cwd() });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("runs");
   });
 });

@@ -47,9 +47,11 @@ const DEFAULTS: Config = {
   historySize: 50,
 };
 
-// Object keys that can hijack the prototype chain via JSON.parse + spread. A crafted
-// ~/.opencli/config.json (or a future path that writes config from untrusted input)
-// could otherwise pollute Object.prototype. See #301.
+// Object keys that can hijack the prototype chain if the merge ever becomes deep.
+// Today JSON.parse + object spread does NOT pollute Object.prototype via this path
+// (spread uses [[DefineOwnProperty]], not [[Set]]), so this is hardening against a
+// future deep/recursive merge — where a live prototype-pollution vector would appear
+// — not a fix for a current one. See #301.
 const POISON_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 /** Return a copy of `obj` with prototype-hijacking keys removed. */

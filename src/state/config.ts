@@ -47,10 +47,27 @@ const DEFAULTS: Config = {
   historySize: 50,
 };
 
+// Object keys that can hijack the prototype chain if the merge ever becomes deep.
+// Today JSON.parse + object spread does NOT pollute Object.prototype via this path
+// (spread uses [[DefineOwnProperty]], not [[Set]]), so this is hardening against a
+// future deep/recursive merge — where a live prototype-pollution vector would appear
+// — not a fix for a current one. See #301.
+const POISON_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+/** Return a copy of `obj` with prototype-hijacking keys removed. */
+function stripPoisonKeys(obj: Record<string, unknown>): Record<string, unknown> {
+  const clean: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (POISON_KEYS.has(k)) continue;
+    clean[k] = v;
+  }
+  return clean;
+}
+
 export async function loadConfig(): Promise<Config> {
   try {
     const raw = await readFile(CONFIG_FILE, "utf8");
-    const saved = JSON.parse(raw) as Record<string, unknown>;
+    const saved = stripPoisonKeys(JSON.parse(raw) as Record<string, unknown>);
     // Migrate legacy apiKey → geminiApiKey
     if (typeof saved["apiKey"] === "string" && !saved["geminiApiKey"]) {
       saved["geminiApiKey"] = saved["apiKey"];

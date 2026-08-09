@@ -34,6 +34,32 @@ describe("loadConfig", () => {
     expect(config.historySize).toBe(100);
     expect(config.temperature).toBe(0.7); // default preserved
   });
+
+  it("strips prototype-hijacking keys from a crafted config file (#301)", async () => {
+    // Write a RAW JSON string (not JSON.stringify of an object literal — `__proto__:`
+    // in a literal is the prototype setter and never serialises) so the file genuinely
+    // contains __proto__/constructor as JSON keys.
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const cfgDir = join(tmpHome, ".opencli");
+    await mkdir(cfgDir, { recursive: true });
+    await writeFile(
+      join(cfgDir, "config.json"),
+      '{"__proto__":{"polluted":true},"constructor":{"prototype":{"polluted2":true}},"model":"x"}',
+    );
+
+    const config = await loadConfig();
+    // Legitimate field survives.
+    expect(config.model).toBe("x");
+    // The poison keys are NOT carried onto the returned object as own properties.
+    // (Without stripPoisonKeys, `{ ...saved }` copies them through as data properties —
+    // this assertion fails on unpatched main. Object.prototype itself is not polluted
+    // either way via this code path; the strip is hardening against a future deep merge.)
+    const keys = Object.keys(config);
+    expect(keys).not.toContain("__proto__");
+    expect(keys).not.toContain("constructor");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(({} as any).polluted).toBeUndefined();
+  });
 });
 
 describe("saveConfig", () => {

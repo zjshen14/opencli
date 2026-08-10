@@ -14,7 +14,7 @@ import { Session } from "../state/session.js";
 import { loadSystemInstruction } from "../core/prompt.js";
 import { resolveApiKey } from "./keys.js";
 import { runRepl } from "./repl.js";
-import { createConfirmFn } from "./confirm.js";
+import { createConfirmFn, createAutoApproveConfirmFn } from "./confirm.js";
 import { printError, printInfo } from "./renderer.js";
 import type { ObservabilityEvent } from "../core/observability.js";
 import { createSandboxRunner } from "../tools/exec/sandbox/index.js";
@@ -252,7 +252,11 @@ async function runSingle(
     temperature,
   );
   if (autoApprove) {
-    agent.setConfirmFn(async () => "allow");
+    // --yes auto-approves tool calls, but STILL honours the user's deny patterns and
+    // a built-in catastrophic blocklist (rm -rf /, curl|sh, fork bombs). Previously
+    // --yes replaced confirmFn with () => "allow", bypassing permissions.deny.
+    // See GHSA-hx58-45j4-fr7m.
+    agent.setConfirmFn(await createAutoApproveConfirmFn());
   } else if (process.stdin.isTTY) {
     const { confirmFn, forcesConfirmation } = await createConfirmFn();
     agent.setConfirmFn(confirmFn);

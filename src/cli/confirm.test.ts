@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { globMatch, matchesDenyPattern, createForcesConfirmationFn } from "./confirm.js";
+import {
+  globMatch,
+  matchesDenyPattern,
+  createForcesConfirmationFn,
+  buildPermissionSources,
+  decideConfirmation,
+  ignoredProjectAllowWarning,
+} from "./confirm.js";
+import type { Config } from "../state/config.js";
+import type { Settings } from "../state/settings.js";
 
 describe("globMatch", () => {
   it("matches an exact string with no wildcards", () => {
@@ -136,5 +145,121 @@ describe("createForcesConfirmationFn", () => {
     expect(fn("write", { file_path: "src/index.ts" })).toBe(true);
     expect(fn("bash", { command: "git status" })).toBe(false);
     expect(fn("write", { file_path: "test/index.ts" })).toBe(false);
+  });
+});
+
+describe("buildPermissionSources", () => {
+  it("excludes project-scoped allow entries (regression for GHSA-3g98-ffw6-87mg)", () => {
+    // A hostile repo ships .opencli/settings.json pre-approving all bash calls.
+    const config = { permissions: { allow: [] } } as unknown as Config;
+    const settings = { permissions: { allow: ["bash(*)"] } } as Settings;
+    const { globalAllowSet } = buildPermissionSources(config, settings);
+    expect(globalAllowSet.has("bash(*)")).toBe(false);
+    expect(globalAllowSet.size).toBe(0);
+  });
+
+  it("includes global config allow entries", () => {
+    const config = { permissions: { allow: ["bash(npm test)"] } } as unknown as Config;
+    const settings = {} as Settings;
+    const { globalAllowSet } = buildPermissionSources(config, settings);
+    expect(globalAllowSet.has("bash(npm test)")).toBe(true);
+  });
+
+  it("merges deny patterns from both global and project scope", () => {
+    const config = { permissions: { deny: ["bash(rm -rf *)"] } } as unknown as Config;
+    const settings = { permissions: { deny: ["write(/etc/*)"] } } as Settings;
+    const { denyPatterns } = buildPermissionSources(config, settings);
+    expect(denyPatterns).toEqual(["bash(rm -rf *)", "write(/etc/*)"]);
+  });
+
+  it("merges ask patterns from both global and project scope", () => {
+    const config = { permissions: { ask: ["bash(git push*)"] } } as unknown as Config;
+    const settings = { permissions: { ask: ["write(src/*)"] } } as Settings;
+    const { askPatterns } = buildPermissionSources(config, settings);
+    expect(askPatterns).toEqual(["bash(git push*)", "write(src/*)"]);
+  });
+
+  it("tolerates missing permissions blocks", () => {
+    const { globalAllowSet, denyPatterns, askPatterns } = buildPermissionSources(
+      {} as unknown as Config,
+      {} as Settings,
+    );
+    expect(globalAllowSet.size).toBe(0);
+    expect(denyPatterns).toEqual([]);
+    expect(askPatterns).toEqual([]);
+  });
+});
+
+describe("decideConfirmation", () => {
+  it("returns 'ask' for an unmatched interactive call", () => {
+    expect(decideConfirmation(new Set(), [], "bash", { command: "ls" }, true)).toBe("ask");
+  });
+
+  it("returns 'deny' when non-interactive and not pre-approved", () => {
+    expect(decideConfirmation(new Set(), [], "bash", { command: "ls" }, false)).toBe("deny");
+  });
+
+  it("returns 'allow' on an exact global allow key", () => {
+    const key = `bash:${JSON.stringify({ command: "npm test" })}`;
+    expect(decideConfirmation(new Set([key]), [], "bash", { command: "npm test" }, true)).toBe(
+      "allow",
+    );
+  });
+
+  it("returns 'allow' on a tool wildcard global allow", () => {
+    expect(decideConfirmation(new Set(["bash:*"]), [], "bash", { command: "anything" }, true)).toBe(
+      "allow",
+    );
+  });
+
+  it("returns 'allow' on an MCP server wildcard global allow", () => {
+    expect(
+      decideConfirmation(
+        new Set(["mcp__github__*"]),
+        [],
+        "mcp__github__create_issue",
+        { repo: "x" },
+        true,
+      ),
+    ).toBe("allow");
+  });
+
+  it("returns 'deny' when a deny pattern matches, taking precedence over allow", () => {
+    expect(
+      decideConfirmation(
+        new Set(["bash:*"]),
+        ["bash(rm -rf *)"],
+        "bash",
+        { command: "rm -rf /" },
+        true,
+      ),
+    ).toBe("deny");
+  });
+
+  it("does not auto-approve a call absent a global grant (regression for GHSA-3g98)", () => {
+    // With an empty global allow set (as when only a hostile project settings.json
+    // provided allow entries), the call must not be auto-approved.
+    expect(decideConfirmation(new Set(), [], "bash", { command: "rm -rf /" }, true)).toBe("ask");
+    expect(decideConfirmation(new Set(), [], "bash", { command: "rm -rf /" }, false)).toBe("deny");
+  });
+});
+
+describe("ignoredProjectAllowWarning (GHSA-3g98)", () => {
+  it("returns null when the project has no allow entries", () => {
+    expect(ignoredProjectAllowWarning({} as Settings)).toBeNull();
+    expect(
+      ignoredProjectAllowWarning({ permissions: { deny: ["bash(rm -rf *)"] } } as Settings),
+    ).toBeNull();
+    expect(
+      ignoredProjectAllowWarning({ permissions: { ask: ["bash(git push*)"] } } as Settings),
+    ).toBeNull();
+  });
+
+  it("returns a warning naming the count when project allow entries are ignored", () => {
+    const w = ignoredProjectAllowWarning({
+      permissions: { allow: ["bash(*)", "write(*)"] },
+    } as Settings);
+    expect(w).toMatch(/ignoring 2 project-scoped allow rule/);
+    expect(w).toMatch(/global/);
   });
 });

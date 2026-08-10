@@ -3,6 +3,11 @@ import { join } from "node:path";
 import type { Tool } from "../base.js";
 import { escapesCwdSync, isCredentialPath } from "./paths.js";
 
+// Cap recursion depth and total entries to bound a walk through a pathological or
+// symlink-cycled tree. See #300.
+const MAX_WALK_DEPTH = 20;
+const MAX_WALK_ENTRIES = 50_000;
+
 export const grepTool: Tool = {
   name: "grep",
   readonly: true,
@@ -79,12 +84,17 @@ async function collectFiles(dir: string, glob?: string): Promise<string[]> {
   });
 }
 
-async function walk(dir: string, out: string[]): Promise<void> {
+async function walk(dir: string, out: string[], depth = 0, count = { n: 0 }): Promise<void> {
+  if (depth > MAX_WALK_DEPTH) return;
   const entries = await readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
+    if (count.n >= MAX_WALK_ENTRIES) return;
     if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    // Skip symlinks so a cycle or a link to a huge tree can't hang/OOM the walk (#300).
+    if (entry.isSymbolicLink()) continue;
+    count.n++;
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) await walk(full, out);
+    if (entry.isDirectory()) await walk(full, out, depth + 1, count);
     else out.push(full);
   }
 }

@@ -3,6 +3,12 @@ import { join, relative } from "node:path";
 import type { Tool } from "../base.js";
 import { escapesCwdSync } from "./paths.js";
 
+// Cap recursion depth and total entries so a pathological tree (or a symlink
+// cycle that slips past isSymbolicLink) cannot hang or OOM a single call.
+// See #300.
+const MAX_WALK_DEPTH = 20;
+const MAX_WALK_ENTRIES = 50_000;
+
 export const globTool: Tool = {
   name: "glob",
   readonly: true,
@@ -49,14 +55,19 @@ export const globTool: Tool = {
   },
 };
 
-async function walk(dir: string): Promise<string[]> {
+async function walk(dir: string, depth = 0, count = { n: 0 }): Promise<string[]> {
+  if (depth > MAX_WALK_DEPTH) return [];
   const entries = await readdir(dir, { withFileTypes: true });
   const results: string[] = [];
   for (const entry of entries) {
+    if (count.n >= MAX_WALK_ENTRIES) break;
     if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    // Skip symlinks so a cycle or a link to a huge tree can't hang/OOM the walk (#300).
+    if (entry.isSymbolicLink()) continue;
+    count.n++;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      results.push(...(await walk(full)));
+      results.push(...(await walk(full, depth + 1, count)));
     } else {
       results.push(full);
     }

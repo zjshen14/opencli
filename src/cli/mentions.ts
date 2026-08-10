@@ -4,6 +4,10 @@ import { join, relative, isAbsolute } from "node:path";
 const MAX_FILE_CHARS = 50_000;
 const MAX_GLOB_FILES = 20;
 const MAX_GLOB_CHARS = 200_000;
+// Cap recursion depth and total entries to bound a walk through a pathological or
+// symlink-cycled tree. See #300.
+const MAX_WALK_DEPTH = 20;
+const MAX_WALK_ENTRIES = 50_000;
 
 export interface ExpandResult {
   /** Input string with @tokens replaced by file content blocks. */
@@ -153,14 +157,19 @@ function isBinary(buf: Buffer): boolean {
   return false;
 }
 
-async function walk(dir: string): Promise<string[]> {
+async function walk(dir: string, depth = 0, count = { n: 0 }): Promise<string[]> {
+  if (depth > MAX_WALK_DEPTH) return [];
   const entries = await readdir(dir, { withFileTypes: true });
   const results: string[] = [];
   for (const entry of entries) {
+    if (count.n >= MAX_WALK_ENTRIES) break;
     if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    // Skip symlinks so a cycle or a link to a huge tree can't hang/OOM the walk (#300).
+    if (entry.isSymbolicLink()) continue;
+    count.n++;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      results.push(...(await walk(full)));
+      results.push(...(await walk(full, depth + 1, count)));
     } else {
       results.push(full);
     }

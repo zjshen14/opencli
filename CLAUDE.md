@@ -69,7 +69,7 @@ src/
   tools/
     base.ts         # Tool interface + JSONSchema type
     registry.ts     # ToolRegistry: register, execute, list
-    file/           # read, write, edit, multi_edit, glob, grep, ls
+    file/           # read, write, edit, multi_edit, glob, grep, ls; paths.ts (symlink-aware containment + credential-path checks)
     exec/           # bash (with requiresConfirmation for non-safe commands); sandbox/ (bwrap, sandbox-exec, passthrough)
     web/            # web_fetch tool
     task/           # todo_write and todo_read tools
@@ -122,7 +122,7 @@ src/
 ## Key Conventions
 
 - All tools return `{ success: boolean; output: string; error?: string }`
-- Tools declare `requiresConfirmation?(args) => boolean` on their interface; the executor calls `confirmFn` when it returns true. Bash requires confirmation for any command not in its `SAFE_COMMANDS` allowlist; `write`/`edit` require it for paths outside `process.cwd()`.
+- Tools declare `requiresConfirmation?(args) => boolean` on their interface; the executor calls `confirmFn` when it returns true. Bash requires confirmation for any command not in its `SAFE_COMMANDS` allowlist; `write`/`edit`/`multi_edit` require it for paths that (symlink-resolved) escape `process.cwd()`; `read`/`grep` require it for out-of-cwd or credential-basename paths; `glob`/`ls` for out-of-cwd paths (see `src/tools/file/paths.ts`). Under `--yes`, the user's deny rules plus a built-in catastrophic blocklist are still enforced (`createAutoApproveConfirmFn`). Grants (`permissions.allow`) are honoured only from the global user config — project-scoped `.opencli/settings.json` allow entries are ignored as untrusted.
 - `edit` tool requires `old_string` to appear exactly once — fails with a clear error if ambiguous
 - Prettier `printWidth: 100`, double quotes, trailing commas — run `npm run format` before committing
 - ESLint: `@typescript-eslint/recommended` + no unused vars (underscore prefix to suppress)

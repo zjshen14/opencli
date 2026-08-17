@@ -177,6 +177,22 @@ export function printToolResultCompact(name: string, result: string): void {
   process.stderr.write(chalk.dim(`  ✓ ${summary}`) + "\n");
 }
 
+// Single combined line for compact tools — emits one ✓ line that includes both
+// the call argument (file path / pattern) and the result summary. Runner calls
+// this at result time instead of the two-step printToolCallCompact + printToolResultCompact
+// so the terminal shows one line per tool instead of two.
+export function printCompactToolRow(
+  name: string,
+  args: Record<string, unknown>,
+  result: string,
+): void {
+  if (result.trim().startsWith("Error:")) {
+    printToolResultExpanded(name, result);
+    return;
+  }
+  process.stderr.write(chalk.dim(`  ✓ ${summariseResult(name, result, args)}`) + "\n");
+}
+
 export function printEditDiff(oldStr: string, newStr: string, filePath: string): void {
   const patch = Diff.createPatch(filePath, oldStr, newStr, "", "", { context: 3 });
   const lines = patch.split("\n").slice(4); // skip file header
@@ -239,20 +255,27 @@ export function compactArg(args: Record<string, unknown>): string {
   return typeof val === "string" ? chalk.dim(val) : chalk.dim(JSON.stringify(args).slice(0, 80));
 }
 
-export function summariseResult(name: string, result: string): string {
+export function summariseResult(
+  name: string,
+  result: string,
+  args?: Record<string, unknown>,
+): string {
   const trimmed = result.trim();
+  // Only include clean path/pattern args (skip complex values like items arrays)
+  const rawArg = args ? (args.file_path ?? args.path ?? args.pattern) : null;
+  const argPart = typeof rawArg === "string" ? `${chalk.dim(rawArg)}  ` : "";
 
   if (name === "read") {
     const lines = trimmed.split("\n").length;
-    return `${name.padEnd(6)}${chalk.dim(`(${lines} lines)`)}`;
+    return `${name.padEnd(6)}${argPart}${chalk.dim(`(${lines} lines)`)}`;
   }
   if (name === "glob") {
     const files = trimmed ? trimmed.split("\n").length : 0;
-    return `${name.padEnd(6)}${chalk.dim(`${files} file${files === 1 ? "" : "s"}`)}`;
+    return `${name.padEnd(6)}${argPart}${chalk.dim(`${files} file${files === 1 ? "" : "s"}`)}`;
   }
   if (name === "grep") {
     const matches = trimmed ? trimmed.split("\n").length : 0;
-    return `${name.padEnd(6)}${chalk.dim(`${matches} match${matches === 1 ? "" : "es"}`)}`;
+    return `${name.padEnd(6)}${argPart}${chalk.dim(`${matches} match${matches === 1 ? "" : "es"}`)}`;
   }
   if (name === "bash") {
     const preview = trimmed.split("\n")[0]?.slice(0, 80) ?? "";
@@ -266,7 +289,7 @@ export function summariseResult(name: string, result: string): string {
   }
   if (name === "ls") {
     const entries = trimmed && trimmed !== "(empty directory)" ? trimmed.split("\n").length : 0;
-    return `ls    ${chalk.dim(`${entries} entr${entries === 1 ? "y" : "ies"}`)}`;
+    return `ls    ${argPart}${chalk.dim(`${entries} entr${entries === 1 ? "y" : "ies"}`)}`;
   }
   if (name === "todo_write" || name === "todo_read") {
     const lines = trimmed ? trimmed.split("\n") : [];

@@ -7,8 +7,8 @@ import {
   printToolCall,
   printToolCallCompact,
   printToolResult,
-  printToolResultCompact,
   printToolResultExpanded,
+  printCompactToolRow,
   printEditDiff,
   printSkillActivated,
   printError,
@@ -25,6 +25,10 @@ export async function runAgentTurn(
   spinner.start();
   const mdRenderer = new MarkdownStreamRenderer();
   const pendingEdits: { file_path: string; old_string: string; new_string: string }[] = [];
+  // Queues call-time args per compact tool so the combined result line can include
+  // the file path / pattern. Parallel calls of the same tool stay ordered because
+  // tool_result events arrive in the same order as the corresponding tool_calls.
+  const pendingCompactArgs = new Map<string, Array<Record<string, unknown>>>();
   let fullText = "";
   let turnText = "";
 
@@ -48,7 +52,14 @@ export async function runAgentTurn(
             ...(event.thoughtSignature ? { thoughtSignature: event.thoughtSignature } : {}),
           });
           if (COMPACT_TOOLS.has(event.name)) {
-            printToolCallCompact(event.name, event.args);
+            if (event.name === "think") {
+              printToolCallCompact(event.name, event.args); // "◦ thinking…" at call time
+            } else {
+              // Defer display to result time so call + result collapse to one line
+              const stack = pendingCompactArgs.get(event.name) ?? [];
+              stack.push(event.args);
+              pendingCompactArgs.set(event.name, stack);
+            }
           } else {
             printToolCall(event.name, event.args);
             if (
@@ -71,7 +82,12 @@ export async function runAgentTurn(
           spinner.stop();
           void session.log({ type: "tool_result", name: event.name, result: event.result });
           if (COMPACT_TOOLS.has(event.name)) {
-            printToolResultCompact(event.name, event.result);
+            if (event.name !== "think") {
+              const stack = pendingCompactArgs.get(event.name) ?? [];
+              const args = stack.shift() ?? {};
+              printCompactToolRow(event.name, args, event.result);
+            }
+            // think: silent — "◦ thinking…" printed at call time is the whole display
           } else if (event.name === "edit") {
             const edit = pendingEdits.shift(); // always shift to keep array in sync
             if (event.result.startsWith("Error:")) {

@@ -17,6 +17,7 @@ import type { AgentEvent } from "../../core/agent.js";
 import type { ObservabilityEvent } from "../../core/observability.js";
 import type { LLMClient } from "../../providers/client.js";
 import type { StreamEvent } from "../../providers/types.js";
+import type { ConfirmFn } from "../../core/executor.js";
 import { SkillRegistry } from "../../skills/registry.js";
 import { TapeClient, type SentMessages } from "./client.js";
 import { TapeRegistry } from "./registry.js";
@@ -74,6 +75,13 @@ export interface RunTapeOptions {
   /** Override the system instruction (default empty — replay does not
    *  exercise the system prompt). */
   systemInstruction?: string;
+  /** Inject a confirmFn into the agent — used by HITL contract evals to
+   *  drive allow/deny decisions without an interactive terminal. */
+  confirmFn?: ConfirmFn;
+  /** Inject a forcesConfirmation predicate — marks specific tools as
+   *  requiring confirmation in tapes where TapeRegistry stubs have no
+   *  requiresConfirmation of their own. */
+  forcesConfirmation?: (toolName: string, args: Record<string, unknown>) => boolean;
 }
 
 export async function runTape(tape: Tape, opts: RunTapeOptions): Promise<ReplayResult> {
@@ -98,6 +106,9 @@ export async function runTape(tape: Tape, opts: RunTapeOptions): Promise<ReplayR
       autoCompact: opts.autoCompact !== false,
     },
   );
+
+  if (opts.confirmFn) agent.setConfirmFn(opts.confirmFn);
+  if (opts.forcesConfirmation) agent.setForcesConfirmationFn(opts.forcesConfirmation);
 
   for (const turn of tape.turns) {
     for await (const event of agent.run(turn.userInput, turn.mode)) {

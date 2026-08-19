@@ -31,6 +31,14 @@ Two hand-written JSONL tapes covering safety-guard behaviours the real card_trad
 | `stuck-loop` | Three identical (name, args) tool calls in a row fire `guard_triggered('stuck_loop')`. Only iters 1+2 execute — iter 3 aborts before tool execution. |
 | `env-error-loop` | Three consecutive tool results containing `EPERM` fire `guard_triggered('env_error_loop')`. All three iters execute; the guard fires AFTER the third. Args differ across iters so stuck-loop does not also fire. |
 
+### `synthesized/plan-mode-write-block`
+
+A hand-written JSONL tape covering the plan-mode contract. Driven by [`src/eval/replay/contract.test.ts`](../replay/contract.test.ts).
+
+| Tape | Asserts |
+|---|---|
+| `plan-mode-write-block` | A `/plan`-prefixed turn containing a `write` call fires `tool_denied(plan_mode)` and produces zero `tool_exec_start` events — the write never reaches the registry. |
+
 ### Nested compaction (programmatic, lives in `synthesized.test.ts`)
 
 The third synthesised case — two compactions in one replay, the second one nested inside the prune anchor preserved by the first — needs ≥ 500 KB of synthetic content (5 × 100 KB `read` results) to push the agent above the 75 % auto-compact threshold twice. Committing that as JSONL would bloat the repo for zero inspection value, so the tape is generated programmatically in the test. The assertion checks that the original user input survives both compactions via the verbatim-block anchor preservation in `extractOriginalTask`.

@@ -1,0 +1,27 @@
+{
+  "source": "synthesised — plan mode blocks write tool; tool_denied(plan_mode) must fire, no tool_exec_start",
+  "tapeStats": {
+    "turns": 1,
+    "totalIterations": 2,
+    "totalToolCalls": 1
+  },
+  "observability": {
+    "exact": {
+      "tool_exec_start": 0,
+      "tool_exec_end": 0,
+      "tool_denied": 1,
+      "llm_call_start": 2,
+      "llm_call_end": 2
+    }
+  },
+  "cleanExit": {
+    "tapeExhausted": true,
+    "unconsumedResults": 0
+  },
+  "toolDenied": [
+    {
+      "name": "write",
+      "reason": "plan_mode"
+    }
+  ]
+}
